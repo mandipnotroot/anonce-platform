@@ -146,6 +146,14 @@ try {
       assert.equal(theme.scheme, "light dark");
       assert.equal(theme.background, colorScheme === "dark" ? "#141a1f" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
       iconFilters[colorScheme] = theme.iconFilter;
+      const palette = await page.evaluate(() => ({
+        accent: getComputedStyle(document.documentElement).getPropertyValue("--accent-icon-filter").trim(),
+        generic: getComputedStyle(document.documentElement).getPropertyValue("--icon-filter").trim(),
+        source: getComputedStyle(document.querySelector(".source-link .icon")).filter,
+        navigation: getComputedStyle(document.querySelector(".nav .icon")).filter,
+      }));
+      assert.equal(palette.generic, palette.accent, `${colorScheme} generic icon token is stale`);
+      assert.equal(palette.source, palette.navigation, `${colorScheme} accent link icons mismatch`);
       assert.equal(theme.overflow, false, `horizontal overflow at ${viewport.width}px`);
       assert.equal(theme.iconFailures, 0, `broken Lucide icon at ${viewport.width}px`);
       await page.screenshot({ path: join(artifactDir, `anonce-${viewport.width}-${colorScheme}.png`), fullPage: true });

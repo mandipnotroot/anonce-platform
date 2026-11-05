@@ -23,7 +23,8 @@
   --danger: #a13030;
   --soft: #f2f5f7;
   --shadow: 0 1px 2px #172a3a0a, 0 12px 32px #172a3a0d;
-  --icon-filter: brightness(0) saturate(100%) invert(28%) sepia(21%) saturate(1430%) hue-rotate(159deg) brightness(91%);
+  --icon-filter: var(--accent-icon-filter);
+  --accent-icon-filter: brightness(0) saturate(100%) invert(29%) sepia(24%) saturate(1060%) hue-rotate(132deg) brightness(91%);
   font-family: Geist,system-ui,sans-serif;
   font-size: 15px;
   line-height: 1.55
@@ -44,7 +45,8 @@
     --danger: #ffb3ac;
     --soft: #252f37;
     --shadow: 0 1px 2px #0003, 0 12px 32px #0002;
-    --icon-filter: brightness(0) saturate(100%) invert(75%) sepia(15%) saturate(890%) hue-rotate(167deg) brightness(96%)
+    --icon-filter: var(--accent-icon-filter);
+    --accent-icon-filter: brightness(0) saturate(100%) invert(83%) sepia(25%) saturate(580%) hue-rotate(117deg) brightness(96%)
   }
 }
 /* Base elements and application shell */
@@ -114,7 +116,8 @@ a {
   filter: var(--icon-filter)
 }
 .nav .icon {
-  color: var(--blue)
+  color: var(--blue);
+  filter: var(--accent-icon-filter)
 }
 .source-link {
   display: inline-flex;
