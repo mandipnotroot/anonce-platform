@@ -15,8 +15,9 @@ identity. Agree shared contracts and disjoint file scopes before parallel work.
 
 Fork and clone the repository, then create a branch for your change. Install the
 Go version declared in `go.mod` and the Node.js version used in
-[CI](.github/workflows/ci.yml). See [README.md](README.md) for build and test
-commands, and [operations](docs/operations.md) for a disposable HTTPS environment.
+[CI](.github/workflows/ci.yml). Run `make browser`, `make test`, and `make vet`
+for local checks; these do not start the application. Follow
+[operations](docs/operations.md) for a disposable HTTPS environment.
 Use only synthetic test data. Never commit local environment files or keys.
 
 ## Pull requests
@@ -36,10 +37,15 @@ Required standards:
 - [JetBrains modern Go guidelines](https://github.com/JetBrains/go-modern-guidelines),
   limited to the Go version declared by the project.
 
+Use `type(scope): description` commit subjects (`feat` for features, `fix` for
+bug fixes). Mark breaking changes with `!` or a `BREAKING CHANGE:` footer.
+Keep the changelog human-curated, newest first, with `Unreleased` and applicable
+change categories; date and link releases when releases exist.
+
 Keep changes focused and documentation honest. Record exact verification
 commands, exit statuses, and skipped checks; do not claim unperformed tests or
-security review. See [README.md](README.md) for existing developer checks and
-[operations](docs/operations.md) for disposable deployment requirements. Database
+security review. Update the [OpenAPI contract](docs/openapi.yaml) and
+[protocol formats](docs/protocol.md) when their contracts change. Database
 integration tests skip without their explicit test database environment variables;
 never point them at production data. Recorded E2E results and remaining release
 gates are documented in [verification evidence](docs/verification.md).

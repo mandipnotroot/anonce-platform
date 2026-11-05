@@ -38,17 +38,17 @@ sharing it; its contents are public, but substituting them changes whom you trus
 
 ## Interpret the result
 
-**Receipt signature verified** means a key in the selected trust configuration
-signed the acceptance statement for that deployment. A historical signing key works
-only if the trusted configuration retains it. The displayed time is asserted by
-the signing server, not independently timestamped.
+| Result or check | What it establishes |
+| --- | --- |
+| **Receipt signature verified** | A key in the selected trust configuration signed the deployment's acceptance statement. Historical keys work only while retained in that trusted configuration. |
+| Receipt file alone | Signature authenticity, not a match to an independently held original submission. |
+| Live submission and reviewer checks | Also bind the encrypted response hash and review context. |
+| Signed acceptance time | A server assertion, not an independently trusted timestamp. Other displayed timestamps are not necessarily signed. |
 
-Checking a receipt file alone does not match it to an independently held original
-submission. The live submission and reviewer flows additionally verify the
-encrypted response hash and review context. Neither check proves correct
-answers, permanent storage, complete results, or anonymity. Verification also
-trusts the browser and the code served by the site.
+No receipt proves correct answers, permanent storage, complete results, or anonymity. Verification trusts the browser and served code; it does not protect against hostile JavaScript, operators, or network/timing correlation. Database tampering can delete or replay records, roll back history, or remove spend state and reuse stored authorizations through the signing service. A valid receipt does not establish complete database integrity.
 
 If verification fails, check the file and trusted configuration. Do not bypass
 failure by trusting a replacement key from an untrusted receipt sender. Current
 code supports receipt v2 only; there is no legacy receipt import path.
+
+See [protocol.md](protocol.md) for receipt v2 fields and signature bytes, and [architecture.md](architecture.md) for system trust boundaries.

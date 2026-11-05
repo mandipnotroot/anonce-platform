@@ -1,0 +1,1028 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+openapi: 3.1.0
+info:
+  title: Anonce HTTP API
+  version: unreleased
+  description: |
+    Implemented Go server contract. Binary strings use canonical unpadded base64url;
+    IDs decode to 16 bytes, hashes and public keys to 32 bytes unless stated otherwise.
+    Member decimal strings are canonical nonnegative signed-64-bit integers;
+    receipt accepted_at permits the full unsigned-64-bit range. Timestamps are
+    Unix seconds. String size checks in Go measure UTF-8 bytes, not characters.
+    JSON decoding rejects unknown/duplicate fields and trailing JSON. Go zero values
+    apply to omitted fields; schema required fields describe usable client requests.
+
+    Signed operations receive SignedEnvelope, NOT the decoded payload object.
+    Each operation names its decoded payload schema in x-payload-schema and its
+    challenge action in x-challenge-action. Encode the exact strict JSON bytes as
+    base64url in payload; SHA-256 those same bytes for the challenge payload_hash.
+    Sign the protocol.md challenge transcript, not the JSON directly. Most member
+    actions require membership_sig. Specialized proofs are stated per operation.
+    Decoded payload limit is 1536 KiB. HTTP body limits are 2304 KiB under
+    /api/member/ and 512 KiB for other API paths.
+
+    Every unsafe API method requires exact configured Origin and Content-Type
+    application/json (media-type parameters permitted), including bodyless logout.
+    Session-bound writes also require X-CSRF-Token. No CORS access is promised.
+    Public and anonymous endpoints reject any nonempty Cookie or Authorization
+    header, even on GET; browser requests must use credentials: omit. Use
+    no-referrer and redirect: error. No anonymity against malicious served code
+    or network/timing correlation is promised.
+
+    All responses set Cache-Control: no-store. API middleware allows 1200 requests
+    per process per one-minute window, then returns 429 rate_limited. Errors from
+    handlers use Error; method mismatches and static-file handling need not use
+    that JSON shape. GET routes also accept HEAD through Go ServeMux.
+    Static web assets and SPA fallback are served by GET/HEAD outside /api/;
+    their concrete paths depend on the configured web directory, not this API.
+
+    Cached member operations bind request_id to method, path and exact payload
+    bytes; changed reuse returns 409 request_conflict. Authorization precedes
+    sensitive cached results. Registration, login and credential changes do not
+    provide this general operation cache. Challenge verification still applies
+    to signed retries; challenges expire after five minutes.
+servers:
+  - url: /
+security:
+  - SessionCookie: []
+x-response-sets:
+  # YAML merges expose concrete status keys to OpenAPI readers after parsing.
+  preauthentication: &PreauthenticationErrors
+    '400': {$ref: '#/components/responses/BadRequest'}
+    '403': {$ref: '#/components/responses/Forbidden'}
+    '413': {$ref: '#/components/responses/TooLarge'}
+    '415': {$ref: '#/components/responses/JSONRequired'}
+    '429': {$ref: '#/components/responses/RateLimited'}
+    '500': {$ref: '#/components/responses/InternalError'}
+  authenticated-write: &AuthenticatedWriteErrors
+    <<: *PreauthenticationErrors
+    '401': {$ref: '#/components/responses/Unauthenticated'}
+  session-read: &SessionReadErrors
+    '401': {$ref: '#/components/responses/Unauthenticated'}
+    '429': {$ref: '#/components/responses/RateLimited'}
+    '500': {$ref: '#/components/responses/InternalError'}
+  session-view: &SessionViewErrors
+    '401': {$ref: '#/components/responses/Unauthenticated'}
+    '429': {$ref: '#/components/responses/RateLimited'}
+  authorized-lookup: &AuthorizedLookupErrors
+    <<: *SessionViewErrors
+    '403': {$ref: '#/components/responses/Forbidden'}
+  authorized-read: &AuthorizedReadErrors
+    <<: *SessionReadErrors
+    '403': {$ref: '#/components/responses/Forbidden'}
+  logout: &LogoutErrors
+    <<: *SessionReadErrors
+    '403': {$ref: '#/components/responses/Forbidden'}
+    '415': {$ref: '#/components/responses/JSONRequired'}
+paths:
+  /healthz:
+    get:
+      operationId: health
+      summary: Process liveness
+      security: []
+      responses:
+        '200':
+          description: Process running
+          content:
+            application/json:
+              schema: {type: object, required: [status], properties: {status: {const: ok}}, additionalProperties: false}
+  /readyz:
+    get:
+      operationId: ready
+      summary: Check both database connections with a two-second deadline
+      security: []
+      responses:
+        '200':
+          description: Both databases reachable
+          content:
+            application/json:
+              schema: {type: object, required: [status], properties: {status: {const: ready}}, additionalProperties: false}
+        '503': {description: unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /api/public/config:
+    get:
+      operationId: publicConfig
+      summary: Public deployment and receipt verification configuration
+      description: Rejects Cookie and Authorization. No KDF parameters appear here.
+      security: []
+      responses:
+        '200': {description: Configuration, content: {application/json: {schema: {$ref: '#/components/schemas/PublicConfig'}}}}
+        '400': {$ref: '#/components/responses/CredentialsForbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /api/public/reviews/{id}:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    get:
+      operationId: publicReview
+      summary: Published or closed review descriptor
+      description: Rejects Cookie and Authorization. Drafts have no public record.
+      security: []
+      responses:
+        '200': {description: Public material, content: {application/json: {schema: {$ref: '#/components/schemas/PublicReview'}}}}
+        '400': {$ref: '#/components/responses/CredentialsForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /api/anon/submissions:
+    post:
+      operationId: submitAnonymous
+      summary: Accept encrypted response with blind authorization
+      description: |
+        Plain JSON, no envelope. Rejects Cookie and Authorization. Verifies RFC 9474
+        RSABSSA-SHA384-PSS-Randomized authorization and atomically spends serial.
+        Exact prior submission returns original receipt before closed-state checks;
+        different submission for spent serial returns 409 conflict. Authorization
+        remains usable after membership revocation. Ciphertext includes AEAD tag.
+      security: []
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Submission'}}}}
+      responses:
+        '200': {description: Original or new receipt, content: {application/json: {schema: {$ref: '#/components/schemas/ReceiptV2'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: conflict (serial already spent on different submission), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '410': {description: closed (not published or outside open window), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '415': {$ref: '#/components/responses/JSONRequired'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/anon/receipts/lookup:
+    post:
+      operationId: lookupReceipt
+      summary: Recover receipt for spent authorization serial
+      description: Plain JSON, no envelope. Rejects Cookie and Authorization.
+      security: []
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReceiptLookup'}}}}
+      responses:
+        '200': {description: Receipt, content: {application/json: {schema: {$ref: '#/components/schemas/ReceiptV2'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '415': {$ref: '#/components/responses/JSONRequired'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/member/auth/params:
+    post:
+      operationId: authenticationParameters
+      summary: Fetch account KDF parameters by normalized email
+      description: Plain JSON. Email is trimmed and lowercased, including local part; mailbox ownership is not verified.
+      security: []
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [email], properties: {email: {$ref: '#/components/schemas/Email'}}}}}}
+      responses:
+        '200': {description: Parameters, content: {application/json: {schema: {$ref: '#/components/schemas/AuthParameters'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        <<: *PreauthenticationErrors
+  /api/member/challenges:
+    post:
+      operationId: createChallenge
+      summary: Create five-minute challenge
+      description: |
+        Plain JSON. register, login-password and login-recovery need no session.
+        Other action strings require same-account session and matching CSRF token.
+        Action has at most 64 UTF-8 bytes; no action allowlist is enforced here.
+        Registration epoch is 0; other epochs come from account/session.
+      security: [{}, {SessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/ConditionalCSRF'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ChallengeRequest'}}}}
+      responses:
+        '200': {description: Challenge, content: {application/json: {schema: {$ref: '#/components/schemas/Challenge'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/register:
+    post:
+      operationId: register
+      summary: Register account and opaque vault
+      description: 'SignedEnvelope payload decodes to Registration. Action register; requires password_sig, recovery_sig and membership_sig using proposed keys. No session. Success does not create session.'
+      x-challenge-action: register
+      x-payload-schema: '#/components/schemas/Registration'
+      security: []
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {description: Registered, content: {application/json: {schema: {$ref: '#/components/schemas/AccountEpoch'}}}}
+        '409': {description: email_exists or conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        <<: *PreauthenticationErrors
+  /api/member/session:
+    post:
+      operationId: login
+      summary: Create twelve-hour full or recovery session
+      description: 'SignedEnvelope payload decodes to Login. Action equals method; password_sig for login-password, recovery_sig for login-recovery. No session required. No cached general retry.'
+      x-challenge-action: login-password or login-recovery
+      x-payload-schema: '#/components/schemas/Login'
+      security: []
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200':
+          description: Session created
+          headers:
+            Set-Cookie:
+              schema: {type: string}
+              description: '__Secure-anonce_session=<32-byte base64url token>; Path=/api/member; Max-Age=43200; HttpOnly; Secure; SameSite=Strict. No Domain.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        '401': {description: invalid_credentials, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        <<: *PreauthenticationErrors
+    delete:
+      operationId: logout
+      summary: Revoke session and clear cookie
+      description: No body or envelope. Full and recovery sessions allowed. Origin and application/json Content-Type remain mandatory.
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      responses:
+        '200':
+          description: Logged out
+          headers:
+            Set-Cookie: {description: Clears session cookie with negative MaxAge and same security attributes., schema: {type: string}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/OK'}}}
+        <<: *LogoutErrors
+  /api/member/me:
+    get:
+      operationId: currentAccount
+      summary: Session view and own memberships
+      description: Full and recovery sessions allowed.
+      responses:
+        '200': {description: Current account, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+        <<: *SessionViewErrors
+  /api/member/vault:
+    get:
+      operationId: getVault
+      summary: Fetch opaque wrappers and objects
+      description: Full and recovery sessions allowed. No plaintext keys or recovery material.
+      responses:
+        '200': {description: Vault, content: {application/json: {schema: {$ref: '#/components/schemas/Vault'}}}}
+        <<: *SessionReadErrors
+  /api/member/vault/objects/{id}:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    put:
+      operationId: putVaultObject
+      summary: Compare-and-swap encrypted vault object
+      description: 'SignedEnvelope payload decodes to PutVaultObject. Action vault-write. Full scope uses membership_sig; recovery scope uses recovery_sig. Object ID must match path. Revision must equal expected_revision + 1; expected 0 creates.'
+      x-challenge-action: vault-write
+      x-payload-schema: '#/components/schemas/PutVaultObject'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {description: Saved object or cached result, content: {application/json: {schema: {$ref: '#/components/schemas/VaultObject'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/credentials/password:
+    post:
+      operationId: changePassword
+      summary: Replace password credentials and wrapper
+      description: 'SignedEnvelope payload decodes to PasswordChange. Action password-change; full session, old password_sig and new_password_sig. Atomically increments epoch and revokes all sessions/challenges. No general cached retry.'
+      x-challenge-action: password-change
+      x-payload-schema: '#/components/schemas/PasswordChange'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Epoch'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/credentials/recovery:
+    post:
+      operationId: rotateRecovery
+      summary: Replace recovery credentials and wrapper
+      description: 'SignedEnvelope payload decodes to RecoveryRotation. Action recovery-rotate; full session, password_sig and new_recovery_sig. Increments epoch and revokes all sessions/challenges. No general cached retry.'
+      x-challenge-action: recovery-rotate
+      x-payload-schema: '#/components/schemas/RecoveryRotation'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Epoch'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/credentials/reset:
+    post:
+      operationId: resetCredentials
+      summary: Recover credentials with atomic vault writes
+      description: 'SignedEnvelope payload decodes to CredentialReset. Action credential-reset; full or recovery session, recovery_sig, new_password_sig and new_recovery_sig. Atomically CAS epoch and objects, increments epoch and revokes all sessions/challenges. No general cached retry.'
+      x-challenge-action: credential-reset
+      x-payload-schema: '#/components/schemas/CredentialReset'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Epoch'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs:
+    get:
+      operationId: listOrganizations
+      summary: List all own memberships
+      description: Full session. Fixed list, next is null. No after or limit support.
+      responses:
+        '200': {description: Memberships, content: {application/json: {schema: {$ref: '#/components/schemas/MembershipList'}}}}
+        <<: *AuthorizedLookupErrors
+    post:
+      operationId: createOrganization
+      summary: Create organization and approved owner membership
+      description: 'SignedEnvelope payload decodes to OrganizationCreate. Action org-create; full session, membership_sig. Exact retry returns 200 rather than 201.'
+      x-challenge-action: org-create
+      x-payload-schema: '#/components/schemas/OrganizationCreate'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationCreated'}}}}
+        '200': {description: Cached result, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationCreated'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/members:
+    parameters: [{$ref: '#/components/parameters/Org'}]
+    get:
+      operationId: listMembers
+      summary: List up to 100 organization members
+      description: Approved owner/admin, full session. Includes member emails. Fixed first 100 by ID, next null; no after or limit support.
+      responses:
+        '200': {description: Members, content: {application/json: {schema: {$ref: '#/components/schemas/MemberList'}}}}
+        <<: *AuthorizedReadErrors
+    post:
+      operationId: addMember
+      summary: Add existing account as approved member
+      description: 'SignedEnvelope payload decodes to MemberAdd. Action member-add; approved owner/admin, full session, membership_sig. Only owner assigns admin. No account creation or mail. Can reactivate revoked non-owner with fresh certificate; admin cannot reactivate admin. Exact retry returns 200.'
+      x-challenge-action: member-add
+      x-payload-schema: '#/components/schemas/MemberAdd'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {description: Added or reactivated, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '200': {description: Cached result, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '404': {description: account_not_found or not_found, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: already_member or request_conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/members/{member}/role:
+    parameters: [{$ref: '#/components/parameters/Org'}, {$ref: '#/components/parameters/Member'}]
+    post:
+      operationId: changeMemberRole
+      summary: Change approved non-owner role
+      description: 'SignedEnvelope payload decodes to MemberRole. Action member-role; approved owner only, full session, membership_sig. Returns 409 not_approved for unapproved target. Cannot appoint owner.'
+      x-challenge-action: member-role
+      x-payload-schema: '#/components/schemas/MemberRole'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {description: Member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/members/{member}/approve:
+    parameters: [{$ref: '#/components/parameters/Org'}, {$ref: '#/components/parameters/Member'}]
+    post:
+      operationId: approveMember
+      summary: Approve pending membership and issue certificate
+      description: 'SignedEnvelope payload decodes to RequestID. Action member-approve; approved owner/admin, full session, membership_sig. Admin cannot target admin or owner. Nonpending target returns 409 not_pending.'
+      x-challenge-action: member-approve
+      x-payload-schema: '#/components/schemas/RequestID'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {description: Approved member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/members/{member}/revoke:
+    parameters: [{$ref: '#/components/parameters/Org'}, {$ref: '#/components/parameters/Member'}]
+    post:
+      operationId: revokeMember
+      summary: Revoke membership and clear its certificate
+      description: 'SignedEnvelope payload decodes to RequestID. Action member-revoke; approved owner/admin, full session, membership_sig. Admin cannot target admin or owner. Last approved owner cannot be revoked (409 last_owner).'
+      x-challenge-action: member-revoke
+      x-payload-schema: '#/components/schemas/RequestID'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {description: Revoked member with empty certificate, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/invites:
+    parameters: [{$ref: '#/components/parameters/Org'}]
+    post:
+      operationId: createInvite
+      summary: Create bearer invite for reviewer or respondent
+      description: 'SignedEnvelope payload decodes to InviteCreate. Action invite-create; approved owner/admin, full session, membership_sig. Expiry must be future and at most 30 days away. Exact retry returns 200.'
+      x-challenge-action: invite-create
+      x-payload-schema: '#/components/schemas/InviteCreate'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {description: Invite, content: {application/json: {schema: {$ref: '#/components/schemas/Invite'}}}}
+        '200': {description: Cached invite, content: {application/json: {schema: {$ref: '#/components/schemas/Invite'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/invites/accept:
+    post:
+      operationId: acceptInvite
+      summary: Consume invite and create pending membership
+      description: 'SignedEnvelope payload decodes to InviteAccept. Action invite-accept; full session, membership_sig. Does not grant immediate organization access. Exact retry returns 200.'
+      x-challenge-action: invite-accept
+      x-payload-schema: '#/components/schemas/InviteAccept'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {description: Pending membership, content: {application/json: {schema: {$ref: '#/components/schemas/InviteAccepted'}}}}
+        '200': {description: Cached result, content: {application/json: {schema: {$ref: '#/components/schemas/InviteAccepted'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410': {description: expired_invite (also absent or already consumed), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/certificate:
+    parameters: [{$ref: '#/components/parameters/Org'}]
+    get:
+      operationId: getCertificate
+      summary: Own approved membership certificate
+      description: Approved member, full session.
+      responses:
+        '200': {description: Certificate, content: {application/json: {schema: {$ref: '#/components/schemas/CertificateResponse'}}}}
+        <<: *AuthorizedReadErrors
+  /api/member/orgs/{org}/certificate/renew:
+    parameters: [{$ref: '#/components/parameters/Org'}]
+    post:
+      operationId: renewCertificate
+      summary: Renew own approved membership certificate
+      description: 'SignedEnvelope payload decodes to RequestID. Action certificate-renew; approved member, full session, direct membership_sig. No CSR.'
+      x-challenge-action: certificate-renew
+      x-payload-schema: '#/components/schemas/RequestID'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {description: Certificate, content: {application/json: {schema: {$ref: '#/components/schemas/CertificateResponse'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/orgs/{org}/reviews:
+    parameters: [{$ref: '#/components/parameters/Org'}]
+    get:
+      operationId: listReviews
+      summary: List visible reviews, 50 per page
+      description: Approved member, full session. Drafts visible only to creator. No limit parameter.
+      parameters: [{$ref: '#/components/parameters/After'}]
+      responses:
+        '200': {description: Reviews, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewList'}}}}
+        <<: *AuthorizedReadErrors
+    post:
+      operationId: createReview
+      summary: Create draft and dedicated RSA-3072 issuer key
+      description: 'SignedEnvelope payload decodes to ReviewCreate. Action review-create; approved member, full session, membership_sig. max_responses 0 or omitted defaults to 1; otherwise 1..100 per member, not global capacity. Exact retry returns 200.'
+      x-challenge-action: review-create
+      x-payload-schema: '#/components/schemas/ReviewCreate'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '201': {$ref: '#/components/responses/Review'}
+        '200': {$ref: '#/components/responses/Review'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    get:
+      operationId: getReview
+      summary: Fetch member review view
+      description: Approved organization member, full session. Draft visible only to creator.
+      responses:
+        '200': {$ref: '#/components/responses/Review'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        <<: *AuthorizedLookupErrors
+    put:
+      operationId: updateReview
+      summary: Compare-and-swap draft
+      description: 'SignedEnvelope payload decodes to ReviewUpdate. Action review-update; creator and approved member, full session, membership_sig. Only draft state. Omitted/null opens_at or closes_at means unbounded; closes_at must exceed opens_at when both set.'
+      x-challenge-action: review-update
+      x-payload-schema: '#/components/schemas/ReviewUpdate'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Review'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+    delete:
+      operationId: deleteReview
+      summary: Compare-and-swap delete draft
+      description: 'SignedEnvelope payload decodes to RevisionRequest. Action review-delete; creator and approved member, full session, membership_sig. Body required; not plain JSON payload.'
+      x-challenge-action: review-delete
+      x-payload-schema: '#/components/schemas/RevisionRequest'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/ReviewState'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/publish:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    post:
+      operationId: publishReview
+      summary: Freeze signed descriptor and atomically save encrypted recipient secret
+      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor matches draft, deployment, reviewer account/membership, current certificate, issuer and limits. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). CAS review and vault_write atomically.'
+      x-challenge-action: review-publish
+      x-payload-schema: '#/components/schemas/ReviewPublish'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Review'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/close:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    post:
+      operationId: closeReview
+      summary: Compare-and-swap close published review
+      description: 'SignedEnvelope payload decodes to RevisionRequest. Action review-close; creator and approved member, full session, membership_sig.'
+      x-challenge-action: review-close
+      x-payload-schema: '#/components/schemas/RevisionRequest'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/ReviewState'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/issuances:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    post:
+      operationId: issueAuthorization
+      summary: Reserve per-member slot and blind-sign authorization
+      description: |
+        SignedEnvelope payload decodes to IssuanceRequest. Action issue; approved
+        member with currently valid certificate, full session, membership_sig.
+        Atomically stores pending_state object, cached blind signature and slot.
+        Exact request_id/payload retry returns original result before consuming
+        challenge or checking open window/quota; changed payload is request_conflict.
+        Verification and current membership checks still precede cached result.
+      x-challenge-action: issue
+      x-payload-schema: '#/components/schemas/IssuanceRequest'
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody: {$ref: '#/components/requestBodies/Signed'}
+      responses:
+        '200': {$ref: '#/components/responses/Issuance'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'quota_exhausted, request_conflict or vault revision conflict', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '410': {description: closed (not published or outside open window), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/issuances/{request}:
+    parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Request'}]
+    get:
+      operationId: getIssuance
+      summary: Recover own cached issuance without spending another slot
+      description: Original issuing member only; currently approved organization membership and full session required.
+      responses:
+        '200': {$ref: '#/components/responses/Issuance'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        <<: *AuthorizedLookupErrors
+  /api/member/reviews/{id}/submissions:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    get:
+      operationId: listSubmissions
+      summary: List encrypted submissions, 50 per page
+      description: Creator and approved organization member, full session. No respondent identity or authorization material. Cursor is receipt ID; no limit parameter.
+      parameters: [{$ref: '#/components/parameters/After'}]
+      responses:
+        '200': {description: Encrypted submissions, content: {application/json: {schema: {$ref: '#/components/schemas/SubmissionList'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        <<: *AuthorizedReadErrors
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Secure-anonce_session
+      description: Secure HttpOnly SameSite=Strict cookie, Path=/api/member, no Domain; twelve-hour lifetime. Recovery scope allows me, vault read/write, credential reset and logout, not organization/review access.
+  parameters:
+    Origin: {name: Origin, in: header, required: true, description: Exact configured HTTPS origin., schema: {type: string, format: uri}, example: 'https://anonce.example'}
+    CSRF: {name: X-CSRF-Token, in: header, required: true, description: Exact csrf_token from current session., schema: {$ref: '#/components/schemas/Bytes32'}}
+    ConditionalCSRF: {name: X-CSRF-Token, in: header, required: false, description: Required except for register/login-password/login-recovery challenges., schema: {$ref: '#/components/schemas/Bytes32'}}
+    ID: {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    Org: {name: org, in: path, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    Member: {name: member, in: path, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    Request: {name: request, in: path, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    After: {name: after, in: query, required: false, description: Exclusive last ID from previous page; omit for first page., schema: {type: string}}
+  requestBodies:
+    Signed:
+      required: true
+      description: Base64url strict JSON payload; decoded schema and action are specified on the operation. This is not a raw payload body.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/SignedEnvelope'}
+  responses:
+    BadRequest: {description: 'Malformed JSON, invalid encoding/fields/crypto input, or credentials_forbidden on public/anonymous routes. Error code varies by handler.', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Unauthenticated: {description: 'unauthenticated or session_revoked where the operation rechecks a session transactionally.', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    CredentialsForbidden: {description: credentials_forbidden (nonempty Cookie or Authorization), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Forbidden: {description: 'origin_required, csrf_required, forbidden, recovery_scope, invalid_challenge, invalid_proof or invalid_membership as applicable.', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    NotFound: {description: not_found, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Conflict: {description: 'CAS or request reuse conflict: revision_conflict, epoch_conflict, request_conflict, conflict; membership rules may return not_pending, not_approved, already_member or last_owner.', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    TooLarge: {description: body_too_large, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    JSONRequired: {description: json_required (missing or unsupported Content-Type), content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    RateLimited: {description: rate_limited, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    InternalError: {description: internal_error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Epoch: {description: New credential epoch; all old sessions/challenges revoked., content: {application/json: {schema: {$ref: '#/components/schemas/Epoch'}}}}
+    Review: {description: Review view, content: {application/json: {schema: {$ref: '#/components/schemas/Review'}}}}
+    ReviewState: {description: State result (delete also reports state closed and incremented revision), content: {application/json: {schema: {$ref: '#/components/schemas/ReviewState'}}}}
+    Issuance: {description: 'Cached blind signature and saved object (pending_state is VaultObject, not VaultWrite)', content: {application/json: {schema: {$ref: '#/components/schemas/Issuance'}}}}
+  schemas:
+    Binary:
+      type: string
+      pattern: '^[A-Za-z0-9_-]*$'
+      description: Canonical unpadded base64url; decoded byte bounds stated per field. Not standard padded base64.
+    ID: {type: string, pattern: '^[A-Za-z0-9_-]{22}$', description: Canonical unpadded base64url of 16 bytes., examples: [AAAAAAAAAAAAAAAAAAAAAA]}
+    Bytes32: {type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: Canonical unpadded base64url of 32 bytes., examples: [AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]}
+    Nonce: {type: string, pattern: '^[A-Za-z0-9_-]{16}$', description: Base64url of 12 bytes.}
+    Signature: {type: string, pattern: '^[A-Za-z0-9_-]{86}$', description: Canonical base64url Ed25519 signature (64 bytes).}
+    RSASignature: {type: string, pattern: '^[A-Za-z0-9_-]{512}$', description: Base64url RSA-3072 value (384 bytes).}
+    Decimal: {type: string, pattern: '^(0|[1-9][0-9]*)$', description: Canonical integer from 0 through 9223372036854775807., examples: ['1']}
+    UnsignedDecimal:
+      type: string
+      # Match canonical decimal strings up to math.MaxUint64 without numeric coercion.
+      pattern: '^(0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4]|18446744073709551615)$'
+      maxLength: 20
+      description: Canonical unsigned integer from 0 through 18446744073709551615.
+      examples: ['18446744073709551615']
+    NullableDecimal: {oneOf: [{$ref: '#/components/schemas/Decimal'}, {type: 'null'}]}
+    Email:
+      type: string
+      maxLength: 254
+      description: ASCII email, trimmed and lowercased including local part, dotted domain required. No display names or quoted local parts. Not mailbox-verified; no domain-based authorization or SMTP delivery.
+      examples: [member@example.com]
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string, description: Code with underscores replaced by spaces.}
+      examples: [{error: {code: invalid_json, message: invalid json}}]
+    OK: {type: object, additionalProperties: false, required: [ok], properties: {ok: {const: true}}}
+    Epoch: {type: object, additionalProperties: false, required: [credential_epoch], properties: {credential_epoch: {$ref: '#/components/schemas/Decimal'}}}
+    AccountEpoch: {type: object, additionalProperties: false, required: [account_id, credential_epoch], properties: {account_id: {$ref: '#/components/schemas/ID'}, credential_epoch: {const: '1'}}}
+    Proof:
+      type: object
+      additionalProperties: false
+      required: [challenge_id]
+      properties:
+        challenge_id: {$ref: '#/components/schemas/ID'}
+        password_sig: {$ref: '#/components/schemas/Signature'}
+        recovery_sig: {$ref: '#/components/schemas/Signature'}
+        membership_sig: {$ref: '#/components/schemas/Signature'}
+        new_password_sig: {$ref: '#/components/schemas/Signature'}
+        new_recovery_sig: {$ref: '#/components/schemas/Signature'}
+      description: Required action-specific signature fields are listed on each operation; omitted unused signatures are allowed.
+    SignedEnvelope:
+      type: object
+      additionalProperties: false
+      required: [payload, proof]
+      properties:
+        payload:
+          $ref: '#/components/schemas/Binary'
+          description: Base64url of exact strict JSON bytes conforming to operation x-payload-schema; decoded size at most 1572864 bytes. Not a raw JSON object.
+        proof: {$ref: '#/components/schemas/Proof'}
+    KDF:
+      type: object
+      additionalProperties: false
+      required: [v, salt, memory_kib, iterations, parallelism, length]
+      properties:
+        v: {const: 19}
+        salt: {type: string, pattern: '^[A-Za-z0-9_-]{22}$', description: Canonical base64url 16-byte Argon2id salt.}
+        memory_kib: {const: 65536}
+        iterations: {const: 3}
+        parallelism: {const: 1}
+        length: {const: 32}
+    Wrapper:
+      type: object
+      additionalProperties: false
+      required: [v, id, nonce, ciphertext]
+      properties:
+        v: {const: 1}
+        id: {$ref: '#/components/schemas/ID'}
+        nonce: {$ref: '#/components/schemas/Nonce'}
+        ciphertext: {$ref: '#/components/schemas/Binary', minLength: 22, maxLength: 1366, description: Decodes to 16..1024 bytes.}
+    VaultObject:
+      type: object
+      additionalProperties: false
+      required: [v, id, revision, nonce, ciphertext]
+      properties:
+        v: {const: 1}
+        id: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/Decimal', description: Must equal expected revision plus one on writes.}
+        nonce: {$ref: '#/components/schemas/Nonce'}
+        ciphertext: {$ref: '#/components/schemas/Binary', minLength: 22, maxLength: 1398102, description: Decodes to 16..1048576 bytes.}
+    VaultWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, object]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/Decimal'}
+        object: {$ref: '#/components/schemas/VaultObject'}
+    PutVaultObject:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, object]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/Decimal'}
+        object: {$ref: '#/components/schemas/VaultObject'}
+    AuthParameters:
+      type: object
+      additionalProperties: false
+      required: [account_id, credential_epoch, password_kdf, recovery_salt]
+      properties:
+        account_id: {$ref: '#/components/schemas/ID'}
+        credential_epoch: {$ref: '#/components/schemas/Decimal'}
+        password_kdf: {$ref: '#/components/schemas/KDF'}
+        recovery_salt: {$ref: '#/components/schemas/Bytes32'}
+    ChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [account_id, action, payload_hash]
+      properties:
+        account_id: {$ref: '#/components/schemas/ID'}
+        action: {type: string, maxLength: 64, description: 'At most 64 UTF-8 bytes; no allowlist, empty string not explicitly rejected.'}
+        payload_hash: {$ref: '#/components/schemas/Bytes32'}
+    Challenge:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, account_id, action, payload_hash, nonce, credential_epoch, expires_at]
+      properties:
+        challenge_id: {$ref: '#/components/schemas/ID'}
+        account_id: {$ref: '#/components/schemas/ID'}
+        action: {type: string}
+        payload_hash: {$ref: '#/components/schemas/Bytes32'}
+        nonce: {$ref: '#/components/schemas/Bytes32'}
+        credential_epoch: {$ref: '#/components/schemas/Decimal'}
+        expires_at: {$ref: '#/components/schemas/Decimal'}
+    Registration:
+      type: object
+      additionalProperties: false
+      required: [request_id, account_id, email, password_kdf, password_auth_public_key, recovery_salt, recovery_auth_public_key, password_wrap, recovery_wrap, membership_public_key]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        account_id: {$ref: '#/components/schemas/ID'}
+        email: {$ref: '#/components/schemas/Email'}
+        password_kdf: {$ref: '#/components/schemas/KDF'}
+        password_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        recovery_salt: {$ref: '#/components/schemas/Bytes32'}
+        recovery_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        password_wrap: {$ref: '#/components/schemas/Wrapper'}
+        recovery_wrap: {$ref: '#/components/schemas/Wrapper'}
+        membership_public_key: {$ref: '#/components/schemas/Bytes32'}
+        vault_objects: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/VaultObject'}, description: Optional initial objects; each revision must be 1. Omitted/null is empty.}
+    Login:
+      type: object
+      additionalProperties: false
+      required: [account_id, method]
+      properties:
+        request_id: {type: string, description: Accepted field but not validated or used for login idempotency.}
+        account_id: {$ref: '#/components/schemas/ID'}
+        method: {enum: [login-password, login-recovery]}
+    Session:
+      type: object
+      additionalProperties: false
+      required: [account_id, scope, credential_epoch, csrf_token, email]
+      properties:
+        account_id: {$ref: '#/components/schemas/ID'}
+        scope: {enum: [full, recovery]}
+        credential_epoch: {$ref: '#/components/schemas/Decimal'}
+        csrf_token: {$ref: '#/components/schemas/Bytes32'}
+        email: {$ref: '#/components/schemas/Email'}
+    Me:
+      type: object
+      additionalProperties: false
+      required: [account_id, scope, credential_epoch, csrf_token, email, memberships]
+      properties:
+        account_id: {$ref: '#/components/schemas/ID'}
+        scope: {enum: [full, recovery]}
+        credential_epoch: {$ref: '#/components/schemas/Decimal'}
+        csrf_token: {$ref: '#/components/schemas/Bytes32'}
+        email: {$ref: '#/components/schemas/Email'}
+        memberships: {type: array, items: {$ref: '#/components/schemas/Membership'}}
+    Vault:
+      type: object
+      additionalProperties: false
+      required: [password_wrap, recovery_wrap, objects, password_kdf, recovery_salt]
+      properties:
+        password_wrap: {$ref: '#/components/schemas/Wrapper'}
+        recovery_wrap: {$ref: '#/components/schemas/Wrapper'}
+        objects: {type: array, items: {$ref: '#/components/schemas/VaultObject'}}
+        password_kdf: {$ref: '#/components/schemas/KDF'}
+        recovery_salt: {$ref: '#/components/schemas/Bytes32'}
+    PasswordChange:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_epoch, password_kdf, password_auth_public_key, password_wrap]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_epoch: {$ref: '#/components/schemas/Decimal'}
+        password_kdf: {$ref: '#/components/schemas/KDF'}
+        password_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        password_wrap: {$ref: '#/components/schemas/Wrapper'}
+    RecoveryRotation:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_epoch, recovery_salt, recovery_auth_public_key, recovery_wrap]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_epoch: {$ref: '#/components/schemas/Decimal'}
+        recovery_salt: {$ref: '#/components/schemas/Bytes32'}
+        recovery_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        recovery_wrap: {$ref: '#/components/schemas/Wrapper'}
+    CredentialReset:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_epoch, password_kdf, password_auth_public_key, password_wrap, recovery_salt, recovery_auth_public_key, recovery_wrap]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_epoch: {$ref: '#/components/schemas/Decimal'}
+        password_kdf: {$ref: '#/components/schemas/KDF'}
+        password_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        password_wrap: {$ref: '#/components/schemas/Wrapper'}
+        recovery_salt: {$ref: '#/components/schemas/Bytes32'}
+        recovery_auth_public_key: {$ref: '#/components/schemas/Bytes32'}
+        recovery_wrap: {$ref: '#/components/schemas/Wrapper'}
+        vault_writes: {type: [array, 'null'], items: {$ref: '#/components/schemas/VaultWrite'}, description: Optional; omitted/null is empty.}
+    Role: {enum: [owner, admin, reviewer, respondent]}
+    AssignableRole: {enum: [admin, reviewer, respondent]}
+    MemberState: {enum: [pending, approved, revoked]}
+    Membership:
+      type: object
+      additionalProperties: false
+      required: [id, membership_id, org_id, name, role, status, state, certificate]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        membership_id: {$ref: '#/components/schemas/ID'}
+        org_id: {$ref: '#/components/schemas/ID'}
+        name: {type: string}
+        role: {$ref: '#/components/schemas/Role'}
+        status: {$ref: '#/components/schemas/MemberState'}
+        state: {$ref: '#/components/schemas/MemberState'}
+        certificate: {$ref: '#/components/schemas/Binary', description: 'DER X.509 certificate; empty string when absent, never null.'}
+    Member:
+      type: object
+      additionalProperties: false
+      required: [id, account_id, email, role, state, status, certificate]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        account_id: {$ref: '#/components/schemas/ID'}
+        email: {$ref: '#/components/schemas/Email'}
+        role: {$ref: '#/components/schemas/Role'}
+        state: {$ref: '#/components/schemas/MemberState'}
+        status: {$ref: '#/components/schemas/MemberState'}
+        certificate: {$ref: '#/components/schemas/Binary', description: DER certificate or empty string; never null.}
+    RequestID: {type: object, additionalProperties: false, required: [request_id], properties: {request_id: {$ref: '#/components/schemas/ID'}}}
+    OrganizationCreate: {type: object, additionalProperties: false, required: [request_id, name], properties: {request_id: {$ref: '#/components/schemas/ID'}, name: {type: string, minLength: 1, maxLength: 200, description: 1..200 UTF-8 bytes.}}}
+    OrganizationCreated:
+      type: object
+      additionalProperties: false
+      required: [id, org_id, name, membership_id, certificate, role, status]
+      properties:
+        id: {$ref: '#/components/schemas/ID', description: 'Organization ID, not membership ID.'}
+        org_id: {$ref: '#/components/schemas/ID'}
+        name: {type: string}
+        membership_id: {$ref: '#/components/schemas/ID'}
+        certificate: {$ref: '#/components/schemas/Binary'}
+        role: {const: owner}
+        status: {const: approved}
+    MemberAdd: {type: object, additionalProperties: false, required: [request_id, email, role], properties: {request_id: {$ref: '#/components/schemas/ID'}, email: {$ref: '#/components/schemas/Email'}, role: {$ref: '#/components/schemas/AssignableRole'}}}
+    MemberRole: {type: object, additionalProperties: false, required: [request_id, role], properties: {request_id: {$ref: '#/components/schemas/ID'}, role: {$ref: '#/components/schemas/AssignableRole'}, email: {const: '', description: Optional empty field accepted by shared handler; nonempty rejected.}}}
+    InviteCreate: {type: object, additionalProperties: false, required: [request_id, role, expires_at], properties: {request_id: {$ref: '#/components/schemas/ID'}, role: {enum: [reviewer, respondent]}, expires_at: {$ref: '#/components/schemas/Decimal'}}}
+    Invite: {type: object, additionalProperties: false, required: [token, expires_at], properties: {token: {$ref: '#/components/schemas/Bytes32'}, expires_at: {$ref: '#/components/schemas/Decimal'}}}
+    InviteAccept: {type: object, additionalProperties: false, required: [request_id, invite_token], properties: {request_id: {$ref: '#/components/schemas/ID'}, invite_token: {$ref: '#/components/schemas/Bytes32'}}}
+    InviteAccepted: {type: object, additionalProperties: false, required: [id, membership_id, org_id, status], properties: {id: {$ref: '#/components/schemas/ID'}, membership_id: {$ref: '#/components/schemas/ID'}, org_id: {$ref: '#/components/schemas/ID'}, status: {const: pending}}}
+    CertificateResponse: {type: object, additionalProperties: false, required: [membership_id, certificate, ca_certificate, expires_at], properties: {membership_id: {$ref: '#/components/schemas/ID'}, certificate: {$ref: '#/components/schemas/Binary'}, ca_certificate: {$ref: '#/components/schemas/Binary'}, expires_at: {$ref: '#/components/schemas/Decimal'}}}
+    Choice: {type: object, additionalProperties: false, required: [id, label], properties: {id: {type: string, minLength: 1, maxLength: 100}, label: {type: string, minLength: 1, maxLength: 1000}}, description: IDs unique within question; bounds measure UTF-8 bytes.}
+    Question:
+      type: object
+      additionalProperties: false
+      required: [id, type, label]
+      description: IDs unique within review; UTF-8 byte bounds. text has no choices (omitted/null/empty accepted); single/multiple require 2..100 choices. Omitted required flag is false.
+      properties:
+        id: {type: string, minLength: 1, maxLength: 100}
+        type: {enum: [text, single, multiple]}
+        label: {type: string, minLength: 1, maxLength: 2000}
+        required: {type: boolean, default: false}
+        choices: {type: [array, 'null'], maxItems: 100, items: {$ref: '#/components/schemas/Choice'}}
+      allOf:
+        - if: {properties: {type: {const: text}}}
+          then: {properties: {choices: {maxItems: 0}}}
+          else: {required: [choices], properties: {choices: {type: array, minItems: 2}}}
+    ReviewCreate: {type: object, additionalProperties: false, required: [request_id, title], properties: {request_id: {$ref: '#/components/schemas/ID'}, title: {type: string, minLength: 1, maxLength: 300}, max_responses: {type: integer, minimum: 0, maximum: 100, default: 1, description: Zero also defaults to 1.}}}
+    ReviewUpdate:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, title, questions, max_responses]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/Decimal'}
+        title: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, maxLength: 10000, default: ''}
+        questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+        max_responses: {type: integer, minimum: 1, maximum: 100}
+        opens_at: {$ref: '#/components/schemas/NullableDecimal'}
+        closes_at: {$ref: '#/components/schemas/NullableDecimal'}
+    RevisionRequest: {type: object, additionalProperties: false, required: [request_id, expected_revision], properties: {request_id: {$ref: '#/components/schemas/ID'}, expected_revision: {$ref: '#/components/schemas/Decimal'}}}
+    Descriptor:
+      type: object
+      additionalProperties: false
+      description: Decoded JSON inside descriptor binary string. Publication compares exact parsed draft and all reviewer/issuer/schedule fields with stored review; this is not sent as a raw descriptor object.
+      required: [v, deployment_id, review_id, org_id, reviewer_account_id, reviewer_membership_id, reviewer_certificate, title, questions, recipient_public_key, issuer_key_id, issuer_public_key, max_responses]
+      properties:
+        v: {const: 1}
+        deployment_id: {$ref: '#/components/schemas/Bytes32'}
+        review_id: {$ref: '#/components/schemas/ID'}
+        org_id: {$ref: '#/components/schemas/ID'}
+        reviewer_account_id: {$ref: '#/components/schemas/ID'}
+        reviewer_membership_id: {$ref: '#/components/schemas/ID'}
+        reviewer_certificate: {$ref: '#/components/schemas/Binary'}
+        title: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, maxLength: 10000, default: ''}
+        questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+        recipient_public_key: {$ref: '#/components/schemas/Bytes32'}
+        issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
+        issuer_public_key: {$ref: '#/components/schemas/Binary', description: DER SubjectPublicKeyInfo RSA-3072 key.}
+        max_responses: {type: integer, minimum: 1, maximum: 100}
+        opens_at: {$ref: '#/components/schemas/NullableDecimal'}
+        closes_at: {$ref: '#/components/schemas/NullableDecimal'}
+    ReviewPublish:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, descriptor, descriptor_signature, vault_write]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/Decimal'}
+        descriptor: {$ref: '#/components/schemas/Binary', description: Base64url strict JSON bytes of Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}
+        descriptor_signature: {$ref: '#/components/schemas/Signature'}
+        vault_write: {$ref: '#/components/schemas/VaultWrite'}
+    Review:
+      type: object
+      additionalProperties: false
+      required: [id, org_id, creator_account_id, reviewer_account_id, reviewer_membership_id, title, description, questions, max_responses, opens_at, closes_at, state, revision, issuer_public_key, issuer_key_id, descriptor, descriptor_signature, issued_count, accepted_count]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        org_id: {$ref: '#/components/schemas/ID'}
+        creator_account_id: {$ref: '#/components/schemas/ID'}
+        reviewer_account_id: {$ref: '#/components/schemas/ID'}
+        reviewer_membership_id: {$ref: '#/components/schemas/ID'}
+        title: {type: string}
+        description: {type: string}
+        questions: {type: array, items: {$ref: '#/components/schemas/Question'}, description: Empty for new draft.}
+        max_responses: {type: integer, minimum: 1, maximum: 100}
+        opens_at: {$ref: '#/components/schemas/NullableDecimal'}
+        closes_at: {$ref: '#/components/schemas/NullableDecimal'}
+        state: {enum: [draft, published, closed]}
+        revision: {$ref: '#/components/schemas/Decimal'}
+        issuer_public_key: {$ref: '#/components/schemas/Binary', description: DER SubjectPublicKeyInfo RSA-3072 key.}
+        issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
+        descriptor: {$ref: '#/components/schemas/Binary', description: Empty string for draft; otherwise encoded Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}
+        descriptor_signature: {$ref: '#/components/schemas/Binary', description: Empty string for draft; otherwise 64-byte Ed25519 signature.}
+        issued_count: {$ref: '#/components/schemas/Decimal'}
+        accepted_count: {$ref: '#/components/schemas/Decimal'}
+    ReviewState: {type: object, additionalProperties: false, required: [id, state, revision, deleted], properties: {id: {$ref: '#/components/schemas/ID'}, state: {const: closed}, revision: {$ref: '#/components/schemas/Decimal'}, deleted: {type: boolean}}}
+    PublicReview: {type: object, additionalProperties: false, required: [state, descriptor, descriptor_signature], properties: {state: {enum: [published, closed]}, descriptor: {$ref: '#/components/schemas/Binary', description: Base64url JSON Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}, descriptor_signature: {$ref: '#/components/schemas/Signature'}}}
+    IssuanceRequest: {type: object, additionalProperties: false, required: [request_id, issuer_key_id, blinded_message, pending_state], properties: {request_id: {$ref: '#/components/schemas/ID'}, issuer_key_id: {$ref: '#/components/schemas/Bytes32'}, blinded_message: {$ref: '#/components/schemas/RSASignature'}, pending_state: {$ref: '#/components/schemas/VaultWrite'}}}
+    Issuance: {type: object, additionalProperties: false, required: [request_id, blind_signature, pending_state], properties: {request_id: {$ref: '#/components/schemas/ID'}, blind_signature: {$ref: '#/components/schemas/RSASignature'}, pending_state: {$ref: '#/components/schemas/VaultObject'}}}
+    Submission:
+      type: object
+      additionalProperties: false
+      required: [review_id, issuer_key_id, prepared_message, signature, enc, ciphertext]
+      properties:
+        review_id: {$ref: '#/components/schemas/ID'}
+        issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
+        prepared_message: {$ref: '#/components/schemas/Binary', maxLength: 1366, description: Decodes to at most 1024 bytes; exact protocol authorization transcript prefixed with RFC 9474 32-byte randomizer. Last 32 bytes are serial.}
+        signature: {$ref: '#/components/schemas/RSASignature'}
+        enc: {$ref: '#/components/schemas/Bytes32', description: HPKE X25519 encapsulated key.}
+        ciphertext: {$ref: '#/components/schemas/Binary', minLength: 22, maxLength: 349526, description: Decodes to 16..262144 bytes including 16-byte tag. HPKE X25519/HKDF-SHA-256/ChaCha20-Poly1305.}
+    ReceiptLookup: {type: object, additionalProperties: false, required: [review_id, issuer_key_id, serial], properties: {review_id: {$ref: '#/components/schemas/ID'}, issuer_key_id: {$ref: '#/components/schemas/Bytes32'}, serial: {$ref: '#/components/schemas/Bytes32'}}}
+    ReceiptV2:
+      type: object
+      additionalProperties: false
+      required: [v, deployment_id, receipt_id, review_id, descriptor_hash, issuer_key_id, response_hash, accepted_at, receipt_key_id, signature]
+      properties:
+        v: {const: 2}
+        deployment_id: {$ref: '#/components/schemas/Bytes32'}
+        receipt_id: {$ref: '#/components/schemas/ID'}
+        review_id: {$ref: '#/components/schemas/ID'}
+        descriptor_hash: {$ref: '#/components/schemas/Bytes32'}
+        issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
+        response_hash: {$ref: '#/components/schemas/Bytes32'}
+        accepted_at: {$ref: '#/components/schemas/UnsignedDecimal'}
+        receipt_key_id: {$ref: '#/components/schemas/Bytes32'}
+        signature: {$ref: '#/components/schemas/Signature'}
+    PublicConfig:
+      type: object
+      additionalProperties: false
+      required: [v, deployment_id, origin, ca_certificate, receipt_keys, receipt_key_id, source_url]
+      properties:
+        v: {const: 2}
+        deployment_id: {$ref: '#/components/schemas/Bytes32'}
+        origin: {type: string, format: uri}
+        ca_certificate: {$ref: '#/components/schemas/Binary', description: DER Ed25519 X.509 CA certificate.}
+        receipt_keys:
+          type: array
+          items: {type: object, additionalProperties: false, required: [receipt_key_id, receipt_public_key], properties: {receipt_key_id: {$ref: '#/components/schemas/Bytes32'}, receipt_public_key: {$ref: '#/components/schemas/Bytes32'}}}
+        receipt_key_id: {$ref: '#/components/schemas/Bytes32', description: Current receipt signer key ID.}
+        source_url: {type: string}
+    MembershipList: {type: object, additionalProperties: false, required: [items, next], properties: {items: {type: array, items: {$ref: '#/components/schemas/Membership'}}, next: {type: 'null'}}}
+    MemberList: {type: object, additionalProperties: false, required: [items, next], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Member'}}, next: {type: 'null'}}}
+    ReviewList: {type: object, additionalProperties: false, required: [items, next], properties: {items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/Review'}}, next: {oneOf: [{$ref: '#/components/schemas/ID'}, {type: 'null'}]}}}
+    SubmissionItem: {type: object, additionalProperties: false, required: [id, enc, ciphertext, receipt], properties: {id: {$ref: '#/components/schemas/ID'}, enc: {$ref: '#/components/schemas/Bytes32'}, ciphertext: {$ref: '#/components/schemas/Binary'}, receipt: {$ref: '#/components/schemas/ReceiptV2'}}}
+    SubmissionList: {type: object, additionalProperties: false, required: [items, next], properties: {items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/SubmissionItem'}}, next: {oneOf: [{$ref: '#/components/schemas/ID'}, {type: 'null'}]}}}

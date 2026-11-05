@@ -1,107 +1,104 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # Anonce
 
-Private, anonymous feedback for verified members. A Go 1.27/PostgreSQL 18 modular
-monolith serves HTML, CSS and vanilla browser ES modules, with locally bundled
-cryptographic dependencies and same-origin HTTPS.
+Private, anonymous feedback for verified members. A Go/PostgreSQL modular
+monolith serves HTML, CSS, and vanilla browser ES modules with locally bundled
+cryptography and same-origin HTTPS.
 
-**Development / pre-release. Not approved for sensitive production data.**
-Earlier baseline checks on 2026-11-05 included broad tests, disposable HTTPS
-browser E2E, backup/restore, and a nonroot application image smoke test; see
-[verification evidence](docs/verification.md) for the scope and current change
-evidence. Earlier runs do not validate later receipt-v2 changes. Focused source reviews
-are not an audit. No production-readiness claim is made. This is unreleased
-source; no version has been released.
+**Pre-release. Not approved for sensitive production data.** No version has been
+released and no independent security audit or production-readiness claim is made.
+See [verification evidence and remaining gates](docs/verification.md).
 
-## Browser workflows
+## Features and browser usage
 
-Register with an email address and unlock an encrypted vault; save a 12-word
-recovery phrase; create or join organizations and approve members; draft and publish signed reviews;
-obtain blind response authorizations; submit encrypted answers anonymously;
-verify receipts; decrypt/export received responses; change passwords or recover
-on another device. These are web flows, not user-facing CLI commands.
+- Register, unlock an encrypted vault, and save a 12-word recovery phrase.
+- Create or join organizations; owners and admins manage membership.
+- Publish signed reviews and obtain blind response authorizations.
+- Submit encrypted answers anonymously; recipients decrypt and export responses.
+- Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
+  access on another device.
 
-See [saving and verifying receipts](docs/receipts.md) for local verification and
-its trust limits.
+These are browser workflows, not user-facing CLI commands. Member lists expose
+emails to owners and admins. Email addresses are not mailbox-verified; a matching
+domain does not establish membership. Invitations do not send email.
 
-Owners can appoint multiple organization admins. Owners and admins can add
-registered accounts by email or share invite links; admins manage non-admin
-members only. Member lists show emails to owners and admins. Email addresses are
-not mailbox-verified, and matching an organization domain does not prove membership.
-The app does not send invitation email or enroll users automatically by domain.
+## Architecture and trust
 
-## Security boundaries
+```mermaid
+flowchart LR
+    Browser[Browser: vault and response crypto] -->|Same-origin HTTPS| Caddy
+    Caddy --> App[Go modular monolith]
+    App -->|Member role| DB[(PostgreSQL)]
+    App -->|Restricted anonymous role| DB
+    App --> Keys[Protected server-only keys]
+```
 
-Client private keys, password/recovery material and response plaintext remain in
-the browser. Server-only membership CA, RSA issuer and receipt keys are distinct
-and protected at rest. Argon2id, ChaCha20-Poly1305, Ed25519, X25519, SHA-256,
-HKDF-SHA-256, X.509 Ed25519, HPKE (X25519/HKDF-SHA-256/ChaCha20-Poly1305), and
-BIP-39 (exactly 12 English words, 128-bit entropy) use established implementations.
-RFC 9474 RSABSSA-SHA384-PSS-Randomized necessarily uses SHA-384 internally;
-application hashing/HKDF remain SHA-256.
+Client private keys, vault keys, password/recovery material, and response plaintext
+remain browser-only. Membership CA, blind issuer, and receipt signing keys are
+distinct server-only keys. Anonymous requests omit credentials.
 
-Go uses its standard library plus CIRCL and golang.org/x/crypto; pgx supplies
-PostgreSQL access. Browsers use Web Crypto where applicable plus bundled noble,
-scure, hash-wasm, hpke-js, Cloudflare blindrsa-ts and Peculiar X.509 libraries.
-See [third-party notices](THIRD_PARTY_NOTICES.md) for pinned dependencies/licenses.
+Browser-delivered code must be trusted. Anonce does not protect anonymity against
+malicious served code, operators/issuers, or network/timing correlation. Public
+password-derived keys allow offline guessing; use strong unique passwords.
+Password or phrase rotation does not revoke old vault snapshots. See
+[security policy](SECURITY.md), [threat boundaries](docs/architecture.md), and
+[protocol limits](docs/protocol.md) before using the application.
 
-This is not anonymity against malicious served JavaScript, XSS, operators,
-network/timing correlation, tiny groups, issuer minting or server-CA substitution.
-Database role isolation does not make a malicious application/issuer trustworthy.
-Public password-derived authentication keys permit offline password guessing;
-use strong unique passwords. Phrase/password rotation rewraps the same vault key
-V: old compromised snapshots are not revoked. Blind authorizations reserve quota;
-lost pending/unblinding state can strand it, and issued count is not accepted count.
-Pagination currently uses fixed 50-item pages with only partial limit-parameter
-support. Registration, credential changes and deletion do not universally cache
-retries; durable idempotency is specifically tested for blind issuance and spends.
-See [architecture/threat boundaries](docs/architecture.md),
-[protocol](docs/protocol.md), [API](docs/api.md), and
-[verification requirements](docs/verification.md).
+## Quickstart: disposable local HTTPS
 
-## Development and deployment
+Use synthetic data only. Install Docker Compose v2. For host-side checks, use
+Go 1.27.3 and Node.js 26 (CI pins 26.12.1); the database is PostgreSQL 18.
 
-Requires Go 1.27.3, Node.js 26, and PostgreSQL 18 (or Docker Compose v2). Operator/dev
-commands only; do not use real sensitive data in development.
+1. Copy `.env.example` to `.env`. Follow the
+   [operations setup](docs/operations.md#first-setup-review-deployment-prerequisites-first)
+   to configure `ANONCE_DOMAIN=anonce.local`, three distinct database passwords,
+   member/anonymous role URLs, the server-key path, and the corresponding-source URL.
+2. Generate and provision the server key using the operations instructions.
+   Verify runtime UID 65532 can read it; preserve existing keys.
+3. Validate and start the local stack:
+
+   ```sh
+   docker compose -p anonce-local -f compose.yaml -f compose.local.yaml config --quiet
+   docker compose -p anonce-local -f compose.yaml -f compose.local.yaml up -d --build
+   ```
+
+4. Follow operations instructions to map `anonce.local` to the host and trust
+   Caddy's local CA. Open `https://anonce.local` and register in the browser.
+
+The local override listens on all interfaces. Review network exposure before
+starting it. `npm run build` builds browser assets; build/test commands alone do
+not start the application. Public deployment, backups, key continuity, and source
+availability require the separate [operations guidance](docs/operations.md).
+
+## Development checks
 
 ```sh
-npm ci
-npm run build
-npm test
-npm run test:interop
+make browser
 make test
 make vet
 ```
 
-Database integration tests need both `ANONCE_TEST_DATABASE_URL` and
-`ANONCE_TEST_ANON_DATABASE_URL`, pointing to separate member/anonymous roles in a
-**disposable** database. They are skipped without those variables; a green
-ordinary Go run alone is not database-integration evidence.
+`make browser` installs pinned npm dependencies, builds assets, and runs browser
+unit and crypto interoperability tests. Database integration tests require both
+`ANONCE_TEST_DATABASE_URL` and `ANONCE_TEST_ANON_DATABASE_URL` for distinct roles
+in a disposable database; they skip without those variables. Browser E2E needs an
+already-running disposable HTTPS service. See [verification](docs/verification.md)
+for commands, recorded evidence, and skipped checks.
 
-For HTTPS deployment, follow [operations](docs/operations.md): configure `.env`
-from `.env.example`, distinct DB roles, and a 32-byte base64url server secret
-readable by runtime UID 65532 (owner 65532, mode 0400 on rootful Linux).
-`make compose-check` validates configuration; `make build` builds images.
-Back up the server key and PostgreSQL metadata/data as a coordinated recovery set.
-Do not start a public deployment until gates and source availability are resolved.
+## Documentation
 
-Optional browser E2E targets an already-running disposable HTTPS service:
+- [Architecture and threat boundaries](docs/architecture.md)
+- [Cryptographic protocol and formats](docs/protocol.md)
+- [OpenAPI contract](docs/openapi.yaml)
+- [Saving and verifying receipts](docs/receipts.md)
+- [Operations and local HTTPS](docs/operations.md)
+- [Verification evidence and release gates](docs/verification.md)
 
-```sh
-npx playwright install chromium
-ANONCE_E2E_ORIGIN=https://localhost:18443 ANONCE_E2E_ALLOW_SELF_SIGNED=1 npm run test:e2e
-```
-
-Self-signed TLS bypass is explicitly restricted to loopback test origins, never
-public deployment. Historical Node 24 E2E evidence covers the whole browser flow,
-lost-reply exact retry and original-phrase recovery, not every failure/renewal case.
-Later Node 26 checks are listed separately in the verification record.
-
-## Project and license
+## Contributing and license
 
 [Source](https://github.com/mandipnotroot/anonce-platform) ·
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 Original material is **AGPL-3.0-only**, not “or later”; see [LICENSE](LICENSE).
 Network deployments must offer complete corresponding source for their exact
-version, including modifications. Third-party licenses remain applicable.
+version, including modifications. Preserve [third-party licenses](THIRD_PARTY_NOTICES.md).

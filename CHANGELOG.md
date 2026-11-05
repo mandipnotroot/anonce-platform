@@ -31,6 +31,10 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Rewrite project documentation around setup, browser workflows, trust boundaries,
+  operations, and verification evidence; replace the prose API reference with an
+  OpenAPI contract. This documentation change does not change application behavior
+  or revalidate historical test results.
 - Group organization names, roles, and status badges in compact list rows, with
   full-width Open actions on mobile, 44px tap targets, and theme-matched Approved icons.
 - Download receipts as readable PNG cards containing the complete signed receipt

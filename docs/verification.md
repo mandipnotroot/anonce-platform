@@ -1,297 +1,137 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # Verification contract and evidence
 
-The checklist below describes required coverage, not blanket proof of every case.
-Executed evidence is recorded separately below. Neither tests nor independent
-focused source reviews constitute an audit or production-readiness approval.
+**No security audit or production approval is claimed.** Required coverage,
+configured automation, and recorded results are different evidence. This
+documentation rewrite did not rerun application tests or deploy anything.
 
-## Receipt-v2 change checks — 2026-11-05
+## Reproduce the gates
 
-These checks concern the current receipt-v2 changes; older baseline runs below
-do not validate this revision. Target execution uses disposable source snapshots
-inside a network-isolated namespace/chroot: source/toolchains are read-only,
-the environment is explicitly allowlisted, and writes are confined to a 512 MiB
-scratch filesystem. A transient cgroup limits memory to 2 GiB with no swap,
-CPU to one core, and tasks to 128. Commands have a 180-second wall limit.
-No deployment secrets, database connections, or live services are exposed.
+Use Go 1.27.3, Node.js 26.12.1, and disposable synthetic data. Never use
+production databases. See [operations](operations.md) for HTTPS and role setup.
 
-- Node 26.12.1: `node --test --test-concurrency=1 web/*.test.js`, exit 0;
-  55 passed, zero failures or skips. Includes receipt vectors, mutations,
-  historical trust, ciphertext replacement, cached/lookup acceptance checks,
-  reviewer verification order, input limits, and stale file reads.
-- `node scripts/build.mjs`, exit 0, in a scratch-only disposable source copy;
-  generated bundles were not promoted to the working tree or deployed.
-- Go 1.27.3 with `CGO_ENABLED=0`, matching the production build:
-  `node scripts/crypto-interop.mjs`, exit 0. Six groups passed: published
-  RFC 9474 vector, framing/U64, HKDF, ChaCha20-Poly1305, blind RSA, and HPKE.
-- `CGO_ENABLED=0 go test -p=1 ./...`, exit 0: protocol and server packages passed;
-  three packages had no test files. Initial compilation found two test-code
-  type/name issues; the successful rerun includes their fixes. Database-backed
-  tests remain opt-in and were not exercised by this command.
-- `CGO_ENABLED=1 go test -race -p=1 ./internal/protocol ./internal/server`,
-  exit 0: both packages passed in fresh isolated scratch. An earlier attempt
-  exhausted scratch after normal and race compilation shared a cache; the
-  successful standalone run kept the same resource limits.
+| Gate | Command | Preconditions and limits |
+| --- | --- | --- |
+| Go/race | `make test` | Runs `go test -race ./...`; database tests skip unless both `ANONCE_TEST_DATABASE_URL` and `ANONCE_TEST_ANON_DATABASE_URL` are set |
+| Go static checks | `make vet` | Runs `go vet ./...` |
+| Browser modules/interop | `make browser` | Runs `npm ci`, `npm run build`, `npm test`, `npm run test:interop`; interop requires Go |
+| Mock browser UI | `node scripts/ui-check.mjs` and `node scripts/ui-responsive.mjs` | Requires browser tooling; not live-backend or accessibility-conformance evidence |
+| Compose syntax | `make compose-check` | Requires configured variables; does not start services |
+| Image build | `make build` | Builds Compose images; does not validate deployment |
+| Live HTTPS E2E | `ANONCE_E2E_ORIGIN=https://localhost:18443 ANONCE_E2E_ALLOW_SELF_SIGNED=1 npm run test:e2e` | Requires an already-running disposable HTTPS deployment and browser tooling; does not provision services |
 
-PostgreSQL integration, concurrent acceptance, rollback, and restart-continuity
-tests require disposable database URLs. They have not been exercised for this
-change: no approved offline PostgreSQL binaries are available. Seven top-level
-database tests use the opt-in helper; individual skip events were not captured
-by the default Go output. The foreign-owner key fixture is conditional on chown
-capability and is not independently evidenced here. Full browser rendering/E2E
-checks were not run for this change; browser-module tests are not E2E evidence.
-Production key
-permissions, encrypted off-host backup recovery, and signing-key rotation remain
-unverified. A focused static review of the protocol/browser changes reported no
-issues; it is not a complete security audit.
+Provide distinct member/migration and anonymous fixture-role URLs for database
+tests. A green Go command without those URLs is not database/concurrency evidence.
+Self-signed E2E bypass is restricted to `localhost`, `127.0.0.1`, and `[::1]`.
 
-Local bounded logs are under
-`/tmp/opencode/anonce-security-verification/logs/`: `run-rnnyo9ht.log` records
-Node/build results and the initial compilation failures; `run-z93wemgr.log`
-records passing interoperability and the remaining test compilation issue;
-`run-r_j8_map.log` records the passing full Go rerun; `run-xyr8gajw.log` records
-the passing standalone race check. These are local run evidence, not deployed
-artifacts or a reproducible production-environment claim.
+### CI configuration
 
-## Backend: real PostgreSQL
+[CI](../.github/workflows/ci.yml) exists and runs on pushes/pull requests, with
+a 20-minute Ubuntu job. It pins Go 1.27.3 and Node.js 26.12.1 and runs race
+tests, vet, dependency installation, build, module tests, and interop. It defines
+no PostgreSQL service/test URLs or live HTTPS E2E step. Workflow configuration
+does not establish a successful run or database coverage.
 
-- Registration proposed-key proofs; password and recovery login; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, unknown/duplicate fields, body limits and CSRF.
-- Vault revision CAS, nonce/AAD tampering, recovery scope boundaries; credential epoch CAS races, session/challenge revocation, old/new proof requirements and unchanged vault after password rewrap.
-- Unique normalized email registration and lookup; invalid addresses and case-variant duplicates. Organization owner/admin/member/pending/revoked boundaries, direct addition by email and retries, owner-only admin appointment, admin escalation denial, cross-account/cross-org reads and mutations, certificate proof and renewal; certificate validity is not database authorization.
-- Publish descriptor and vault write atomicity, draft revisions and immutable publication. Positive max_responses values greater than one, default one, per-member independence (not global capacity), distinct request IDs, exact retry/hash conflicts, concurrent slot allocation and unique constraints. Confirm issued_count differs from accepted_count.
-- Revocation blocks issuance but not outstanding tokens. Verify no identifying submission columns/logs/joins. Anonymous Cookie/Authorization rejection and proxy stripping; creator-only ciphertext export.
-- Concurrent identical/different spends, closure racing acceptance, response loss and retry after closure. Fault injection must show spend/ciphertext/receipt/counter all commit or all roll back. Lookup returns the exact original verifiable receipt.
+## Latest recorded receipt-v2 checks — 2026-11-05
 
-## Crypto interoperability
+These are previously recorded results, not new runs for this documentation change.
+Older baselines do not validate receipt-v2. Execution used disposable snapshots
+in a network-isolated namespace/chroot, read-only source/toolchains, allowlisted
+environment, 512 MiB scratch, 2 GiB memory/no swap, one CPU, 128 tasks, and
+180-second command limits. No deployment secrets, database connections, or live
+services were exposed.
 
-- Shared byte-for-byte E, JSON payload hash, KDF, password/recovery wrapper, vault-object and receipt vectors in browser and Go. Validate decimal U64 handling and canonical base64url lengths/roundtrips.
-- Established Argon2id v19 parameters, exact 12-English-word BIP-39 checksum/entropy, Ed25519 derived authentication seeds and separate membership seed. Wrong password/phrase, modified metadata, nonce, revision and AAD must fail closed.
-- RFC 9474 randomized SHA384-PSS browser blind → Go issuer → browser unblind/verify interoperability, malformed messages, wrong review/key/hash/serial, signature lengths and prepared prefix; never replace the prescribed suite.
-- RFC 9180 X25519/HKDF-SHA256/ChaCha20-Poly1305 interop, wrong key/info/AAD/tag rejection, descriptor signature and certificate verification. Ensure no AES substitutions in wrapping or vault objects.
-- Receipt v2: compare Go/browser transcripts, response hash, key ID, and Ed25519
-  signature against `testdata/receipt-v2.json`; reject changed context, envelope,
-  signature, noncanonical encoding/timestamp, and unknown or duplicate fields.
-  Exercise maximum-U64 server-asserted timestamps without invalid date displays.
-  Accept explicitly trusted historical keys and reject removed or substituted keys.
+| Recorded command | Exit/result | Scope |
+| --- | --- | --- |
+| `node --test --test-concurrency=1 web/*.test.js` | 0; 55 passed, no failures/skips | Node 26.12.1; receipt vectors/mutations, historical trust, ciphertext replacement, acceptance checks, reviewer order, limits and stale reads |
+| `node scripts/build.mjs` | 0 | Scratch-only build; bundles not promoted or deployed |
+| `node scripts/crypto-interop.mjs` | 0; six groups | Go 1.27.3 with `CGO_ENABLED=0`; RFC 9474 vector, framing/U64, HKDF, ChaCha20-Poly1305, blind RSA, HPKE |
+| `CGO_ENABLED=0 go test -p=1 ./...` | 0 | Protocol/server passed; three packages without tests; database tests remained opt-in |
+| `CGO_ENABLED=1 go test -race -p=1 ./internal/protocol ./internal/server` | 0 | Both packages passed in fresh scratch; not database acceptance/concurrency coverage |
 
-## Browser flows
+Initial compilation found two test-code type/name issues; successful reruns include
+fixes. An initial race attempt exhausted shared scratch; a standalone run passed
+with the same limits. Focused static protocol/browser review reported no issues,
+but was not a complete audit.
 
-Full registration and phrase confirmation; password login; create organization; invite, accept pending, approve; create/edit/publish review; multiple per-member authorizations where configured; respond at `#respond/<id>`; reviewer decrypt and export. Cross-device phrase recovery, credential reset and restored encrypted vault; phrase rotation snapshot warning. Preserve exact pending issuance and submission bytes across crashes/retries. Anonymous requests carry no credentials/referrer, do not follow redirects and retry the identical submission, not newly encrypted ciphertext. Review keyboard access, accessibility, and responsive behavior with a file-specific goal; no particular design tool or coding assistant is required.
+Recorded local logs under `/tmp/opencode/anonce-security-verification/logs/`:
 
-Use actual exports in `web/crypto.js` and tests/vectors in `web/crypto.test.js`, not an implementation-progress snapshot. Export presence is not passing evidence.
+| Log | Evidence |
+| --- | --- |
+| `run-rnnyo9ht.log` | Node/build and initial compilation failures |
+| `run-z93wemgr.log` | Passing interop and remaining compilation issue |
+| `run-r_j8_map.log` | Passing full Go rerun |
+| `run-xyr8gajw.log` | Passing standalone race check |
 
-Test descriptor signature/profile/deployment/org/membership-key checks and server publication validation of reviewer account association; do not claim the account is independently certificate-bound. Expired certificates must still support historical decoding with signature/profile checks, while publication/issuance enforce current validity and revocation. No browser test can establish trusted signing time or historical approval/non-revocation.
+Local paths are evidence pointers, not repository artifacts or a guarantee that
+another machine retains them.
 
-Test same-device unlock's nonextractable IndexedDB HKDF CryptoKey, in-memory ChaCha cache key and encrypted V/private state; logout must delete capability/cache and prevent pending writes restoring them. State explicitly that copied capabilities/profile backups, malicious served code and XSS are not defeated by password gating. Password/phrase changes preserve data, not repair old snapshots. Exercise the 256 KiB ciphertext boundary using serialized UTF-8 length plus 16-byte tag before issuance, including multibyte input and server rejection above the cap. Confirm `X-CSRF-Token`, `full`/`recovery` scopes and certificate `membership_id` responses.
+## Required coverage
 
-For receipt verification, test submitted, looked-up, and cached acceptance against
-the saved envelope and verified descriptor. Require receipt verification before
-reviewer decryption, ignore unsigned outer timestamps, and isolate invalid records.
-Check the public verifier without sign-in or upload, with explicit trust, 64 KiB
-UTF-8/file limits, stale asynchronous input guards, and escaped receipt values.
-Signature-only saved-file checks must not claim original-submission matching.
+| Area | Positive and negative cases required |
+| --- | --- |
+| Authentication | Registration key proofs; password/recovery; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, duplicate/unknown fields, body limits, CSRF |
+| Vault/credentials | Revision/epoch CAS races; nonce/AAD tampering; recovery scope; session/challenge revocation; old/new proofs; unchanged vault after rewrap; logout prevents pending writes restoring capabilities |
+| Membership | Normalized email uniqueness/invalid addresses; owner/admin/member/pending/revoked boundaries; direct addition/retry; owner-only admin appointment; escalation/cross-account/org denial; certificate proof/renewal is not database authorization |
+| Publication/issuance | Descriptor/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count |
+| Anonymous acceptance | Cookie/Authorization rejection and proxy stripping; no identifying fields/logs/joins; concurrent spends, closure races, lost replies/exact retries; spend/ciphertext/receipt/counter commit or roll back together; lookup returns original verifiable receipt |
+| Cryptography | Shared framing/JSON hashes/KDF/wrapper/vault vectors; decimal U64/canonical base64url; prescribed Argon2id, 12-English-word BIP-39, Ed25519, RFC 9474/RFC 9180; wrong key/context/nonce/tag/hash/signature rejection |
+| Receipt v2 | Go/browser `testdata/receipt-v2.json` transcripts, hash/key ID/signature; reject changed context/envelope, noncanonical timestamp/encoding, unknown/duplicate fields; maximum U64; explicit historical trust and removed/substituted-key rejection |
+| Browser journeys | Registration/phrase confirmation, login, organization membership/approval, publication, multiple authorizations, response, creator-only decrypt/export, recovery/reset; preserve exact pending bytes across crashes/retries |
+| Browser receipt use | Verify submitted/looked-up/cached acceptance against saved envelope/verified descriptor before decryption; ignore unsigned timestamps; isolate invalid records; public offline verifier requires explicit trust, 64 KiB limits, stale-read guards and escaped values |
+| Operations | Compose health/readiness, role grants, migration rollback, HTTPS/cookies/CSP/Origin, local dependencies, logging leakage, encrypted restore and signing-key continuity |
 
-## Operations and independent review
+Anonymous browser requests must omit credentials/referrer, reject redirects, and
+retry identical ciphertext. Check the 256 KiB ciphertext boundary using serialized
+UTF-8 length plus the 16-byte tag, including multibyte input and server rejection.
+Check descriptor signature/profile/deployment/org/membership-key and reviewer
+account association without implying independent certificate binding. Historical
+certificate decoding retains signature/profile checks but cannot prove trusted
+signing time or historical approval/non-revocation.
 
-Compose build/start/health with real PostgreSQL; least-privilege application/migration DB roles; transactional migration rollback; encrypted backups and actual restore exercises, including server signing keys and receipt verification continuity. Inspect proxy, access/error logs and telemetry for anonymity leaks. Test secure cookie attributes, HTTPS, configured Origin and static locally bundled dependencies.
+Test nonextractable IndexedDB HKDF capabilities, in-memory ChaCha cache keys,
+encrypted private state, and logout cleanup. Password/phrase changes preserve data
+but do not repair copied snapshots. Signature-only saved-file checks must not
+claim original-submission matching. Check keyboard, responsive behavior, and
+assistive technology separately from module tests.
 
-Independent **source-first** security review should focus on cryptographic transcripts/library use, replay/CAS/quota races, role boundaries, atomic acceptance, browser persistence and infrastructure metadata. Report findings and fixes; do not describe this plan or a focused review as a security audit. Explicitly retain limitations: timing/IP correlation, malicious served code, trusted operators, tiny anonymity sets, server issuer minting, CA substitution and recovery snapshot exposure.
+## Historical summary — recorded 2026-11-05
 
-## Executed evidence — 2026-11-05
+These snapshots predate receipt-v2 validation. Counts belong to separate snapshots;
+do not add them or treat them as current coverage.
 
-### Workspace navigation
+| Snapshot | Recorded result | Limits / evidence pointer |
+| --- | --- | --- |
+| Navigation/shared UI | Node 26.12.1 build, 44 module tests, mock UI/responsive checks and diff check exited 0; light/dark widths 320–1365px | Mocked backend, not device/E2E/WCAG evidence; `/tmp/opencode/anonce-ui-final`, `anonce-nav-*.log`, `anonce-charcoal-*.log` |
+| Email accounts/admins | Go 1.27.3 race/vet against disposable PostgreSQL 18.6 with both roles exited 0; 10 top-level Go tests; 42 frontend tests/mock UI passed | No HTTPS E2E or mailbox ownership proof; `/tmp/opencode/anonce-email-final/summary.log` |
+| Dark interface/acceptance | Race/vet with both PostgreSQL 18.6 URLs, build, 31 module tests, six interop groups and mock UI exited 0 | Initial old-toolchain/harness MIME errors corrected; `/tmp/opencode/anonce-current-checks.log` and follow-up logs |
+| Interface/contributor cleanup | Isolated Node 26.12.1 build/31 module tests, mock UI, diff/link checks exited 0 | No backend/DB/E2E/rebuild or full contrast/accessibility audit for that change |
+| Earlier baseline | PostgreSQL 17 race suite (8 tests across two packages), vet, Node 24 build/modules/interop passed; dependency audit reported no vulnerabilities then | Old snapshot/toolchains; `/tmp/opencode/anonce-final`; initial tracked-secret scan inconclusive before staging |
+| Earlier HTTPS E2E | Node 24 disposable journey passed registration, membership/publication, submission/lost-reply retry, receipt/decrypt/export, reload and original-phrase recovery; no CSP/page errors | Not current E2E; renewal wrapper simulated only near-expiry metadata, not actual expiry |
+| Earlier restore/runtime | Dump/restore matched 14 table counts and sorted row digests, including four ciphertext/receipt rows; synthetic Compose/proxy checks and hardened UID65532 smoke passed | Fixture key continuity only; not encrypted off-host recovery, public DNS/TLS, or current deployment |
 
-With `PATH=/tmp/opencode/anonce-node26:$PATH` (Node.js v26.12.1),
-`npm run build`, `npm test` (44 passing tests), `node scripts/ui-check.mjs`,
-`node scripts/ui-responsive.mjs`, and `git diff --check` each exited 0.
-Logs are retained at `/tmp/opencode/anonce-nav-{build,tests,browser,responsive}.log`.
-Responsive checks cover both themes at 320, 375, 390, 640, 768, 1280, and
-1365 pixels, including actual scrolling, desktop sticky positioning, mobile
-bottom positioning, footer clearance, and long workspace names and email addresses.
-The refreshed mobile dark screenshot in `/tmp/anonce-ui` was inspected.
-These are mocked browser checks, not live-backend or physical-device evidence;
-virtual-keyboard and device-specific safe-area behavior remain unverified.
+## Open gates and limitations
 
-### Shared UI cleanup and near-black dark theme
+- Receipt-v2 **database integration, concurrent acceptance, rollback, and restart
+  continuity were not run**: no approved offline PostgreSQL binaries were available.
+  Seven top-level tests use the opt-in helper; default output did not capture
+  individual skips. Non-database race tests do not close this gap.
+- Receipt-v2 full browser rendering/live HTTPS E2E was not run. Module tests,
+  historical mock UI, and Node 24 E2E do not substitute for it.
+- The foreign-owner key fixture depends on chown capability and lacks independent
+  execution evidence here. Production key permissions, encrypted off-host restore,
+  and signing-key rotation remain unverified.
+- Pagination remains limited: organization lists have no cursor; member lists
+  return at most 100; reviews/submissions return at most 50 with `after` only.
+  No configurable `limit` is supported. Registration,
+  credential changes, and deletion are not universally retry-cached; core issuance
+  and spend idempotency coverage is not a global retry guarantee.
+- Independent source-first review remains a release gate: examine transcripts,
+  libraries, replay/CAS/quota races, roles, atomicity, browser persistence and
+  metadata. No public deployment, independent audit, release, or sensitive-production
+  approval is established.
+- Malicious code/operators, timing/IP correlation, offline password guessing,
+  tiny anonymity sets, issuer minting, CA substitution and compromised recovery
+  snapshots retain the [security model's](../SECURITY.md) limitations.
 
-The subsequent palette refinement replaces the near-black background with
-`#141318` and matching charcoal surfaces. On Node.js v26.12.1, `npm test`
-(44 passing tests), `node scripts/ui-check.mjs`, and `git diff --check` each
-exited 0. The browser check confirmed `rgb(20, 19, 24)` for the dark body
-background; the refreshed desktop dark screenshot was inspected. Logs are in
-`/tmp/opencode/anonce-charcoal-tests.log` and
-`/tmp/opencode/anonce-charcoal-browser.log`.
-
-Final checks used Node.js v26.12.1 with
-`PATH=/tmp/opencode/anonce-node26:$PATH`. All commands exited 0:
-
-- `npm run build`.
-- `npm test`: 44 tests passed, zero failures or skips.
-- `node scripts/ui-check.mjs`: mocked authentication, registration/recovery,
-  organization membership and revoke confirmation, review creation/editing/
-  preview/publication/results, response submission/receipt, account rotation,
-  notifications, and keyboard focus checks passed. Representative pages were
-  checked in both themes at widths from 320 to 1365 pixels. Status text contrast
-  met 4.5:1 and borders against badge backgrounds met 3:1 for tested tones.
-- `node scripts/ui-responsive.mjs`: navigation geometry and overflow checks
-  passed at 320, 375, 390, 640, 768, and 1280 pixels in both themes.
-- `git diff --check`.
-
-Logs are retained in `/tmp/opencode/anonce-ui-final`; browser screenshots are
-in `/tmp/anonce-ui`. Mobile dark-theme member and results screenshots were also
-inspected. Icon checks establish asset loading and theme-aware filters, not
-pixel-measured icon contrast. These checks are not a full WCAG conformance audit.
-Live-backend E2E, assistive-technology testing, invite creation/acceptance,
-membership approval actions, and pending-submission retry journeys were not run
-for this change. Cryptography, authentication, authorization, and business logic
-were not changed.
-
-### Email accounts and organization admins
-
-Final reconciled checks used Go 1.27.3, Node.js 26.12.1, and a fresh disposable
-PostgreSQL 18.6 instance with separate member/anonymous fixture roles. The
-container was removed afterward; the existing deployment was not changed.
-Logs and individual exit statuses are retained at
-`/tmp/opencode/anonce-email-final/summary.log` and adjacent logs.
-
-All commands below exited 0:
-
-- `git diff --check`.
-- `go test -race ./... -count=1`: both tested packages passed with database
-  fixtures configured; 10 top-level tests, including normalized email uniqueness,
-  direct member addition/retry, admin restrictions, demotion, and concurrent adds.
-- `go vet ./...`.
-- With `PATH=/tmp/opencode/anonce-node26:$PATH`: `npm run build` and `npm test`;
-  42 frontend tests passed, zero failures or skips.
-- With the same PATH: `node scripts/ui-check.mjs` and
-  `node scripts/ui-responsive.mjs`; mocked-browser UI checks and 12 viewport/theme
-  cases passed at 320, 375, 390, 640, 768, and 1280 pixels in light/dark themes.
-  Focused assertions cover rendered review badges, matching workspace labels,
-  owner/admin controls, revoked-member actions, and closed-status text contrast.
-
-Real-backend browser E2E was not run for this change: no isolated temporary HTTPS
-service was configured. Mocked UI checks do not establish complete browser/backend
-integration. Email syntax and uniqueness checks do not verify mailbox ownership.
-
-### Earlier baseline checks
-
-Local evidence is retained outside the repository in
-`/tmp/opencode/anonce-final`; fixture credentials/data are disposable, not production.
-Commands below exited 0 unless a limitation is explicitly stated.
-
-- `git diff --check`, read-only `gofmt -l`, and original-source SPDX checks:
-  clean. Before staging, zero tracked files made the initial tracked-secret scan
-  inconclusive; actual-index review is a separate publication gate.
-- `ANONCE_TEST_DATABASE_URL=… ANONCE_TEST_ANON_DATABASE_URL=… go test -race ./... -count=1`:
-  8 tests across 2 tested packages against PostgreSQL 17 `anonce_regression`,
-  with separate member/anonymous roles; `go vet ./...` passed. This did not use
-  or reset the live E2E database.
-- Node 24.22.2/npm 11.21.2: `npm ci`, `npm run build`, `npm test`,
-  `npm run test:interop` passed. Aggregate: 21 tests, 0 failures/skips before the
-  final source-link change; the app owner separately reported 4 focused app tests
-  passing afterward (not 25 distinct tests). Interop: 6 checks, including the
-  published RFC 9474 vector, Go/browser framing, HKDF, ChaCha, blind RSA and HPKE.
-  `npm audit --omit=dev` reported no vulnerabilities at execution time.
-- `ANONCE_E2E_ORIGIN=https://localhost:18443 ANONCE_E2E_ALLOW_SELF_SIGNED=1 node scripts/e2e.mjs`
-  under Node 24, using an execution-only observer: whole HTTPS journey passed,
-  including registration, membership/publication, response, lost-reply exact retry,
-  receipt, plaintext/export, reload unlock and original-phrase cross-device recovery.
-  CSP console violations: 0; uncaught page errors: 0. Expected new-session 401s
-  occurred. The subsequent source-link-only change had focused desktop/mobile
-  configured-href checks reported passing; the whole journey was not rerun for it.
-- A second execution-only browser wrapper simulated **only near-expiry metadata**
-  (`expires_at = now + 60s`): 2 real renewal POSTs returned 200 and the journey
-  passed, CSP/page errors both 0. This is not an actual-expired-certificate browser
-  test; actual expiry checks belong to backend/helper coverage.
-- `pg_dump -Fc` and `pg_restore --exit-on-error` into a new absent-checked
-  `anonce_restore_1793857486` database passed. All 14 table counts and sorted
-  SHA-256 row digests matched, including 4 immutable ciphertext/receipt records.
-  Source E2E/regression databases were not dropped/reset. Matching fixture key
-  continuity was preserved; encrypted off-host recovery was not exercised.
-- Synthetic `docker compose config --quiet`, proxy-only build/offline Caddy
-  validation and fresh-volume nonroot permission checks passed. Final
-  `docker build --tag anonce-final:local .` passed. Image:
-  `sha256:6ecbcfce9adc95f93706d2591cdda0824020845f8602d63910ed03d7bd3cafbf`.
-  Actual UID65532, read-only filesystem, all capabilities dropped and
-  no-new-privileges runtime returned 200 for health/readiness/root/config/app/UI.
-  Served app/UI bytes matched frozen sources including source links. A copied
-  fixture key owned by UID65532, mode0400, was readable; original key untouched.
-
-## Dark interface and acceptance checks — 2026-11-05
-
-This change uses a separate disposable PostgreSQL 18.6 instance and source copies,
-not the deployment or databases described above. Execution uses isolated Docker
-containers with no external network, an explicit empty-environment allowlist,
-read-only source/tool mounts, scratch tmpfs storage, dropped capabilities and
-CPU, memory, process, file-size, disk and wall-clock limits. Fixture roles have
-no production credentials. Logs are retained in
-`/tmp/opencode/anonce-current-checks.log` and follow-up logs beside it.
-
-- Node 26.12.1: `node scripts/build.mjs` exited 0.
-- `node --test web/api.test.js web/app.test.js web/crypto.test.js web/storage.test.js web/ui.test.js`
-  exited 0: 31 tests passed, no failures or skips. This includes fixed-size
-  issuance padding, remote JSONB retry reconstruction, per-record decryption
-  failure isolation, exports, and recovery clipboard/download helper behavior.
-- The first Go attempt used local Go 1.27.2, below `go.mod`'s required 1.27.3;
-  backend/vet/interop checks could not run in that attempt. The cached 1.27.3
-  toolchain is selected explicitly for the follow-up. The first browser harness
-  also exposed an HTML MIME error in the test server; the harness was corrected.
-- With Go 1.27.3 and both disposable database URLs configured,
-  `go test -race -count=1 ./...` and `go vet ./...` exited 0. The server tests
-  include assertions that accepted counts equal persisted rows after issuance,
-  invalid fields/signatures, an invisible uncommitted write, rollback,
-  concurrent duplicates, exact retries and conflicting replays.
-- `node scripts/crypto-interop.mjs` exited 0: six interoperability groups passed,
-  including the published RFC 9474 vector, framing, HKDF, ChaCha, blind RSA and
-  HPKE, with the existing tamper-rejection checks.
-- `node scripts/ui-check.mjs` exited 0 for dark computed color scheme,
-  desktop/mobile overflow, phrase copy/download and unreadable response notice.
-  After fixing replacement-phrase display following account recovery,
-  `node --test web/ui.test.js` exited 0 again (4 tests, not additional distinct
-  tests), and `node scripts/ui-check.mjs` exited 0 across registration, recovery
-  and phrase rotation. Final UI evidence is in
-  `/tmp/opencode/anonce-current-checks-ui.log`.
-
-These checks are targeted regression evidence, not a full cryptographic audit.
-The mock browser harness does not establish real HTTPS, account recovery or
-end-to-end server behavior. Previous deployment evidence is historical, not a
-deployment of the current changes.
-
-## Interface simplification and contributor guidance — 2026-11-05
-
-The interface follows the reference project's restrained visual principles:
-neutral surfaces, clear labels, simple borders, and locally served icons. No
-frontend framework or dependency was added. Contributor instructions no longer
-prescribe a maintainer's Git identity or a particular coding assistant.
-
-- In an isolated, network-disabled `node:26.12.1-bookworm-slim` container,
-  `npm run build && npm test` exited 0: 31 tests passed, none failed or skipped.
-  The container used read-only source/dependency mounts and a temporary working
-  copy; no environment files, server keys, or databases were mounted.
-- `/tmp/opencode/anonce-node26/node scripts/ui-check.mjs` exited 0 using the
-  Node.js 26.12.1 binary extracted from that same image. The mock browser harness
-  checked light/dark themes at 1365px and 390px, horizontal overflow, local Lucide
-  asset loading, distinct dark icon filters, recovery controls, unreadable-response
-  notices, and skip-link focus without changing the current route or content.
-- `git diff --check` exited 0. A local documentation-link check passed for all
-  25 checked links in the top-level contributor documents and the modified
-  operations/verification documents.
-
-Screenshots of synthetic review results were inspected at desktop/mobile sizes.
-These are mock-harness captures, not evidence of a deployed application. Earlier
-focused browser checks used host Node.js 22; the final run above used the supported
-Node.js 26 runtime. Backend/database tests, real HTTPS E2E, a container rebuild,
-manual assistive-technology testing, and a full contrast audit were not run for
-this interface/documentation change. Previous deployment evidence remains
-historical. This work does not establish project-wide production readiness.
-
-## Remaining limitations
-
-Fixed 50-item pagination and partial limit-parameter support remain. Registration,
-credential changes and deletion are not universally retry-cached; durable core
-blind-issuance/spend idempotency has specific tested coverage, not a global promise.
-No public DNS/TLS deployment, independent audit or sensitive-production approval
-is claimed. Malicious JavaScript/operators, timing correlation, offline password
-guessing, issuer/CA trust, small groups and compromised vault snapshots retain
-the architecture's stated limitations. Publication does not establish a public
-deployment, release, or production approval.
+See [OpenAPI](openapi.yaml) for endpoints and [protocol](protocol.md) for formats.
