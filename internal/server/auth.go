@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -19,7 +18,7 @@ const cookieName = "__Secure-anonce_session"
 func ioBody(b []byte) io.ReadCloser { return io.NopCloser(bytes.NewReader(b)) }
 
 type session struct {
-	Account, Scope, CSRF, Login          string
+	Account, Scope, CSRF, Email          string
 	Epoch                                int64
 	Hash, Password, Recovery, Membership []byte
 }
@@ -34,14 +33,14 @@ func (s *Server) session(r *http.Request) (*session, error) {
 		return nil, problem{401, "unauthenticated"}
 	}
 	a := &session{Hash: protocol.Hash(b)}
-	e = s.member.QueryRow(r.Context(), "SELECT a.id,s.scope,s.csrf,a.login,a.epoch,a.password_public,a.recovery_public,a.membership_public FROM member.sessions s JOIN member.accounts a ON a.id=s.account_id AND a.epoch=s.epoch WHERE s.id_hash=$1 AND s.expires_at>now()", a.Hash).Scan(&a.Account, &a.Scope, &a.CSRF, &a.Login, &a.Epoch, &a.Password, &a.Recovery, &a.Membership)
+	e = s.member.QueryRow(r.Context(), "SELECT a.id,s.scope,s.csrf,a.email,a.epoch,a.password_public,a.recovery_public,a.membership_public FROM member.sessions s JOIN member.accounts a ON a.id=s.account_id AND a.epoch=s.epoch WHERE s.id_hash=$1 AND s.expires_at>now()", a.Hash).Scan(&a.Account, &a.Scope, &a.CSRF, &a.Email, &a.Epoch, &a.Password, &a.Recovery, &a.Membership)
 	if e != nil {
 		return nil, problem{401, "unauthenticated"}
 	}
 	return a, nil
 }
 func sessionView(a *session) map[string]any {
-	return map[string]any{"account_id": a.Account, "scope": a.Scope, "credential_epoch": strconv.FormatInt(a.Epoch, 10), "csrf_token": a.CSRF, "login": a.Login}
+	return map[string]any{"account_id": a.Account, "scope": a.Scope, "credential_epoch": strconv.FormatInt(a.Epoch, 10), "csrf_token": a.CSRF, "email": a.Email}
 }
 
 type proof struct {
@@ -213,16 +212,21 @@ func (s *Server) authRoutes(m *http.ServeMux) {
 }
 func (s *Server) params(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Login string `json:"login"`
+		Email string `json:"email"`
 	}
 	if e := body(r, &p); e != nil {
+		fail(w, e)
+		return
+	}
+	email, e := normalizeEmail(p.Email)
+	if e != nil {
 		fail(w, e)
 		return
 	}
 	var id, salt string
 	var epoch int64
 	var kd json.RawMessage
-	if e := s.member.QueryRow(r.Context(), "SELECT id,epoch,password_kdf,recovery_salt FROM member.accounts WHERE login=$1", p.Login).Scan(&id, &epoch, &kd, &salt); e != nil {
+	if e := s.member.QueryRow(r.Context(), "SELECT id,epoch,password_kdf,recovery_salt FROM member.accounts WHERE email=$1", email).Scan(&id, &epoch, &kd, &salt); e != nil {
 		fail(w, problem{404, "not_found"})
 		return
 	}
@@ -283,7 +287,7 @@ func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
 type registration struct {
 	Request      string   `json:"request_id"`
 	Account      string   `json:"account_id"`
-	Login        string   `json:"login"`
+	Email        string   `json:"email"`
 	KDF          kdf      `json:"password_kdf"`
 	Password     string   `json:"password_auth_public_key"`
 	RecoverySalt string   `json:"recovery_salt"`
@@ -305,12 +309,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, bad("invalid_registration"))
 		return
 	}
+	email, emailErr := normalizeEmail(p.Email)
+	p.Email = email
 	pw, a := protocol.Decode(p.Password, 32)
 	re, b := protocol.Decode(p.Recovery, 32)
 	mp, c := protocol.Decode(p.Membership, 32)
 	_, d := protocol.Decode(p.RecoverySalt, 32)
 	_, f := protocol.Decode(p.Account, 16)
-	if a != nil || b != nil || c != nil || d != nil || f != nil || !p.KDF.valid() || !p.PasswordWrap.valid() || !p.RecoveryWrap.valid() || len(p.Login) < 3 || len(p.Login) > 128 || strings.TrimSpace(p.Login) != p.Login || !checkSig(pw, x.Proof.Password, x.Transcript) || !checkSig(re, x.Proof.Recovery, x.Transcript) || !checkSig(mp, x.Proof.Membership, x.Transcript) {
+	if a != nil || b != nil || c != nil || d != nil || f != nil || !p.KDF.valid() || !p.PasswordWrap.valid() || !p.RecoveryWrap.valid() || emailErr != nil || !checkSig(pw, x.Proof.Password, x.Transcript) || !checkSig(re, x.Proof.Recovery, x.Transcript) || !checkSig(mp, x.Proof.Membership, x.Transcript) {
 		fail(w, bad("invalid_registration"))
 		return
 	}
@@ -330,7 +336,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	kd, _ := json.Marshal(p.KDF)
 	wraps, _ := json.Marshal(map[string]any{"password_wrap": p.PasswordWrap, "recovery_wrap": p.RecoveryWrap})
-	_, e = tx.Exec(r.Context(), "INSERT INTO member.accounts(id,login,password_public,recovery_public,membership_public,password_kdf,recovery_salt,vault) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", p.Account, p.Login, pw, re, mp, kd, p.RecoverySalt, wraps)
+	_, e = tx.Exec(r.Context(), "INSERT INTO member.accounts(id,email,password_public,recovery_public,membership_public,password_kdf,recovery_salt,vault) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", p.Account, p.Email, pw, re, mp, kd, p.RecoverySalt, wraps)
 	if e == nil {
 		for _, o := range p.Objects {
 			if e = saveObject(r, tx, p.Account, vaultWrite{"0", o}); e != nil {
@@ -386,7 +392,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := &session{Account: p.Account}
-	if e = s.member.QueryRow(r.Context(), "SELECT epoch,password_public,recovery_public,login FROM member.accounts WHERE id=$1", p.Account).Scan(&a.Epoch, &a.Password, &a.Recovery, &a.Login); e != nil {
+	if e = s.member.QueryRow(r.Context(), "SELECT epoch,password_public,recovery_public,email FROM member.accounts WHERE id=$1", p.Account).Scan(&a.Epoch, &a.Password, &a.Recovery, &a.Email); e != nil {
 		fail(w, problem{401, "invalid_credentials"})
 		return
 	}

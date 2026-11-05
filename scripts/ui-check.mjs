@@ -33,17 +33,23 @@ const server = createServer(async (request, response) => {
 
 const mockModule = `
 let active = null;
+let mockRole = "owner";
+export const addedMembers=[];
 const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"];
 export const getSourceURL=()=>"https://example.invalid/source";
 export const getSession=async()=>active;
-export const register=async()=>{active={account_id:"acct",login:"demo"};return {recoveryWords:phrase,session:active};};
-export const login=async({password})=>{if(password==="fail-password")throw new Error("Login or password is incorrect.");active={account_id:"acct",login:"demo"};return active;};
-export const recover=async()=>{active={account_id:"acct",login:"demo"};return {recoveryWords:phrase,session:active};};
+export const register=async({email})=>{active={account_id:"acct",email};return {recoveryWords:phrase,session:active};};
+export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");active={account_id:"acct",email};return active;};
+export const recover=async({email})=>{active={account_id:"acct",email};return {recoveryWords:phrase,session:active};};
 export const rotateRecovery=async()=>({recoveryWords:phrase,session:active});
-export const listOrganizations=async()=>({items:[{id:"org",name:"Demo",role:"reviewer"}]});
+export const setMockRole=role=>mockRole=role;
+export const listOrganizations=async()=>({items:[{id:"org",name:"Demo workspace",role:mockRole},{id:"other",name:"Other workspace",role:mockRole}]});
+export const listMembers=async()=>({items:[{id:"owner",email:"owner@example.net",role:"owner",status:"approved"},{id:"admin",email:"admin@example.net",role:"admin",status:"approved"},{id:"reviewer",email:"reviewer@example.net",role:"reviewer",status:"approved"},{id:"respondent",email:"respondent@example.net",role:"respondent",status:"approved"},{id:"pending",email:"pending@example.net",role:"respondent",status:"pending"},{id:"revoked",email:"revoked@example.net",role:"reviewer",status:"revoked"}]});
+export const addMember=async({email,role})=>addedMembers.push({email,role});
+export const changeMemberRole=async()=>{};
 export const listReviews=async()=>({items:[],next:null});
 export const listPendingResponses=async()=>({items:[]});
-export const getReview=async()=>({id:"review",title:"Demo review",status:"published",creator_account_id:"acct",revision:1,questions:[]});
+export const getReview=async()=>({id:"review",org_id:"other",title:"Demo review",status:"closed",creator_account_id:"acct",revision:1,questions:[]});
 export const listResponses=async()=>({items:[{id:"r1",acceptedAt:"2026-01-01T00:00:00Z",status:"invalid",error:"RESPONSE_UNREADABLE",answers:[]}],next:null});
 `;
 
@@ -82,6 +88,13 @@ try {
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button .icon")].every((icon) => icon.complete && icon.naturalWidth > 0)), true, `${name} action icon failed to load`);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button")].every((button) => button.querySelector(".icon"))), true, `${name} action button icon missing`);
         if (name === "recovery") assert.equal(await page.evaluate(() => { const alert = document.querySelector(".auth-card .alert").getBoundingClientRect(); const firstWord = document.querySelector(".word").getBoundingClientRect(); return firstWord.top - alert.bottom >= 12; }), true, `recovery warning touches word grid at ${viewport.width}px`);
+        if (name === "results") assert.ok(await page.evaluate(() => {
+          const badge = document.querySelector(".status-closed");
+          if (!badge) return 0;
+          const luminance = (color) => color.match(/\d+/g).slice(0, 3).map(value => Number(value) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+          const colors = [getComputedStyle(badge).color, getComputedStyle(badge).backgroundColor].map(luminance).sort((a, b) => b - a);
+          return (colors[0] + .05) / (colors[1] + .05);
+        }) >= 4.5, `closed badge contrast below WCAG AA at ${viewport.width}px (${colorScheme})`);
         await page.screenshot({ path: join(artifactDir, `anonce-${name}-${viewport.width}-${colorScheme}.png`), fullPage: true });
       }
     }
@@ -92,21 +105,20 @@ try {
   assert.ok(await page.locator(".site-footer").count(), "reference-style footer missing");
   await captures("auth");
   await page.goto(`http://127.0.0.1:${port}/index.html#/register`);
-  await page.locator("#login").fill("demo");
+  await page.locator("#email").fill("demo@example.net");
   await page.locator("#password").fill("correct horse battery staple");
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("heading", { name: "Your recovery phrase" }).waitFor();
   await captures("recovery");
   assert.ok(await page.locator(".recovery-actions .icon").count() >= 2, "recovery action icons missing");
-
   const errorContext = await browser.newContext();
   const errorPage = await errorContext.newPage();
   await errorPage.goto(`http://127.0.0.1:${port}/index.html#/login`);
-  await errorPage.locator("#login").fill("demo");
+  await errorPage.locator("#email").fill("demo@example.net");
   await errorPage.locator("#password").fill("fail-password");
   await errorPage.getByRole("button", { name: "Sign in" }).click();
-  await errorPage.locator("#toast-region").getByText("Login or password is incorrect.").waitFor();
-  assert.equal(await errorPage.locator("#toast-region").getByText("Login or password is incorrect.").count(), 1, "form error duplicated toast");
+  await errorPage.locator("#toast-region").getByText("Email or password is incorrect.").waitFor();
+  assert.equal(await errorPage.locator("#toast-region").getByText("Email or password is incorrect.").count(), 1, "form error duplicated toast");
   assert.equal(await errorPage.locator("#auth .form-error").textContent(), "", "inline error duplicated toast");
 
   for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 375, height: 812 }, { width: 320, height: 720 }]) {
@@ -127,8 +139,37 @@ try {
   await verifyRecoveryTools(page, expectedPhrase);
   assert.ok(requestPayloads.every((payload) => !payload.includes("alpha bravo charlie")), "recovery phrase leaked into a network request");
 
+  await page.evaluate(() => { location.hash = "#/orgs"; });
+  await page.getByText("reviewer@example.net", { exact: true }).waitFor();
+  assert.equal(await page.locator(".workspace-label strong").textContent(), "Demo workspace");
+  assert.equal(await page.locator("#member-area [data-role]").count(), 3, "owners can edit roles only for approved non-owners");
+  assert.equal(await page.locator('#member-area [data-revoke="revoked"]').count(), 0, "revoked members have no revoke action");
+  await page.getByRole("button", { name: "Add by email" }).click();
+  assert.deepEqual(await page.locator("#member-role option").evaluateAll(options => options.map(option => option.value)), ["admin", "reviewer", "respondent"]);
+  await page.getByLabel("Member email").fill("new.member@example.net");
+  await page.getByLabel("Role").last().selectOption("admin");
+  await page.getByRole("button", { name: "Add member" }).click();
+  await page.locator("#toast-region").getByText("Member added.").waitFor();
+  assert.deepEqual(await page.evaluate(async () => (await import("/app.js")).addedMembers), [{ email: "new.member@example.net", role: "admin" }]);
+  await captures("members");
+
+  await page.evaluate(async () => { (await import("/app.js")).setMockRole("admin"); location.hash = "#/"; });
+  await page.getByRole("heading", { name: "Overview" }).waitFor();
+  await page.evaluate(() => { location.hash = "#/orgs"; });
+  await page.getByText("reviewer@example.net", { exact: true }).waitFor();
+  assert.equal(await page.locator("#member-area [data-role]").count(), 0, "admins cannot change member roles");
+  assert.equal(await page.locator('#member-area [data-revoke="reviewer"],#member-area [data-revoke="respondent"]').count(), 2, "admins can manage non-admin reviewer and respondent members");
+  assert.equal(await page.locator('#member-area [data-approve="owner"],#member-area [data-approve="admin"]').count(), 0, "admins cannot approve owner or admin targets");
+  assert.equal(await page.locator('#member-area [data-revoke="revoked"]').count(), 0, "admins cannot revoke an already revoked member");
+  await page.getByRole("button", { name: "Add by email" }).click();
+  assert.deepEqual(await page.locator("#member-role option").evaluateAll(options => options.map(option => option.value)), ["reviewer", "respondent"], "admins cannot add other admins");
+
   await page.evaluate(() => { location.hash = "#/review/review/results"; });
   await page.getByText("This response could not be decrypted or validated.").waitFor();
+  assert.equal(await page.locator(".status-badge").textContent(), "Closed", "review status badge renders as markup");
+  assert.equal(await page.locator(".workspace-label strong").textContent(), "Other workspace", "workspace label follows review organization");
+  assert.equal(await page.locator(".page-head .subtitle").evaluate(node => node.textContent.includes("<span")), false, "review status markup is not escaped as text");
+  assert.notEqual(await page.locator(".status-badge").evaluate(node => getComputedStyle(node).color), await page.locator(".status-badge").evaluate(node => getComputedStyle(node).backgroundColor), "closed badge text contrasts with fill");
   await page.getByRole("button", { name: "Share" }).click();
   await page.locator("#toast-region").getByText("Response link copied.").waitFor();
   assert.match(await page.evaluate(() => navigator.clipboard.readText()), /#\/respond\/review$/);
@@ -178,7 +219,7 @@ try {
 
   const recoveryPage = await context.newPage();
   await recoveryPage.goto(`http://127.0.0.1:${port}/index.html#/recover`);
-  await recoveryPage.locator("#login").fill("demo");
+  await recoveryPage.locator("#email").fill("demo@example.net");
   await recoveryPage.locator("#words").fill("old phrase from user");
   await recoveryPage.locator("#password").fill("another correct horse battery staple");
   await recoveryPage.getByRole("button", { name: "Recover account" }).click();

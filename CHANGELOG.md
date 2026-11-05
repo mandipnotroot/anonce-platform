@@ -9,6 +9,8 @@ No version has been released.
 ## Unreleased
 
 ### Added
+- Direct organization membership by registered email alongside invite links,
+  multiple organization admins, and owner-only admin appointment controls.
 - Browser-local recovery phrase copy and plain-text download controls.
 - Initial repository bootstrap: contributor rules, AGPL-3.0-only license,
   project status, contribution guidance, and private security reporting policy.
@@ -23,6 +25,11 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Replace usernames with unique normalized email addresses for registration,
+  sign-in, and recovery. Show member emails to organization owners and admins;
+  email addresses are not mailbox-verified.
+- Distinguish the current organization workspace and review/membership statuses,
+  with additional locally bundled Lucide icons and labeled icon actions.
 - Share spacing, typography, and corner-radius tokens across cards, forms, and
   responsive layouts; match browser theme colors to light and dark preferences.
 - Align the web interface with the reference design: centered header navigation,

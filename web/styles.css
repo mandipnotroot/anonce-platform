@@ -590,6 +590,29 @@ textarea {
 .main { min-height: 0; margin: 0; padding: 34px 0 56px }
 .content { max-width: 1000px }
 .route-context { margin-bottom: 28px; color: var(--muted); font-size: 13px }
+.workspace-label { display: flex; align-items: center; gap: 11px; width: fit-content; max-width: 100%; margin: 0 0 18px; padding: 9px 15px 9px 11px; border: 1px solid color-mix(in srgb,var(--blue) 45%,var(--line)); border-radius: 12px; background: color-mix(in srgb,var(--blue) 9%,var(--surface)); box-shadow: 0 5px 18px #075e6310 }
+.workspace-label .workspace-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; background: var(--blue); color: var(--button-ink) }
+.workspace-label .workspace-icon .icon { width: 17px; height: 17px; filter: var(--button-icon-filter) }
+.workspace-label small { display: block; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .12em; line-height: 1.2 }
+.workspace-label strong { display: block; max-width: min(60vw,460px); overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap }
+.status-badge { display: inline-flex; align-items: center; gap: 5px; width: fit-content; vertical-align: middle; padding: 3px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 670; line-height: 1.4; white-space: nowrap }
+.status-badge .icon { width: 13px; height: 13px; filter: var(--secondary-icon-filter) }
+.status-positive { color: #176644; background: #e7f5ed; border-color: #c0e5cf }
+.status-closed { color: #56327f; background: #f0e8fb; border-color: #d3bee9 }
+.status-warning { color: #80510d; background: #fff4d8; border-color: #f0d99a }
+.status-neutral,.status-muted { color: var(--muted); background: var(--soft); border-color: var(--line) }
+.status-danger { color: #912b2b; background: #fce9e7; border-color: #efc4bf }
+@media (prefers-color-scheme: dark) { .status-closed { color: #e8d7ff; background: #38294d; border-color: #69518b } }
+.member-help { margin: -8px 0 13px; color: var(--muted); font-size: 13px }
+.member-email { display: inline-flex; align-items: center; gap: 8px; overflow-wrap: anywhere }
+.member-email .icon { width: 15px; height: 15px; flex: none }
+.member-actions { white-space: nowrap }
+.member-actions .icon-btn { display: inline-grid; place-items: center; margin-right: 5px }
+.member-actions .icon-btn .icon { width: 16px; height: 16px; filter: var(--icon-filter) }
+.member-actions .danger-icon { color: var(--danger) }
+.member-actions .danger-icon .icon { filter: var(--secondary-icon-filter) }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%) }
+.table-wrap select { max-width: 100%; padding: 7px 28px 7px 9px }
 .site-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 0 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px }
 .site-footer p { max-width: 65ch; margin: 0 }
 .site-footer .source-link { color: var(--blue) }

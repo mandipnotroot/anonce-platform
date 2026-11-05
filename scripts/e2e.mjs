@@ -20,9 +20,9 @@ try {
   const page=await browser.newPage(contextOptions);
   observe(page);
   await page.goto(origin+'/#/register');
-  const login=`e2e-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const email=`e2e-${Date.now()}-${Math.random().toString(16).slice(2)}@example.net`;
   const password=crypto.randomUUID()+crypto.randomUUID();
-  await page.getByLabel('Login',{exact:true}).fill(login);
+  await page.getByLabel('Email address',{exact:true}).fill(email);
   await page.getByLabel('Password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Create account',exact:true}).click();
   await page.locator('#saved').waitFor();
@@ -35,15 +35,15 @@ try {
   assert.equal(await page.evaluate(async()=>Boolean(await (await import('/app.js')).getSession())),true,'device cache survives reload');
   await page.evaluate(async()=>{const app=await import('/app.js');const orgs=await app.listOrganizations();if(!orgs.items.length)throw Error('Organization missing');await app.logout();});
   await page.reload();
-  await page.evaluate(async({login,password})=>{const app=await import('/app.js');await app.login({login,password});await app.changePassword({currentPassword:password,newPassword:password+'-rotated'});await app.logout();},{login,password});
+  await page.evaluate(async({email,password})=>{const app=await import('/app.js');await app.login({email,password});await app.changePassword({currentPassword:password,newPassword:password+'-rotated'});await app.logout();},{email,password});
   const reviewer=page;
-  await reviewer.evaluate(async({login,password})=>{await (await import('/app.js')).login({login,password:password+'-rotated'});},{login,password});
+  await reviewer.evaluate(async({email,password})=>{await (await import('/app.js')).login({email,password:password+'-rotated'});},{email,password});
   const orgId=await reviewer.evaluate(async()=>{const a=await import('/app.js');return (await a.listOrganizations()).items[0].id;});
   const token=await reviewer.evaluate(async orgId=>(await (await import('/app.js')).createInvite({orgId,role:'respondent',expiresAt:String(Math.floor(Date.now()/1000)+3600)})).token,orgId);
   const respondentContext=await browser.newContext(contextOptions), respondent=await respondentContext.newPage();await respondent.goto(origin);
   observe(respondent);
-  const respondentLogin=login+'-respondent';
-  const words=await respondent.evaluate(async({login,password,token})=>{const a=await import('/app.js');const r=await a.register({login,password});await a.acceptInvite({token});return r.recoveryWords;},{login:respondentLogin,password,token});
+  const respondentEmail=email.replace('@','-respondent@');
+  const words=await respondent.evaluate(async({email,password,token})=>{const a=await import('/app.js');const r=await a.register({email,password});await a.acceptInvite({token});return r.recoveryWords;},{email:respondentEmail,password,token});
   await reviewer.evaluate(async orgId=>{const a=await import('/app.js');for(const m of (await a.listMembers({orgId})).items)if(m.status==='pending'||m.state==='pending')await a.approveMember({orgId,memberId:m.id});},orgId);
   const reviewId=await reviewer.evaluate(async orgId=>{
     const a=await import('/app.js');let r=await a.createReview({orgId,title:'E2E anonymous feedback',maxResponses:2});
@@ -73,8 +73,8 @@ try {
   await reviewer.evaluate(async reviewId=>{const a=await import('/app.js');const result=await a.listResponses({reviewId});if(result.items[0].answers[0].value!=='Private browser response')throw Error('Plaintext mismatch');const exported=await a.exportResponses({reviewId,format:'csv'});if(!(await exported.blob.text()).includes('Private browser response'))throw Error('Export mismatch');},reviewId);
   const recoveryContext=await browser.newContext(contextOptions),recoveryPage=await recoveryContext.newPage();await recoveryPage.goto(origin);
   observe(recoveryPage);
-  await recoveryPage.evaluate(async({login,words,newPassword})=>{const a=await import('/app.js');const r=await a.recover({login,words:words.join(' '),newPassword});if(r.recoveryWords.length!==12)throw Error('Fresh recovery phrase missing');},{login:respondentLogin,words,newPassword:password+'-recovered'});
+  await recoveryPage.evaluate(async({email,words,newPassword})=>{const a=await import('/app.js');const r=await a.recover({email,words:words.join(' '),newPassword});if(r.recoveryWords.length!==12)throw Error('Fresh recovery phrase missing');},{email:respondentEmail,words,newPassword:password+'-recovered'});
   // Reviewer recovery must also preserve decryption of the old recipient key.
-  await recoveryPage.evaluate(async({login,words,newPassword,reviewId})=>{const a=await import('/app.js');await a.logout();await a.recover({login,words:words.join(' '),newPassword});if(!(await a.listResponses({reviewId})).items.length)throw Error('Recovered reviewer cannot decrypt');},{login,words:originalReviewerWords,newPassword:password+'-recovered',reviewId});
+  await recoveryPage.evaluate(async({email,words,newPassword,reviewId})=>{const a=await import('/app.js');await a.logout();await a.recover({email,words:words.join(' '),newPassword});if(!(await a.listResponses({reviewId})).items.length)throw Error('Recovered reviewer cannot decrypt');},{email,words:originalReviewerWords,newPassword:password+'-recovered',reviewId});
   console.log('PASS: two-context membership, publish, UI response, lost-reply exact retry, receipt, plaintext/export, reload unlock and cross-device recovery');
 } finally {await browser.close();}

@@ -117,6 +117,9 @@ func fail(w http.ResponseWriter, e error) {
 		switch pg.Code {
 		case "23505":
 			status, code = 409, "conflict"
+			if pg.ConstraintName == "accounts_email_key" {
+				code = "email_exists"
+			}
 		case "P0002":
 			status, code = 404, "not_found"
 		case "55000":

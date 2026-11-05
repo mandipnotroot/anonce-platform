@@ -57,7 +57,7 @@ async function signed(path, action, payload, seeds, method='POST') {
   return request(path,{method,body:{payload:C.toBase64url(payloadBytes),proof}});
 }
 const mutation = (path,action,payload={},method) => signed('/api/member'+path,action,{request_id:id(),...payload},undefined,method);
-function sessionView(s) { return {...s,accountId:s.account_id,login:state?.login}; }
+function sessionView(s) { return {...s,accountId:s.account_id,email:state?.email}; }
 async function sessionStart(accountId,authSeed,method) {
   const result = await signed('/api/member/session',method,{request_id:id(),account_id:accountId,method},{[method==='login-password'?'password_sig':'recovery_sig']:authSeed});
   const session = result.session || result;
@@ -94,16 +94,16 @@ export async function getSession() {
   catch(e) { if(e.code==='unauthenticated'||e.code==='UNAUTHENTICATED') return null; throw e; }
   return null;
 }
-export async function login({login,password}) {
+export async function login({email,password}) {
   const expectedGeneration=generation;
   await initialize();
-  const params=await request('/api/member/auth/params',{method:'POST',body:{login}});
+  const params=await request('/api/member/auth/params',{method:'POST',body:{email}});
   const derived=await C.derivePassword({password,accountId:bytes(params.account_id),kdf:params.password_kdf});
   let session=await sessionStart(params.account_id,derived.authSeed,'login-password');
   session={...session,...await request('/api/member/me')};
   const unlocked=await vaultOpen(params.account_id,derived,'password');
   if(generation!==expectedGeneration)throw new APIError('SESSION_CHANGED','The session changed. Please sign in again.');
-  state={...unlocked,accountId:params.account_id,authSeed:derived.authSeed,login,session,params};
+  state={...unlocked,accountId:params.account_id,authSeed:derived.authSeed,email,session,params};
   await cacheState();
   return sessionView(session);
 }
@@ -117,18 +117,18 @@ async function credentials(accountId,password) {
 async function wrapper(accountId,kind,material,metadataHash,masterKey) {
   return C.wrapVaultMaster({accountId:bytes(accountId),kind,wrapperId:random(16),metadataHash,wrapKey:material.wrapKey,masterKey});
 }
-export async function register({login:loginName,password}) {
+export async function register({email,password}) {
   await initialize();
   const accountId=id(), masterKey=random(32), membership=await C.generateMembershipKey();
   const cr=await credentials(accountId,password);
   const object=await C.sealVaultObject({accountId:bytes(accountId),masterKey,objectId:random(16),revision:'1',plaintext:jsonBytes({kind:'membership',seed:C.toBase64url(membership.seed)})});
-  await signed('/api/member/register','register',{request_id:id(),account_id:accountId,login:loginName,password_kdf:cr.passwordKdf,
+  await signed('/api/member/register','register',{request_id:id(),account_id:accountId,email,password_kdf:cr.passwordKdf,
     password_auth_public_key:await C.authenticationPublicKey({authSeed:cr.p.authSeed}),recovery_salt:cr.recoverySalt,
     recovery_auth_public_key:await C.authenticationPublicKey({authSeed:cr.r.authSeed}),membership_public_key:membership.publicKey,
     password_wrap:await wrapper(accountId,'password',cr.p,await C.passwordMetadataHash(toWire(cr.passwordKdf)),masterKey),
     recovery_wrap:await wrapper(accountId,'recovery',cr.r,await C.recoveryMetadataHash(cr.recoverySalt),masterKey),vault_objects:[object]},
     {password_sig:cr.p.authSeed,recovery_sig:cr.r.authSeed,membership_sig:membership.seed});
-  const session=await login({login:loginName,password});
+  const session=await login({email,password});
   return {session,recoveryWords:cr.recovery.words.split(' ')};
 }
 export async function logout() {
@@ -142,6 +142,7 @@ const list = (r, fn=x=>x) => ({items:(r.items||[]).map(fn),next:r.next??null});
 export const listOrganizations = async()=>list(await request('/api/member/orgs'),o=>({...o,id:o.org_id||o.id,status:o.status||o.state}));
 export const createOrganization = ({name})=>mutation('/orgs','org-create',{name});
 export const listMembers = async({orgId})=>list(await request(`/api/member/orgs/${orgId}/members`));
+export const addMember = ({orgId,email,role})=>mutation(`/orgs/${orgId}/members`,'member-add',{email,role});
 export const createInvite = async({orgId,role,expiresAt})=>{
   const result=await mutation(`/orgs/${orgId}/invites`,'invite-create',{role,expires_at:time(expiresAt)});
   return {token:result.token||result.invite_token};
@@ -149,6 +150,7 @@ export const createInvite = async({orgId,role,expiresAt})=>{
 export const acceptInvite = ({token})=>mutation('/invites/accept','invite-accept',{invite_token:token});
 export const approveMember = ({orgId,memberId})=>mutation(`/orgs/${orgId}/members/${memberId}/approve`,'member-approve');
 export const revokeMember = ({orgId,memberId})=>mutation(`/orgs/${orgId}/members/${memberId}/revoke`,'member-revoke');
+export const changeMemberRole = ({orgId,memberId,role})=>mutation(`/orgs/${orgId}/members/${memberId}/role`,'member-role',{role});
 export const listReviews = async({orgId,after})=>list(await request(`/api/member/orgs/${orgId}/reviews${after?'?after='+encodeURIComponent(after):''}`),reviewView);
 export async function getReview({reviewId}) {
   await initialize();
@@ -189,18 +191,18 @@ async function credentialChange({currentPassword,newPassword,recoveryOnly=false}
   }
   await signed('/api/member/credentials/'+(recoveryOnly?'recovery':'password'),recoveryOnly?'recovery-rotate':'password-change',payload,proofs);
   state=undefined;
-  const session=await login({login:s.login,password:newPassword||currentPassword});
+  const session=await login({email:s.email,password:newPassword||currentPassword});
   return recoveryOnly?{session,recoveryWords:recovery.words.split(' ')}:session;
 }
 export const changePassword=options=>credentialChange(options);
 export const rotateRecovery=options=>credentialChange({...options,recoveryOnly:true});
-export async function recover({login:loginName,words,newPassword}) {
+export async function recover({email,words,newPassword}) {
   await initialize();
-  const params=await request('/api/member/auth/params',{method:'POST',body:{login:loginName}}), accountId=params.account_id;
+  const params=await request('/api/member/auth/params',{method:'POST',body:{email}}), accountId=params.account_id;
   const old=await C.deriveRecovery({words,accountId:bytes(accountId),recoverySalt:bytes(params.recovery_salt)});
   const session=await sessionStart(accountId,old.authSeed,'login-recovery');
   const unlocked=await vaultOpen(accountId,old,'recovery');
-  state={...unlocked,accountId,session,login:loginName,params,authSeed:old.authSeed};
+  state={...unlocked,accountId,session,email,params,authSeed:old.authSeed};
   const cr=await credentials(accountId,newPassword);
   await signed('/api/member/credentials/reset','credential-reset',{request_id:id(),expected_epoch:session.credential_epoch,
     password_kdf:cr.passwordKdf,password_auth_public_key:await C.authenticationPublicKey({authSeed:cr.p.authSeed}),
@@ -209,7 +211,7 @@ export async function recover({login:loginName,words,newPassword}) {
     recovery_wrap:await wrapper(accountId,'recovery',cr.r,await C.recoveryMetadataHash(cr.recoverySalt),unlocked.masterKey),vault_writes:[]},
     {recovery_sig:old.authSeed,new_password_sig:cr.p.authSeed,new_recovery_sig:cr.r.authSeed});
   state=undefined;
-  return {session:await login({login:loginName,password:newPassword}),recoveryWords:cr.recovery.words.split(' ')};
+  return {session:await login({email,password:newPassword}),recoveryWords:cr.recovery.words.split(' ')};
 }
 async function seal(objectId,value,revision='1') {
   const s=active();return saveSealed({accountId:bytes(s.accountId),masterKey:s.masterKey,objectId:bytes(objectId),revision,value,sealVaultObject:C.sealVaultObject});

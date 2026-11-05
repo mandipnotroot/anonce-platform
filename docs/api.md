@@ -14,9 +14,9 @@ Default mutation proof is membership signing key. Registration/login/credential 
 | Method/path | Payload or result; action/proof |
 |---|---|
 | GET `/public/config` | Deployment, configured origin, protocol/KDF settings and public trust/receipt keys; no secrets. |
-| POST `/member/auth/params` | Plain `{login}` → `{account_id,credential_epoch,password_kdf,recovery_salt}`. |
+| POST `/member/auth/params` | Plain `{email}` → `{account_id,credential_epoch,password_kdf,recovery_salt}`. |
 | POST `/member/challenges` | Plain `{account_id,action,payload_hash}` → `{challenge_id,account_id,action,payload_hash,nonce,credential_epoch,expires_at}`. |
-| POST `/member/register` | `{request_id,account_id,login,password_kdf,password_auth_public_key,recovery_salt,recovery_auth_public_key,password_wrap,recovery_wrap,membership_public_key,vault_objects}`; `register`, proposed password + recovery + membership proofs. |
+| POST `/member/register` | `{request_id,account_id,email,password_kdf,password_auth_public_key,recovery_salt,recovery_auth_public_key,password_wrap,recovery_wrap,membership_public_key,vault_objects}`; `register`, proposed password + recovery + membership proofs. |
 | POST `/member/session` | `{request_id,account_id,method}`; method/action `login-password` or `login-recovery`, corresponding password/recovery proof. Returns session and sets cookie. |
 | GET `/member/me` | Current session/account information. |
 | DELETE `/member/session` | CSRF-protected logout; revoke session and clear cookie; no challenge envelope required. |
@@ -30,17 +30,34 @@ Credential changes atomically CAS epoch, replace indicated credentials/wrappers 
 
 ## Organizations and certificates
 
+Accounts use unique email addresses rather than usernames. Email input is trimmed
+and lowercased, including the local part. Supported addresses are ASCII, at most
+254 bytes, with a dotted domain; display names and quoted local parts are rejected.
+Addresses are not mailbox-verified;
+an address on an organization's domain is not proof of employment or domain ownership.
+There is no SMTP delivery or automatic domain-based enrollment.
+
 | Method/path | Payload/action; authorization |
 |---|---|
 | GET `/member/orgs` | List own memberships. |
 | POST `/member/orgs` | `{request_id,name}`; `org-create`; authenticated member becomes owner. |
-| GET `/member/orgs/{org}/members` | Owner only. |
-| POST `/member/orgs/{org}/invites` | `{request_id,role,expires_at}`; `invite-create`; owner only; return invite token. |
+| GET `/member/orgs/{org}/members` | Owner/admin only; items include `id,account_id,email,role,state,status,certificate`. |
+| POST `/member/orgs/{org}/members` | `{request_id,email,role}`; `member-add`; owner/admin adds an existing registered account as an approved member. Only owners may assign `admin`. |
+| POST `/member/orgs/{org}/invites` | `{request_id,role,expires_at}`; `invite-create`; owner/admin; role `reviewer` or `respondent`; return bearer invite token. |
 | POST `/member/invites/accept` | `{request_id,invite_token}`; `invite-accept`; creates pending membership, not immediate authorization. |
-| POST `/member/orgs/{org}/members/{member}/approve` | `{request_id}`; `member-approve`; owner only. |
-| POST `/member/orgs/{org}/members/{member}/revoke` | `{request_id}`; `member-revoke`; owner only. |
+| POST `/member/orgs/{org}/members/{member}/approve` | `{request_id}`; `member-approve`; owner/admin; admins cannot target owners or admins. |
+| POST `/member/orgs/{org}/members/{member}/revoke` | `{request_id}`; `member-revoke`; owner/admin; admins cannot target owners or admins. |
+| POST `/member/orgs/{org}/members/{member}/role` | `{request_id,role}`; `member-role`; owner only; change an approved non-owner to `admin`, `reviewer`, or `respondent`. |
 | GET `/member/orgs/{org}/certificate` | Own approved membership certificate; response includes `membership_id`. |
 | POST `/member/orgs/{org}/certificate/renew` | `{request_id}`; `certificate-renew`; active approved membership, direct membership-key proof, no CSR; certificate response includes `membership_id`. |
+
+Multiple admins may manage non-admin members. Member emails are visible only to
+approved owners/admins, not through anonymous submission endpoints. Direct addition
+does not create accounts or send email. An unknown address returns
+`404 account_not_found`; use an invite link after the person registers instead.
+An existing active or pending membership returns `409 already_member`. Direct
+addition can reactivate a revoked non-owner membership with a fresh certificate;
+admins cannot reactivate an admin. Duplicate registration returns `409 email_exists`.
 
 ## Reviews, issuance and anonymous acceptance
 

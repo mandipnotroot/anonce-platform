@@ -52,8 +52,9 @@ export async function request(path, { method = 'GET', body, anonymous = false, s
     // Do not reflect arbitrary server text, request material, or crypto errors.
     const safeCode = typeof code === 'string' && /^[A-Z_a-z0-9-]{1,64}$/.test(code) ? code.toUpperCase() : 'REQUEST_FAILED';
     const messages = {
-      INVALID_CREDENTIALS: 'Login or password is incorrect.', INVALID_LOGIN: 'Enter a valid login.',
-      INVALID_REGISTRATION: 'Check your login and password, then try again.', INVALID_NAME: 'Enter a valid organization name.',
+      INVALID_CREDENTIALS: 'Email or password is incorrect.', INVALID_EMAIL: 'Enter a valid email address.',
+      INVALID_REGISTRATION: 'Check your email and password, then try again.', INVALID_NAME: 'Enter a valid organization name.',
+      EMAIL_EXISTS: 'An account already uses this email. Sign in or recover that account.', ACCOUNT_NOT_FOUND: 'No account exists for this email. Ask them to create an account or share an invite link.', ALREADY_MEMBER: 'This person is already a member of this organization.',
       INVALID_REVIEW: 'Check review title, limits, dates, and questions.', INVALID_NEW_PASSWORD: 'Choose a valid new password.',
       INVALID_NEW_RECOVERY: 'The new recovery phrase could not be saved. Try again.', EXPIRED_INVITE: 'This invitation has expired. Ask for a new invitation.',
       LAST_OWNER: 'Organization must keep at least one owner.', NOT_PENDING: 'This membership is no longer awaiting approval.',

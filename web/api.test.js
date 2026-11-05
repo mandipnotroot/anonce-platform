@@ -34,7 +34,11 @@ test('remote error envelopes give safe specific context and HTTP fallback',async
   globalThis.fetch=async()=>({status:429,ok:false,json:async()=>({error:{code:'RATE_LIMITED'}})});
   await assert.rejects(request('/api/member/me'),e=>e.message==='Too many attempts. Wait a moment, then try again.');
   globalThis.fetch=async()=>({status:401,ok:false,json:async()=>({error:{code:'invalid_credentials'}})});
-  await assert.rejects(request('/api/member/me'),e=>e.message==='Login or password is incorrect.');
+  await assert.rejects(request('/api/member/me'),e=>e.message==='Email or password is incorrect.');
+  for(const [code,message] of [['email_exists','An account already uses this email. Sign in or recover that account.'],['account_not_found','No account exists for this email. Ask them to create an account or share an invite link.'],['already_member','This person is already a member of this organization.']]) {
+    globalThis.fetch=async()=>({status:409,ok:false,json:async()=>({error:{code}})});
+    await assert.rejects(request('/api/member/me'),e=>e.message===message);
+  }
   for (const [status,message] of [[400,/Check the information/],[403,/do not have permission/],[409,/changed or conflicts/],[410,/expired or closed/],[429,/Too many attempts/],[503,/temporarily unavailable/]]) {
     globalThis.fetch=async()=>({status,ok:false,json:async()=>({error:{code:'unknown_code'}})});
     await assert.rejects(request('/api/member/me'),e=>message.test(e.message));

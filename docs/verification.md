@@ -9,7 +9,7 @@ focused source reviews constitute an audit or production-readiness approval.
 
 - Registration proposed-key proofs; password and recovery login; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, unknown/duplicate fields, body limits and CSRF.
 - Vault revision CAS, nonce/AAD tampering, recovery scope boundaries; credential epoch CAS races, session/challenge revocation, old/new proof requirements and unchanged vault after password rewrap.
-- Organization owner/member/pending/revoked role boundaries, cross-account/cross-org reads and mutations, certificate proof and renewal; certificate validity is not database authorization.
+- Unique normalized email registration and lookup; invalid addresses and case-variant duplicates. Organization owner/admin/member/pending/revoked boundaries, direct addition by email and retries, owner-only admin appointment, admin escalation denial, cross-account/cross-org reads and mutations, certificate proof and renewal; certificate validity is not database authorization.
 - Publish descriptor and vault write atomicity, draft revisions and immutable publication. Positive max_responses values greater than one, default one, per-member independence (not global capacity), distinct request IDs, exact retry/hash conflicts, concurrent slot allocation and unique constraints. Confirm issued_count differs from accepted_count.
 - Revocation blocks issuance but not outstanding tokens. Verify no identifying submission columns/logs/joins. Anonymous Cookie/Authorization rejection and proxy stripping; creator-only ciphertext export.
 - Concurrent identical/different spends, closure racing acceptance, response loss and retry after closure. Fault injection must show spend/ciphertext/receipt/counter all commit or all roll back. Lookup returns the exact original verifiable receipt.
@@ -38,6 +38,35 @@ Compose build/start/health with real PostgreSQL; least-privilege application/mig
 Independent **source-first** security review should focus on cryptographic transcripts/library use, replay/CAS/quota races, role boundaries, atomic acceptance, browser persistence and infrastructure metadata. Report findings and fixes; do not describe this plan or a focused review as a security audit. Explicitly retain limitations: timing/IP correlation, malicious served code, trusted operators, tiny anonymity sets, server issuer minting, CA substitution and recovery snapshot exposure.
 
 ## Executed evidence — 2026-11-05
+
+### Email accounts and organization admins
+
+Final reconciled checks used Go 1.27.3, Node.js 26.12.1, and a fresh disposable
+PostgreSQL 18.6 instance with separate member/anonymous fixture roles. The
+container was removed afterward; the existing deployment was not changed.
+Logs and individual exit statuses are retained at
+`/tmp/opencode/anonce-email-final/summary.log` and adjacent logs.
+
+All commands below exited 0:
+
+- `git diff --check`.
+- `go test -race ./... -count=1`: both tested packages passed with database
+  fixtures configured; 10 top-level tests, including normalized email uniqueness,
+  direct member addition/retry, admin restrictions, demotion, and concurrent adds.
+- `go vet ./...`.
+- With `PATH=/tmp/opencode/anonce-node26:$PATH`: `npm run build` and `npm test`;
+  42 frontend tests passed, zero failures or skips.
+- With the same PATH: `node scripts/ui-check.mjs` and
+  `node scripts/ui-responsive.mjs`; mocked-browser UI checks and 12 viewport/theme
+  cases passed at 320, 375, 390, 640, 768, and 1280 pixels in light/dark themes.
+  Focused assertions cover rendered review badges, matching workspace labels,
+  owner/admin controls, revoked-member actions, and closed-status text contrast.
+
+Real-backend browser E2E was not run for this change: no isolated temporary HTTPS
+service was configured. Mocked UI checks do not establish complete browser/backend
+integration. Email syntax and uniqueness checks do not verify mailbox ownership.
+
+### Earlier baseline checks
 
 Local evidence is retained outside the repository in
 `/tmp/opencode/anonce-final`; fixture credentials/data are disposable, not production.

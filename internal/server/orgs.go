@@ -48,6 +48,8 @@ func (s *Server) orgRoutes(m *http.ServeMux) {
 	})
 	m.HandleFunc("POST /api/member/orgs", s.createOrg)
 	m.HandleFunc("GET /api/member/orgs/{org}/members", s.listMembers)
+	m.HandleFunc("POST /api/member/orgs/{org}/members", s.addMember)
+	m.HandleFunc("POST /api/member/orgs/{org}/members/{member}/role", s.memberRole)
 	m.HandleFunc("POST /api/member/orgs/{org}/invites", s.invite)
 	m.HandleFunc("POST /api/member/invites/accept", s.acceptInvite)
 	m.HandleFunc("POST /api/member/orgs/{org}/members/{member}/approve", s.approve)
@@ -180,7 +182,7 @@ func (s *Server) membership(r *http.Request, a *session, org string, owner bool)
 	}
 	var id, role string
 	e := s.member.QueryRow(r.Context(), "SELECT id,role FROM member.memberships WHERE org_id=$1 AND account_id=$2 AND state='approved'", org, a.Account).Scan(&id, &role)
-	if e != nil || owner && role != "owner" {
+	if e != nil || owner && role != "owner" && role != "admin" {
 		return "", problem{403, "forbidden"}
 	}
 	return id, nil
@@ -195,7 +197,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	rows, e := s.member.Query(r.Context(), "SELECT id,account_id,role,state,COALESCE(certificate,'') FROM member.memberships WHERE org_id=$1 ORDER BY id LIMIT 100", r.PathValue("org"))
+	rows, e := s.member.Query(r.Context(), "SELECT m.id,m.account_id,a.email,m.role,m.state,COALESCE(m.certificate,'') FROM member.memberships m JOIN member.accounts a ON a.id=m.account_id WHERE m.org_id=$1 ORDER BY m.id LIMIT 100", r.PathValue("org"))
 	if e != nil {
 		fail(w, e)
 		return
@@ -203,12 +205,12 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]string{}
 	for rows.Next() {
-		var id, account, role, state, cert string
-		if e = rows.Scan(&id, &account, &role, &state, &cert); e != nil {
+		var id, account, email, role, state, cert string
+		if e = rows.Scan(&id, &account, &email, &role, &state, &cert); e != nil {
 			fail(w, e)
 			return
 		}
-		items = append(items, map[string]string{"id": id, "account_id": account, "role": role, "status": state, "state": state, "certificate": cert})
+		items = append(items, map[string]string{"id": id, "account_id": account, "email": email, "role": role, "status": state, "state": state, "certificate": cert})
 	}
 	write(w, 200, map[string]any{"items": items, "next": nil})
 }
@@ -348,11 +350,15 @@ func (s *Server) changeMember(w http.ResponseWriter, r *http.Request, revoke boo
 		write(w, 200, old)
 		return
 	}
-	var role, state string
+	var role, state, account, email string
 	var pub []byte
-	e = tx.QueryRow(r.Context(), "SELECT m.role,m.state,a.membership_public FROM member.memberships m JOIN member.accounts a ON a.id=m.account_id WHERE m.id=$1 AND m.org_id=$2 FOR UPDATE OF m", r.PathValue("member"), org).Scan(&role, &state, &pub)
+	e = tx.QueryRow(r.Context(), "SELECT m.role,m.state,a.membership_public,a.id,a.email FROM member.memberships m JOIN member.accounts a ON a.id=m.account_id WHERE m.id=$1 AND m.org_id=$2 FOR UPDATE OF m", r.PathValue("member"), org).Scan(&role, &state, &pub, &account, &email)
 	if e != nil {
 		fail(w, problem{404, "not_found"})
+		return
+	}
+	if e = authorizeTarget(r, tx, x, role, false); e != nil {
+		fail(w, e)
 		return
 	}
 	target := "approved"
@@ -380,7 +386,7 @@ func (s *Server) changeMember(w http.ResponseWriter, r *http.Request, revoke boo
 	if e == nil {
 		_, e = tx.Exec(r.Context(), "UPDATE member.memberships SET state=$1,certificate=$2 WHERE id=$3", target, cert, r.PathValue("member"))
 	}
-	result := map[string]string{"id": r.PathValue("member"), "status": target, "certificate": cert}
+	result := map[string]string{"id": r.PathValue("member"), "account_id": account, "email": email, "role": role, "state": target, "status": target, "certificate": cert}
 	if e == nil {
 		e = cache(r, tx, x, p.Request, result)
 	}
@@ -498,8 +504,8 @@ func transactionAuthorization(r *http.Request, tx pgx.Tx, x *verified) error {
 	if e := tx.QueryRow(r.Context(), "SELECT role,state FROM member.memberships WHERE account_id=$1 AND org_id=$2 FOR SHARE", x.Session.Account, org).Scan(&role, &state); e != nil {
 		return problem{403, "forbidden"}
 	}
-	owner := strings.Contains(r.URL.Path, "/invites") || strings.Contains(r.URL.Path, "/members/")
-	if state != "approved" || (owner && role != "owner") {
+	manage := strings.Contains(r.URL.Path, "/invites") || strings.Contains(r.URL.Path, "/members")
+	if state != "approved" || (manage && role != "owner" && role != "admin") || (strings.HasSuffix(r.URL.Path, "/role") && role != "owner") {
 		return problem{403, "forbidden"}
 	}
 	return nil

@@ -3,7 +3,7 @@ CREATE SCHEMA IF NOT EXISTS member;
 CREATE SCHEMA IF NOT EXISTS anon;
 CREATE TABLE member.settings (name text PRIMARY KEY, value bytea NOT NULL);
 CREATE TABLE member.accounts (
- id text PRIMARY KEY, login text UNIQUE NOT NULL, password_public bytea NOT NULL, recovery_public bytea NOT NULL,
+ id text PRIMARY KEY, email text UNIQUE NOT NULL CHECK(octet_length(email)<=254 AND email=lower(btrim(email))), password_public bytea NOT NULL, recovery_public bytea NOT NULL,
  membership_public bytea NOT NULL, password_kdf jsonb NOT NULL, recovery_salt text NOT NULL,
  vault jsonb NOT NULL, epoch bigint NOT NULL DEFAULT 1 CHECK(epoch>0)
 );
@@ -11,7 +11,7 @@ CREATE TABLE member.sessions (id_hash bytea PRIMARY KEY, account_id text NOT NUL
 CREATE TABLE member.challenges (id text PRIMARY KEY, account_id text NOT NULL, action text NOT NULL, epoch bigint NOT NULL, payload_hash bytea NOT NULL, nonce bytea NOT NULL, expires bigint NOT NULL, session_hash bytea);
 CREATE TABLE member.vault_objects (account_id text REFERENCES member.accounts(id), id text NOT NULL, revision bigint NOT NULL, object jsonb NOT NULL, PRIMARY KEY(account_id,id));
 CREATE TABLE member.orgs (id text PRIMARY KEY, name text NOT NULL);
-CREATE TABLE member.memberships (id text PRIMARY KEY, org_id text REFERENCES member.orgs(id), account_id text REFERENCES member.accounts(id), role text NOT NULL CHECK(role IN ('owner','member')), state text NOT NULL CHECK(state IN ('pending','approved','revoked')), certificate text, UNIQUE(org_id,account_id));
+CREATE TABLE member.memberships (id text PRIMARY KEY, org_id text REFERENCES member.orgs(id), account_id text REFERENCES member.accounts(id), role text NOT NULL CHECK(role IN ('owner','admin','reviewer','respondent')), state text NOT NULL CHECK(state IN ('pending','approved','revoked')), certificate text, UNIQUE(org_id,account_id));
 CREATE TABLE member.invites (id_hash bytea PRIMARY KEY, org_id text REFERENCES member.orgs(id), expires_at timestamptz NOT NULL);
 CREATE TABLE member.reviews (id text PRIMARY KEY, org_id text REFERENCES member.orgs(id), account_id text REFERENCES member.accounts(id), membership_id text REFERENCES member.memberships(id), draft jsonb NOT NULL, issuer_private bytea NOT NULL, issuer_public bytea NOT NULL, issuer_key_id text NOT NULL, state text NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','published','closed')), revision bigint NOT NULL DEFAULT 1, max_responses integer NOT NULL CHECK(max_responses BETWEEN 1 AND 100), opens_at bigint, closes_at bigint, descriptor bytea, descriptor_signature bytea, recipient_key jsonb, issued_count bigint NOT NULL DEFAULT 0);
 CREATE TABLE member.operations(account_id text NOT NULL REFERENCES member.accounts(id), request_id text NOT NULL, payload_hash bytea NOT NULL, result jsonb NOT NULL, PRIMARY KEY(account_id,request_id));

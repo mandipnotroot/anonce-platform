@@ -76,7 +76,7 @@ func newUser(t *testing.T, s *Server, h http.Handler) *testUser {
 	_, re, _ := ed25519.GenerateKey(rand.Reader)
 	_, mp, _ := ed25519.GenerateKey(rand.Reader)
 	u := &testUser{id: protocol.ID(), pw: pw, re: re, member: mp}
-	p := registration{Request: protocol.ID(), Account: u.id, Login: "user-" + u.id, KDF: kdf{19, protocol.B64(protocol.Random(16)), 65536, 3, 1, 32}, Password: protocol.B64(pw.Public().(ed25519.PublicKey)), RecoverySalt: protocol.B64(protocol.Random(32)), Recovery: protocol.B64(re.Public().(ed25519.PublicKey)), PasswordWrap: fakeWrapper(), RecoveryWrap: fakeWrapper(), Membership: protocol.B64(mp.Public().(ed25519.PublicKey)), Objects: []object{fakeObject()}}
+	p := registration{Request: protocol.ID(), Account: u.id, Email: "user-" + u.id + "@example.test", KDF: kdf{19, protocol.B64(protocol.Random(16)), 65536, 3, 1, 32}, Password: protocol.B64(pw.Public().(ed25519.PublicKey)), RecoverySalt: protocol.B64(protocol.Random(32)), Recovery: protocol.B64(re.Public().(ed25519.PublicKey)), PasswordWrap: fakeWrapper(), RecoveryWrap: fakeWrapper(), Membership: protocol.B64(mp.Public().(ed25519.PublicKey)), Objects: []object{fakeObject()}}
 	env := signed(t, s, h, u, "register", p, true)
 	result(t, request(h, "POST", "/api/member/register", env, nil), 201)
 	loginUser(t, s, h, u, "login-password")

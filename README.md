@@ -14,11 +14,17 @@ source; no version has been released.
 
 ## Browser workflows
 
-Register and unlock an encrypted vault; save a 12-word recovery phrase; create
-or join organizations and approve members; draft and publish signed reviews;
+Register with an email address and unlock an encrypted vault; save a 12-word
+recovery phrase; create or join organizations and approve members; draft and publish signed reviews;
 obtain blind response authorizations; submit encrypted answers anonymously;
 verify receipts; decrypt/export received responses; change passwords or recover
 on another device. These are web flows, not user-facing CLI commands.
+
+Owners can appoint multiple organization admins. Owners and admins can add
+registered accounts by email or share invite links; admins manage non-admin
+members only. Member lists show emails to owners and admins. Email addresses are
+not mailbox-verified, and matching an organization domain does not prove membership.
+The app does not send invitation email or enroll users automatically by domain.
 
 ## Security boundaries
 

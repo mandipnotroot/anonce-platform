@@ -92,7 +92,11 @@ function icon(name) {
 const buttonIcons = [[/copy/i, "copy"], [/download|export/i, "download"], [/create|new|add/i, "plus"], [/remove|revoke/i, "trash-2"], [/sign in|accept|continue|send|save|approve|update/i, "check"], [/manage|open|respond|status|retry|back/i, "arrow-right"], [/rotate/i, "rotate-cw"], [/share/i, "share-2"], [/publish/i, "check"], [/close/i, "x"]];
 function renderButtonIcons(scope = root) {
   scope.querySelectorAll(".button").forEach((control) => {
-    if (control.querySelector(".icon")) return;
+    const existing = control.querySelector(".icon");
+    if (existing) {
+      control.dataset.icon ||= existing.getAttribute("src")?.split("/").at(-1).replace(/\.svg$/, "");
+      return;
+    }
     const name = buttonIcons.find(([pattern]) => pattern.test(control.textContent))?.[1] || "arrow-right";
     control.dataset.icon = name;
     control.insertAdjacentHTML("afterbegin", icon(name));
@@ -108,7 +112,8 @@ function frame(body, title = "Workspace") {
   const sourceURL = esc(api.getSourceURL());
   const sourceLink = `<a class="source-link" href="${sourceURL}" target="_blank" rel="noopener noreferrer">${icon("arrow-up-right")} Source code</a>`;
   const active = path()[0];
-  root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span>Anonce</a><nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.login || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content"><div class="route-context">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div>${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}</footer></div>`;
+  const workspaceLabel = session && currentOrg ? `<div class="workspace-label"><span class="workspace-icon">${icon("building-2")}</span><span><small>WORKSPACE</small><strong>${esc(currentOrg.name || "Organization")}</strong></span></div>` : "";
+  root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span>Anonce</a><nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.email || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content">${workspaceLabel}<div class="route-context">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div>${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}</footer></div>`;
   renderButtonIcons();
   root.querySelector(".skip-link").addEventListener("click", (event) => {
     event.preventDefault();
@@ -129,6 +134,15 @@ function frame(body, title = "Workspace") {
 }
 function head(title, sub, action = "") {
   return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${esc(sub)}</p></div>${action}</div>`;
+}
+function headWithBadge(title, badge, detail, action = "") {
+  return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${badge} · ${esc(detail)}</p></div>${action}</div>`;
+}
+function statusBadge(value) {
+  const status = String(value || "active").toLowerCase();
+  const known = { published: ["Open", "positive"], open: ["Open", "positive"], closed: ["Closed", "closed"], draft: ["Draft", "muted"], pending: ["Pending", "warning"], approved: ["Approved", "positive"], active: ["Active", "positive"], revoked: ["Revoked", "danger"], valid: ["Valid", "positive"], invalid: ["Unreadable", "danger"] };
+  const [label, tone] = known[status] || [status.replace(/[-_]/g, " "), "muted"];
+  return `<span class="status-badge status-${tone}">${icon(tone === "positive" ? "check-circle-2" : tone === "warning" ? "clock-3" : tone === "danger" ? "ban" : "circle-dot")}<span>${esc(label)}</span></span>`;
 }
 function button(label, href, cls = "") {
   return `<a class="button ${cls}" href="#/${href}">${esc(label)}</a>`;
@@ -286,7 +300,7 @@ function renderHome() {
               const mine = isReviewOwner(r);
               const accepted = countText(r.accepted_count);
               const issued = countText(r.issued_count);
-              return `<article class="card review-row"><span class="review-dot"></span><div class="review-info"><strong>${esc(r.title || "Untitled review")}</strong><small>${esc(r.status || "Draft")} · <span aria-label="Accepted responses">${accepted} accepted</span> · <span aria-label="Issued authorizations">${issued} issued</span></small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
+             return `<article class="card review-row"><div class="review-info"><strong>${esc(r.title || "Untitled review")}</strong><small>${statusBadge(r.status)} · <span aria-label="Accepted responses">${accepted} accepted</span> · <span aria-label="Issued authorizations">${issued} issued</span></small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
             })
             .join(
               "",
@@ -403,8 +417,8 @@ function renderAuth(mode, intent = "") {
         : "Welcome back";
   let body =
     mode === "recover"
-      ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="login">Login</label><input id="login" name="login" required autocomplete="username"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">Use at least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
-      : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="login">Login</label><input id="login" name="login" required autocomplete="username"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}"></div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
+      ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">Use at least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
+      : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="you@organization.org"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}"></div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
   frame(
     `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down and keep them somewhere private. They will not be shown again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may be able to recover your account. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I have saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in first to continue to this anonymous response form." : intent === "invite" ? "Sign in to accept your organization invitation." : mode === "register" ? "Create a secure account to take part in trusted feedback spaces." : "Sign in to manage feedback and your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="#/login">Sign in</a>` : `New to Anonce? <a href="#/register">Create an account</a> · <a href="#/recover">Recover account</a>`}</p>`}</section></div>`,
     title,
@@ -425,7 +439,7 @@ function renderAuth(mode, intent = "") {
   bind("#auth", async (fd) => {
     if (mode === "register") {
       let result = await api.register({
-        login: fd.get("login"),
+        email: fd.get("email").trim(),
         password: fd.get("password"),
       });
       phrase = result.recoveryWords;
@@ -433,7 +447,7 @@ function renderAuth(mode, intent = "") {
       renderAuth("register");
     } else if (mode === "recover") {
       const result = await api.recover({
-        login: fd.get("login"),
+        email: fd.get("email").trim(),
         words: fd.get("words"),
         newPassword: fd.get("newPassword"),
       });
@@ -442,7 +456,7 @@ function renderAuth(mode, intent = "") {
       renderAuth("recover");
     } else {
       session = await api.login({
-        login: fd.get("login"),
+        email: fd.get("email").trim(),
         password: fd.get("password"),
       });
       const destination = returnRoute || "/";
@@ -452,8 +466,10 @@ function renderAuth(mode, intent = "") {
   });
 }
 function renderOrgs() {
+  const canManage = ["owner", "admin"].includes(currentOrg?.role);
+  const roleOptions = (includeAdmin) => `${includeAdmin ? '<option value="admin">Admin</option>' : ""}<option value="reviewer">Reviewer</option><option value="respondent">Respondent</option>`;
   frame(
-    `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">New organization</button>`)}<div class="card">${orgs.length ? orgs.map((o) => `<div class="review-row"><div class="avatar">${esc((o.name || "O")[0])}</div><div class="review-info"><strong>${esc(o.name)}</strong><small>${esc(o.role || "Member")} · ${o.status === "pending" ? "Approval pending" : "Organization"}</small></div><button class="button secondary small" data-org="${esc(o.id)}">Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg ? `<div class="section-row"><h2 class="section-title">${esc(currentOrg.name)} · members</h2><button class="button secondary small" id="invite-toggle">Invite a member</button></div><div id="member-area" class="card empty">Loading membership…</div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label>Role</label><select name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label>Invite expires</label><input name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">Create invite</button><div id="invite-result"></div></form></div>` : ""}`,
+    `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card">${orgs.length ? orgs.map((o) => `<div class="review-row"><div class="avatar">${icon("building-2")}</div><div class="review-info"><strong>${esc(o.name)}</strong><small>${esc(o.role || "Member")} · ${statusBadge(o.status || "active")}</small></div><button class="button secondary small" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg ? `<div class="section-row"><h2 class="section-title">${esc(currentOrg.name)} · members</h2>${canManage ? `<div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div>` : ""}</div>${canManage ? `<div class="member-help">Add existing accounts directly by email. For people without an account, create an invite link.</div><div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div>` : ""}<div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
     "Organizations",
   );
   document.querySelector("#new-org").onclick = () =>
@@ -472,8 +488,14 @@ function renderOrgs() {
       }),
   );
   if (currentOrg) {
-    document.querySelector("#invite-toggle").onclick = () =>
-      document.querySelector("#invite-area").classList.toggle("hidden");
+    document.querySelector("#add-toggle")?.addEventListener("click", () => document.querySelector("#add-area").classList.toggle("hidden"));
+    document.querySelector("#invite-toggle")?.addEventListener("click", () => document.querySelector("#invite-area").classList.toggle("hidden"));
+    bind("#add-member", async (fd) => {
+      await api.addMember({ orgId: currentOrg.id, email: fd.get("email").trim(), role: fd.get("role") });
+      toast("Member added.", "success");
+      document.querySelector("#add-member").reset();
+      loadMembers();
+    });
     bind("#invite", async (fd) => {
       const expiresAt = new Date(fd.get("expiresAt")).toISOString(),
         r = await api.createInvite({
@@ -498,13 +520,32 @@ async function loadMembers() {
   let box = document.querySelector("#member-area");
   try {
     const rows = (await api.listMembers({ orgId: currentOrg.id })).items;
+    const owner = currentOrg.role === "owner";
+    const admin = currentOrg.role === "admin";
     box.innerHTML = rows.length
-      ? `<div class="table-wrap"><table class="simple-table"><thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows.map((m) => `<tr><td>${esc(m.login || m.memberId || "Member")}</td><td>${esc(m.role || "Member")}</td><td>${esc(m.status || "Active")}</td><td>${m.status === "pending" ? `<button class="button small" data-approve="${esc(m.id || m.memberId)}">Approve</button>` : ""}<button class="button danger small" data-revoke="${esc(m.id || m.memberId)}">Revoke</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="simple-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th>${owner || admin ? "<th>Actions</th>" : ""}</tr></thead><tbody>${rows.map((m) => {
+          const memberId = m.id || m.memberId;
+          const memberRole = String(m.role || "member").toLowerCase();
+          const memberStatus = String(m.status || m.state || "active").toLowerCase();
+          const manageable = owner ? memberRole !== "owner" : admin && !["owner", "admin"].includes(memberRole);
+          const editableRole = owner && memberRole !== "owner" && memberStatus === "approved";
+          const canRevoke = manageable && memberStatus !== "revoked";
+          return `<tr><td><span class="member-email">${icon("mail")}<span>${esc(m.email || "Email unavailable")}</span></span></td><td>${editableRole ? `<label class="sr-only" for="role-${esc(memberId)}">Role for ${esc(m.email || "member")}</label><select id="role-${esc(memberId)}" data-role="${esc(memberId)}" aria-label="Role for ${esc(m.email || "member")}">${owner ? `<option value="admin" ${memberRole === "admin" ? "selected" : ""}>Admin</option>` : ""}<option value="reviewer" ${memberRole === "reviewer" ? "selected" : ""}>Reviewer</option><option value="respondent" ${memberRole === "respondent" ? "selected" : ""}>Respondent</option></select>` : esc(m.role || "Member")}</td><td>${statusBadge(memberStatus)}</td>${owner || admin ? `<td class="member-actions">${manageable && memberStatus === "pending" ? `<button class="icon-btn" data-approve="${esc(memberId)}" aria-label="Approve ${esc(m.email || "member")}" title="Approve">${icon("check")}</button>` : ""}${canRevoke ? `<button class="icon-btn danger-icon" data-revoke="${esc(memberId)}" aria-label="Revoke ${esc(m.email || "member")}" title="Revoke">${icon("trash-2")}</button>` : ""}</td>` : ""}</tr>`;
+        }).join("")}</tbody></table></div>`
       : emptyCard(
           "No members yet",
           "Invites and membership approvals will appear here.",
         );
-    renderButtonIcons(box);
+    box.querySelectorAll("[data-role]").forEach((select) => select.addEventListener("change", async () => {
+      try {
+        await api.changeMemberRole({ orgId: currentOrg.id, memberId: select.dataset.role, role: select.value });
+        toast("Member role updated.", "success");
+        loadMembers();
+      } catch (e) {
+        toast(say(e));
+        loadMembers();
+      }
+    }));
     box.querySelectorAll("[data-approve]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -614,6 +655,8 @@ async function renderReview(id, tab) {
     toast(say(e));
     return;
   }
+  const reviewOrgId = review.org_id || review.orgId || review.descriptor?.org_id;
+  currentOrg = orgs.find((organization) => organization.id === reviewOrgId) || null;
   const canManage = isReviewOwner(review);
   const canReviewResponses = canManage || currentOrg?.role === "reviewer";
   if (!canManage && !canReviewResponses) {
@@ -639,7 +682,7 @@ async function renderReview(id, tab) {
     }
   }
   frame(
-    `${head(review.title || "Untitled review", `${status} · ${review.revision !== undefined ? "Revision " + review.revision : "Review workspace"}`, `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}${canManage ? '<button class="button secondary" id="share">Share</button>' : ""}</div>`)}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
+    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}${canManage ? '<button class="button secondary" id="share">Share</button>' : ""}</div>`)}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
     "Review",
   );
   if (responseError) toast(responseError);

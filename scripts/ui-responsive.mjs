@@ -21,8 +21,9 @@ try {
   const page = await browser.newPage({ colorScheme: "light" });
   const icon = (name) => `<img class="icon" src="data:image/svg+xml;base64,${icons.get(name)}" alt="" aria-hidden="true">`;
   const root = { innerHTML: "" };
-  const renderFrame = new Function("root", "active", "session", "sourceURL", "body", "title", "icon", "esc", "sourceLink", markupAssignment);
-  renderFrame(root, "", { login: "member" }, "#", "<div></div>", "Overview", icon, (value) => String(value), "<a></a>");
+  const renderFrame = new Function("root", "active", "session", "sourceURL", "body", "title", "icon", "esc", "sourceLink", "workspaceLabel", markupAssignment);
+  const workspaceLabel = `<div class="workspace-label"><span class="workspace-icon">${icon("building-2")}</span><span><small>WORKSPACE</small><strong>Design workspace</strong></span></div>`;
+  renderFrame(root, "", { email: "member@example.net" }, "#", "<div></div>", "Overview", icon, (value) => String(value), "<a></a>", workspaceLabel);
   await page.setContent(`<style>${css.replace("url('./assets/geist-variable.woff2')", `url('data:font/woff2;base64,${font.toString("base64")}')`)}</style>${root.innerHTML}`);
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -44,6 +45,7 @@ try {
           labelFits: links.every((link) => link.scrollWidth <= link.clientWidth + 1),
           activeCount: links.filter((link) => link.getAttribute("aria-current") === "page").length,
           accountLabel: links[2].getAttribute("aria-label"),
+          workspace: document.querySelector(".workspace-label strong")?.textContent,
           desktopSpacing: getComputedStyle(document.querySelector(".nav-label span + span"), "::before").content,
           geometry: links.map((link) => {
             const icon = link.querySelector(".icon").getBoundingClientRect();
@@ -57,6 +59,7 @@ try {
       assert.equal(result.labelFits, true, `navigation label overflow at ${width}px (${colorScheme})`);
       assert.equal(result.activeCount, 1);
       assert.equal(result.accountLabel, "Account and recovery");
+      assert.equal(result.workspace, "Design workspace");
       assert.equal(result.desktopSpacing, '" "');
       if (width <= 640) {
         assert.equal(new Set(result.linkHeights).size, 1, `uneven tile heights at ${width}px`);
