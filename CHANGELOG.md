@@ -37,6 +37,8 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Keep mobile navigation, recovery words, and share controls within narrow screens,
+  and use theme-aware text colors on primary and danger buttons.
 - Preserve issuance retry bytes when restoring encrypted pending state from PostgreSQL JSONB.
 - Extend response-count regression coverage for issuance, invalid submissions,
   rollback, concurrent duplicates and retries; counts reflect committed records only.

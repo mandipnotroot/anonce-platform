@@ -16,6 +16,7 @@
   --line: #d6dfe5;
   --blue: #174f7b;
   --blue-hover: #123d60;
+  --button-ink: #fff;
   --danger: #a13030;
   --soft: #f2f5f7;
   --shadow: 0 1px 2px #172a3a0a, 0 12px 32px #172a3a0d;
@@ -33,6 +34,7 @@
     --line: #3d4a54;
     --blue: #b5d8f5;
     --blue-hover: #d2e8f8;
+    --button-ink: #14212d;
     --danger: #ffb3ac;
     --soft: #252f37;
     --shadow: 0 1px 2px #0003, 0 12px 32px #0002;
@@ -46,7 +48,8 @@
 body {
   margin: 0;
   background: var(--paper);
-  color: var(--ink)
+  color: var(--ink);
+  min-width: 320px
 }
 button,input,textarea,select {
   font:inherit
@@ -188,7 +191,7 @@ a {
   border: 1px solid var(--blue);
   border-radius: 6px;
   background: var(--blue);
-  color: #fff;
+  color: var(--button-ink);
   font-weight: 620;
   text-decoration: none;
   cursor: pointer;
@@ -209,7 +212,7 @@ a {
 .button.danger {
   border-color:var(--danger);
   background: var(--danger);
-  color: #fff
+  color: var(--button-ink)
 }
 .button.small {
   min-height: 32px;
@@ -570,10 +573,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 }
 @media (max-width:640px) {
   .shell { padding: 0 18px }
-  .site-header { align-items: stretch; flex-direction: column; gap: 12px; padding: 16px 0 }
-  .header-account { position: absolute; top: 26px; right: 20px; min-width: 0 }
+  .site-header { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 16px 0 }
+  .header-account { position: static; min-width: 0; align-self: center }
   .nav { width: 100%; justify-content: stretch }
-  .nav a { flex: 1 1 0; justify-content: center; gap: 6px; padding-inline: 7px; font-size: 12px }
+  .site-header .nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch }
+  .nav a { flex: 1 1 0; justify-content: center; gap: 6px; padding-inline: 7px; font-size: 12px; min-width: 0 }
   .main { padding: 24px 0 38px }
   .route-context { margin-bottom: 22px }
   .site-footer { align-items: flex-start; flex-direction: column; padding-bottom: 26px }
@@ -627,6 +631,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
     width: 18px;
     height: 18px
   }
+  .card { padding: 18px }
+  .share-box { align-items: stretch }
+  .share-box .button { flex: none }
+  .toolbar > *, .recovery-actions > .button { max-width: 100% }
+}
+@media (max-width:390px) {
+  .shell { padding-inline: 12px }
+  .nav a { flex-direction: column; gap: 2px; padding: 6px 3px; font-size: 10px; line-height: 1.25 }
+  .nav .icon { width: 16px; height: 16px }
+  .header-account { font-size: 11px }
+  .form-card,.auth-card { padding: 16px }
+  .word-grid { grid-template-columns: 1fr }
+  .share-box { flex-direction: column }
+  .share-box .button { width: 100% }
 }
 @media (forced-colors: active) {
   .button,.nav a,.card,.form-card,.question,.review-row {

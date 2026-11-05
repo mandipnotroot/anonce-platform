@@ -68,7 +68,7 @@ try {
   const requestPayloads = [];
   page.on("request", (request) => requestPayloads.push(`${request.url()} ${request.postData() || ""}`));
   const captures = async (name) => {
-    for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+    for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 375, height: 812 }, { width: 320, height: 720 }]) {
       await page.setViewportSize(viewport);
       for (const colorScheme of ["light", "dark"]) {
         await page.emulateMedia({ colorScheme });
@@ -92,7 +92,7 @@ try {
   await page.getByRole("heading", { name: "Your recovery phrase" }).waitFor();
   await captures("recovery");
 
-  for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 375, height: 812 }, { width: 320, height: 720 }]) {
     await page.setViewportSize(viewport);
     const theme = await page.evaluate(() => ({
       scheme: getComputedStyle(document.documentElement).colorScheme,
