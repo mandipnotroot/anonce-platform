@@ -63,10 +63,10 @@
     --ink: #edf2f5;
     --muted: #bdc8d0;
     --line: #38353e;
-    --blue: #8be0d5;
-    --blue-hover: #a9eee4;
-    --button-ink: #102522;
-    --button-icon-filter: brightness(0) saturate(100%) invert(11%) sepia(14%) saturate(804%) hue-rotate(112deg) brightness(95%);
+    --blue: #c4a7ff;
+    --blue-hover: #d2bdff;
+    --button-ink: #211a2d;
+    --button-icon-filter: brightness(0) saturate(100%) invert(9%) sepia(18%) saturate(1174%) hue-rotate(225deg) brightness(95%);
     --secondary-icon-filter: brightness(0) saturate(100%) invert(87%) sepia(13%) saturate(184%) hue-rotate(153deg) brightness(98%);
     --button-secondary: #29262e;
     --danger: #ffb3ac;
@@ -86,7 +86,7 @@
     --status-closed-line: #9a7bbb;
     --status-neutral-line: #697780;
     --icon-filter: var(--accent-icon-filter);
-    --accent-icon-filter: brightness(0) saturate(100%) invert(83%) sepia(25%) saturate(580%) hue-rotate(117deg) brightness(96%)
+    --accent-icon-filter: brightness(0) saturate(100%) invert(77%) sepia(20%) saturate(1164%) hue-rotate(211deg) brightness(102%)
   }
 }
 /* Base elements and application shell */
@@ -501,6 +501,9 @@ textarea {
 .button.danger .icon { filter: var(--button-icon-filter) }
 .button:disabled .icon { filter: var(--secondary-icon-filter) }
 .button:focus-visible { outline-offset: 3px }
+@media (prefers-color-scheme: dark) {
+  ::selection { background: var(--blue); color: var(--button-ink) }
+}
 .toolbar { gap: var(--space-3) }
 .inline { gap: var(--space-4) }
 .recovery-actions [role=status] {
