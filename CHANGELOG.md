@@ -37,6 +37,8 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Separate adjacent cards, form controls, and recovery warnings; refresh button
+  colors and disabled states, and add local action icons that persist during updates.
 - Keep mobile navigation, recovery words, and share controls within narrow screens,
   and use theme-aware text colors on primary and danger buttons.
 - Preserve issuance retry bytes when restoring encrypted pending state from PostgreSQL JSONB.

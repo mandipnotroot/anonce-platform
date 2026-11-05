@@ -76,6 +76,10 @@ try {
         assert.equal(await page.evaluate(() => Math.abs(document.querySelector("main").getBoundingClientRect().left - document.querySelector(".brand").getBoundingClientRect().left) < 1), true, `${name} main offset suggests phantom sidebar at ${viewport.width}px`);
         assert.equal(await page.evaluate(() => { const nav = document.querySelector(".site-header nav").getBoundingClientRect(); const header = document.querySelector(".site-header").getBoundingClientRect(); return nav.left >= header.left && nav.right <= header.right; }), true, `${name} navigation exceeds header at ${viewport.width}px`);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${name} overflow at ${viewport.width}px`);
+        assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button")].every((button) => button.getAttribute("aria-label") || button.textContent.trim())), true, `${name} button accessible name missing`);
+        assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button .icon")].every((icon) => icon.complete && icon.naturalWidth > 0)), true, `${name} action icon failed to load`);
+        assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button")].every((button) => button.querySelector(".icon"))), true, `${name} action button icon missing`);
+        if (name === "recovery") assert.equal(await page.evaluate(() => { const alert = document.querySelector(".auth-card .alert").getBoundingClientRect(); const firstWord = document.querySelector(".word").getBoundingClientRect(); return firstWord.top - alert.bottom >= 12; }), true, `recovery warning touches word grid at ${viewport.width}px`);
         await page.screenshot({ path: join(artifactDir, `anonce-${name}-${viewport.width}-${colorScheme}.png`), fullPage: true });
       }
     }
@@ -91,6 +95,7 @@ try {
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("heading", { name: "Your recovery phrase" }).waitFor();
   await captures("recovery");
+  assert.ok(await page.locator(".recovery-actions .icon").count() >= 2, "recovery action icons missing");
 
   for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 375, height: 812 }, { width: 320, height: 720 }]) {
     await page.setViewportSize(viewport);
@@ -174,7 +179,12 @@ try {
   await recoveryPage.locator('input[name="currentPassword"]').last().fill("current password");
   await recoveryPage.getByRole("button", { name: "Rotate recovery phrase" }).click();
   await recoveryPage.getByRole("button", { name: "Copy phrase" }).waitFor();
+  assert.ok(await recoveryPage.locator("#new-phrase .recovery-actions .icon").count() >= 2, "rotated recovery action icons missing");
   await verifyRecoveryTools(recoveryPage, expectedPhrase);
+  const rotateButton = recoveryPage.getByRole("button", { name: "Rotate recovery phrase" });
+  await rotateButton.click();
+  await recoveryPage.locator("#new-phrase .word").first().waitFor();
+  assert.ok(await rotateButton.locator(".icon").count(), "icon disappeared after submit busy-state restore");
   console.log("UI check passed: light/dark themes, responsive overflow, Lucide assets, skip navigation, recovery flows, invalid response notice.");
 } finally {
   await browser?.close();

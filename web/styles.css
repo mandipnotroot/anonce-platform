@@ -14,9 +14,12 @@
   --ink: #1d2730;
   --muted: #52616d;
   --line: #d6dfe5;
-  --blue: #174f7b;
-  --blue-hover: #123d60;
+  --blue: #075e63;
+  --blue-hover: #064b50;
+  --button-secondary: #eaf4f2;
   --button-ink: #fff;
+  --button-icon-filter: brightness(0) invert(1);
+  --secondary-icon-filter: brightness(0) saturate(100%) invert(19%) sepia(10%) saturate(1120%) hue-rotate(160deg) brightness(94%);
   --danger: #a13030;
   --soft: #f2f5f7;
   --shadow: 0 1px 2px #172a3a0a, 0 12px 32px #172a3a0d;
@@ -32,9 +35,12 @@
     --ink: #edf2f5;
     --muted: #bdc8d0;
     --line: #3d4a54;
-    --blue: #b5d8f5;
-    --blue-hover: #d2e8f8;
-    --button-ink: #14212d;
+    --blue: #8be0d5;
+    --blue-hover: #a9eee4;
+    --button-ink: #102522;
+    --button-icon-filter: brightness(0) saturate(100%) invert(11%) sepia(14%) saturate(804%) hue-rotate(112deg) brightness(95%);
+    --secondary-icon-filter: brightness(0) saturate(100%) invert(87%) sepia(13%) saturate(184%) hue-rotate(153deg) brightness(98%);
+    --button-secondary: #263a38;
     --danger: #ffb3ac;
     --soft: #252f37;
     --shadow: 0 1px 2px #0003, 0 12px 32px #0002;
@@ -170,7 +176,8 @@ a {
   box-shadow: var(--shadow)
 }
 .card {
-  padding: 24px
+  padding: 24px;
+  margin-bottom: 16px
 }
 .form-card {
   padding: 30px
@@ -187,6 +194,7 @@ a {
   min-height: 39px;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 8px 15px;
   border: 1px solid var(--blue);
   border-radius: 6px;
@@ -202,8 +210,8 @@ a {
   border-color:var(--blue-hover)
 }
 .button.secondary,.button.ghost {
-  border-color:var(--line);
-  background: var(--surface);
+  border-color:var(--blue);
+  background: var(--button-secondary);
   color: var(--ink)
 }
 .button.secondary:hover,.button.ghost:hover {
@@ -220,7 +228,10 @@ a {
   font-size: 13px
 }
 .button:disabled {
-  opacity: .55;
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--muted);
+  opacity: 1;
   cursor: not-allowed
 }
 .stat-grid {
@@ -343,6 +354,7 @@ textarea {
   background: var(--soft);
   color: var(--ink)
 }
+.alert { margin-bottom: 14px }
 .notice {
   border-left-color:#337750
 }
@@ -391,15 +403,16 @@ textarea {
 .word-grid {
   display: grid;
   grid-template-columns: repeat(3,minmax(0,1fr));
-  gap: 8px
+  gap: 12px
 }
 .word {
   display: flex;
   gap: 10px;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: var(--soft)
+  background: var(--surface);
+  box-shadow: 0 2px 5px #172a3a0a
 }
 .word b {
   color: var(--muted);
@@ -409,9 +422,16 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin: 17px 0
 }
+.button .icon { width: 16px; height: 16px; filter: var(--button-icon-filter) }
+.button.secondary .icon,.button.ghost .icon { filter: var(--secondary-icon-filter) }
+.button.danger .icon { filter: var(--button-icon-filter) }
+.button:disabled .icon { filter: var(--secondary-icon-filter) }
+.button:focus-visible { outline-offset: 3px }
+.toolbar { gap: 12px }
+.inline { gap: 16px }
 .recovery-actions [role=status] {
   flex-basis: 100%;
   min-height: 1.5em;
@@ -595,7 +615,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   }
   .stat-grid {
     grid-template-columns: repeat(2,minmax(0,1fr));
-    gap: 9px
+    gap: 12px
   }
   .stat {
     padding: 13px
@@ -616,10 +636,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .inline {
     flex-direction: column;
     align-items: stretch;
-    gap: 0
+    gap: 12px
   }
   .word-grid {
-    grid-template-columns: repeat(2,minmax(0,1fr))
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 10px
   }
   .auth-wrap {
     min-height: calc(100vh - 145px)
@@ -642,7 +663,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .nav .icon { width: 16px; height: 16px }
   .header-account { font-size: 11px }
   .form-card,.auth-card { padding: 16px }
-  .word-grid { grid-template-columns: 1fr }
+  .word-grid { grid-template-columns: 1fr; gap: 8px }
   .share-box { flex-direction: column }
   .share-box .button { width: 100% }
 }

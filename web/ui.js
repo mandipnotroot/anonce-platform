@@ -30,12 +30,27 @@ const say = (e) => e?.message || "Something went wrong. Please try again.";
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
 }
+const buttonIcons = [[/copy/i, "copy"], [/download|export/i, "download"], [/create|new|add/i, "plus"], [/remove|revoke/i, "trash-2"], [/sign in|accept|continue|send|save|approve|update/i, "check"], [/manage|open|respond|status|retry|back/i, "arrow-right"], [/rotate/i, "rotate-cw"], [/share/i, "share-2"], [/publish/i, "check"], [/close/i, "x"]];
+function renderButtonIcons(scope = root) {
+  scope.querySelectorAll(".button").forEach((control) => {
+    if (control.querySelector(".icon")) return;
+    const name = buttonIcons.find(([pattern]) => pattern.test(control.textContent))?.[1] || "arrow-right";
+    control.dataset.icon = name;
+    control.insertAdjacentHTML("afterbegin", icon(name));
+  });
+}
+function setButtonText(control, text) {
+  const name = control.dataset.icon;
+  control.textContent = text;
+  if (name) control.insertAdjacentHTML("afterbegin", icon(name));
+}
 function frame(body, title = "Workspace") {
   root.setAttribute("aria-busy", "false");
   const sourceURL = esc(api.getSourceURL());
   const sourceLink = `<a class="source-link" href="${sourceURL}" target="_blank" rel="noopener noreferrer">${icon("arrow-up-right")} Source code</a>`;
   const active = path()[0];
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span>Anonce</a><nav class="nav" aria-label="Workspace"><a href="#/" class="${!active ? "active" : ""}">${icon("house")}<span>Overview</span></a><a href="#/orgs" class="${active === "orgs" ? "active" : ""}">${icon("building-2")}<span>Organizations</span></a><a href="#/account" class="${active === "account" ? "active" : ""}">${icon("user-round")}<span>Account &amp; recovery</span></a></nav><div class="header-account">${session ? esc(session.login || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content"><div class="route-context">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div>${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}</footer></div>`;
+  renderButtonIcons();
   root.querySelector(".skip-link").addEventListener("click", (event) => {
     event.preventDefault();
     const main = root.querySelector("#main-content");
@@ -106,7 +121,7 @@ function bind(form, fn) {
     if (b) {
       b.disabled = true;
       b.dataset.old = b.textContent;
-      b.textContent = "Please wait…";
+      setButtonText(b, "Please wait…");
     }
     try {
       await fn(new FormData(form), form);
@@ -118,7 +133,7 @@ function bind(form, fn) {
       busy = false;
       if (b) {
         b.disabled = false;
-        b.textContent = b.dataset.old;
+        setButtonText(b, b.dataset.old);
       }
     }
   });
@@ -246,7 +261,7 @@ function renderHome() {
 async function loadMoreReviews(event) {
   const button = event.currentTarget;
   button.disabled = true;
-  button.textContent = "Loading…";
+  setButtonText(button, "Loading…");
   try {
     const result = await api.listReviews({
       orgId: currentOrg.id,
@@ -302,7 +317,7 @@ function renderPendingResponses() {
 async function resumePending(pendingId, button) {
   const old = button.textContent;
   button.disabled = true;
-  button.textContent = "Checking…";
+  setButtonText(button, "Checking…");
   try {
     let result = await api.lookupReceipt({ pendingId });
     if (result.status !== "accepted")
@@ -313,18 +328,18 @@ async function resumePending(pendingId, button) {
       );
       renderHome();
     } else {
-      button.textContent = "Still processing";
+      setButtonText(button, "Still processing");
       setTimeout(() => {
         if (button.isConnected) {
           button.disabled = false;
-          button.textContent = old;
+          setButtonText(button, old);
         }
       }, 1800);
     }
   } catch (e) {
     const error = document.querySelector("#pending-error");
     if (error) error.textContent = say(e);
-    button.textContent = old;
+    setButtonText(button, old);
     button.disabled = false;
   }
 }
@@ -417,6 +432,7 @@ function renderOrgs() {
         });
       document.querySelector("#invite-result").innerHTML =
         `<div class="notice">Invite created. Share this link with the member:<div class="share-box"><input readonly value="${esc(location.origin + location.pathname + "#/invite/" + r.token)}" aria-label="Invitation link"><button class="button small" type="button" id="copy">Copy</button></div></div>`;
+      renderButtonIcons(document.querySelector("#invite-result"));
       document.querySelector("#copy").onclick = () =>
         navigator.clipboard?.writeText(
           location.origin + location.pathname + "#/invite/" + r.token,
@@ -435,6 +451,7 @@ async function loadMembers() {
           "No members yet",
           "Invites and membership approvals will appear here.",
         );
+    renderButtonIcons(box);
     box.querySelectorAll("[data-approve]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -489,6 +506,7 @@ async function renderAccount() {
     phrase = r.recoveryWords;
     document.querySelector("#new-phrase").innerHTML =
       `<div class="alert"><strong>Save your new phrase now.</strong> The old phrase is replaced. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(phrase, "rotated-recovery")}<label class="check"><input id="rotated-saved" type="checkbox"> I saved the new phrase</label>`;
+    renderButtonIcons(document.querySelector("#new-phrase"));
     bindRecoveryPhraseTools(phrase, "rotated-recovery");
     document.querySelector("#rotated-saved").onchange = (e) => {
         if (e.target.checked && e.target.isConnected && phrase) {
@@ -563,7 +581,7 @@ async function renderReview(id, tab) {
   const loadMoreResponses = async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
-    button.textContent = "Loading…";
+    setButtonText(button, "Loading…");
     try {
       const page = await api.listResponses({
         reviewId: id,
@@ -583,7 +601,7 @@ async function renderReview(id, tab) {
       const error = document.querySelector("#response-page-error");
       if (error) error.textContent = say(e);
       button.disabled = false;
-      button.textContent = "Load more responses";
+      setButtonText(button, "Load more responses");
     }
   };
   document
@@ -803,6 +821,7 @@ async function renderRespond(id) {
     if (result.status === "pending") {
       const pendingId = result.pendingId || p.pendingId;
       box.innerHTML = `<div class="alert">Your response is still processing. Keep this page open and use the button to check again.<p><button type="button" class="button secondary" id="retry">Check status</button> <span id="pending-state"></span></p></div>`;
+      renderButtonIcons(box);
       document.querySelector("#respond").classList.add("hidden");
       document.querySelector("#retry").onclick = async () => {
         const btn = document.querySelector("#retry"),
