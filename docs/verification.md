@@ -39,6 +39,19 @@ Independent **source-first** security review should focus on cryptographic trans
 
 ## Executed evidence — 2026-11-05
 
+### Workspace navigation
+
+With `PATH=/tmp/opencode/anonce-node26:$PATH` (Node.js v26.12.1),
+`npm run build`, `npm test` (44 passing tests), `node scripts/ui-check.mjs`,
+`node scripts/ui-responsive.mjs`, and `git diff --check` each exited 0.
+Logs are retained at `/tmp/opencode/anonce-nav-{build,tests,browser,responsive}.log`.
+Responsive checks cover both themes at 320, 375, 390, 640, 768, 1280, and
+1365 pixels, including actual scrolling, desktop sticky positioning, mobile
+bottom positioning, footer clearance, and long workspace names and email addresses.
+The refreshed mobile dark screenshot in `/tmp/anonce-ui` was inspected.
+These are mocked browser checks, not live-backend or physical-device evidence;
+virtual-keyboard and device-specific safe-area behavior remain unverified.
+
 ### Shared UI cleanup and near-black dark theme
 
 The subsequent palette refinement replaces the near-black background with

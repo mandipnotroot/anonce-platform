@@ -27,7 +27,10 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
-- Use soft charcoal dark-theme surfaces with matching lavender accents.
+- Move the current workspace name into the header without an uppercase label.
+  Keep desktop navigation at the top while scrolling and mobile navigation at
+  the bottom, with safe-area spacing and content clearance.
+- Use soft charcoal dark-theme surfaces with teal accents.
   Standardize shared section, list, toolbar, and mobile form spacing,
   and shorten dashboard, account, and review setup copy.
 - Refine shared spacing, form controls, cards, tables, and responsive layouts

@@ -90,7 +90,7 @@ try {
         await page.emulateMedia({ colorScheme });
         await page.evaluate(() => window.scrollTo(0, 0));
         assert.equal(await page.evaluate(() => Math.abs(document.querySelector("main").getBoundingClientRect().left - document.querySelector(".brand").getBoundingClientRect().left) < 1), true, `${name} main offset suggests phantom sidebar at ${viewport.width}px`);
-        assert.equal(await page.evaluate(() => { const nav = document.querySelector(".site-header nav").getBoundingClientRect(); const header = document.querySelector(".site-header").getBoundingClientRect(); return nav.left >= header.left && nav.right <= header.right; }), true, `${name} navigation exceeds header at ${viewport.width}px`);
+        assert.equal(await page.evaluate(() => { const nav = document.querySelector(".site-header nav").getBoundingClientRect(); const header = document.querySelector(".site-header").getBoundingClientRect(); return innerWidth <= 640 ? nav.left >= 0 && nav.right <= innerWidth : nav.left >= header.left && nav.right <= header.right; }), true, `${name} navigation exceeds its responsive viewport at ${viewport.width}px`);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${name} overflow at ${viewport.width}px`);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button")].every((button) => button.getAttribute("aria-label") || button.textContent.trim())), true, `${name} button accessible name missing`);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button .icon")].every((icon) => icon.complete && icon.naturalWidth > 0)), true, `${name} action icon failed to load`);

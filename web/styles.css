@@ -63,10 +63,10 @@
     --ink: #edf2f5;
     --muted: #bdc8d0;
     --line: #38353e;
-    --blue: #c4a7ff;
-    --blue-hover: #d2bdff;
-    --button-ink: #211a2d;
-    --button-icon-filter: brightness(0) saturate(100%) invert(9%) sepia(18%) saturate(1174%) hue-rotate(225deg) brightness(95%);
+    --blue: #2dd4bf;
+    --blue-hover: #5eead4;
+    --button-ink: #102321;
+    --button-icon-filter: brightness(0) saturate(100%) invert(10%) sepia(28%) saturate(855%) hue-rotate(128deg) brightness(95%);
     --secondary-icon-filter: brightness(0) saturate(100%) invert(87%) sepia(13%) saturate(184%) hue-rotate(153deg) brightness(98%);
     --button-secondary: #29262e;
     --danger: #ffb3ac;
@@ -86,7 +86,7 @@
     --status-closed-line: #9a7bbb;
     --status-neutral-line: #697780;
     --icon-filter: var(--accent-icon-filter);
-    --accent-icon-filter: brightness(0) saturate(100%) invert(77%) sepia(20%) saturate(1164%) hue-rotate(211deg) brightness(102%)
+    --accent-icon-filter: brightness(0) saturate(100%) invert(76%) sepia(72%) saturate(438%) hue-rotate(117deg) brightness(99%)
   }
 }
 /* Base elements and application shell */
@@ -661,23 +661,22 @@ textarea {
 }
 /* Keyboard access and responsive layouts */
 .shell { width: min(100%, 1248px); margin: 0 auto; padding: 0 40px }
-.site-header { min-height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line) }
+.site-header { position: sticky; top: 0; z-index: 30; min-height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); background: color-mix(in srgb,var(--paper) 92%,transparent); backdrop-filter: blur(16px) }
 .brand { display: inline-flex; align-items: center; gap: 10px; padding: 0; font-size: 20px }
 .nav { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
 .nav a { min-height: 42px; padding: 8px 12px; color: var(--ink); font-weight: 570 }
 .nav a.active,.nav a:hover { background: var(--soft); color: var(--blue) }
 .nav-label span + span::before { content: " " }
 .nav-item { display: flex; align-items: center; gap: 11px }
-.header-account { min-width: 110px; text-align: right; color: var(--muted); font-size: 13px }
+.header-account { min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--muted); font-size: 13px }
 .header-account a { color: var(--blue); text-decoration: none }
 .main { min-height: 0; margin: 0; padding: 34px 0 56px }
 .content { max-width: 1000px }
 .route-context { margin-bottom: 28px; color: var(--muted); font-size: 13px }
-.workspace-label { display: flex; align-items: center; gap: 11px; width: fit-content; max-width: 100%; margin: 0 0 18px; padding: 9px 15px 9px 11px; border: 1px solid color-mix(in srgb,var(--blue) 45%,var(--line)); border-radius: 12px; background: color-mix(in srgb,var(--blue) 9%,var(--surface)); box-shadow: 0 5px 18px #075e6310 }
+.workspace-label { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 240px; padding: 7px 11px; border: 1px solid color-mix(in srgb,var(--blue) 45%,var(--line)); border-radius: 999px; background: color-mix(in srgb,var(--blue) 9%,var(--surface)) }
 .workspace-label .workspace-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; background: var(--blue); color: var(--button-ink) }
 .workspace-label .workspace-icon .icon { width: 17px; height: 17px; filter: var(--button-icon-filter) }
-.workspace-label small { display: block; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .12em; line-height: 1.2 }
-.workspace-label strong { display: block; max-width: min(60vw,460px); overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap }
+.workspace-label strong { display: block; min-width: 0; overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap }
 .status-badge { display: inline-flex; align-items: center; gap: 6px; width: fit-content; vertical-align: middle; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 650; line-height: 1.35; white-space: nowrap }
 .status-badge .icon { width: 14px; height: 14px; filter: var(--secondary-icon-filter) }
 .status-positive { color: var(--status-positive-ink); background: var(--status-positive-bg); border-color: var(--status-positive-line) }
@@ -736,16 +735,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .content {
     max-width: 760px
   }
-  .site-header { display: grid; grid-template-columns: 1fr auto; gap: 12px 20px; padding: 14px 0 }
+  .site-header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; padding: 12px 0 }
   .site-header .nav { grid-column: 1 / -1; grid-row: 2; justify-self: center }
 }
 @media (max-width:640px) {
-  .shell { padding: 0 16px }
-  .site-header { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 16px 0 }
-  .header-account { position: static; min-width: 0; align-self: center }
+  .shell { padding: 0 16px; padding-bottom: calc(82px + env(safe-area-inset-bottom)) }
+  .site-header { position: static; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 12px; padding: 12px 0; border-bottom: 0; backdrop-filter: none }
+  .workspace-label { grid-column: 1 / -1; grid-row: 2; max-width: 100%; width: fit-content }
+  .header-account { position: static; min-width: 0; max-width: 45vw; align-self: center }
   .nav { width: 100%; justify-content: stretch }
-  .site-header .nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch }
-  .nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; padding: 4px }
+  .site-header .nav { position: fixed; inset: auto 0 0; z-index: 50; grid-column: 1 / -1; grid-row: auto; justify-self: stretch; width: 100%; padding: 7px 12px calc(7px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; background: color-mix(in srgb,var(--surface) 94%,transparent); box-shadow: 0 -8px 28px #0002; backdrop-filter: blur(18px) }
+  .nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px }
   .nav a { min-width: 0; min-height: 56px; justify-content: center; gap: 5px; padding: 7px 4px; font-size: 12px; white-space: nowrap }
   .nav-item { flex-direction: column; gap: 5px }
   .nav-detail { display: none }

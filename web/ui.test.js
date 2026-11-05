@@ -122,11 +122,16 @@ test("registration and account rotation share recovery controls", () => {
   assert.match(source, /This response could not be decrypted or validated\./);
 });
 
-test("workspace navigation keeps complete accessible names and compact mobile labels", () => {
+test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
   assert.match(source, /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/);
   assert.match(source, /aria-current="page"/);
   assert.match(styles, /@media \(max-width:640px\)[\s\S]*?grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(styles, /\.nav a\.active \{ box-shadow: inset 0 -2px 0 var\(--blue\) \}/);
+  assert.match(source, /aria-label="Current workspace:/);
+  assert.doesNotMatch(source, /<small>WORKSPACE<\/small>/);
+  assert.match(styles, /\.site-header \{ position: sticky; top: 0/);
+  assert.match(styles, /inset: auto 0 0/);
+  assert.match(styles, /env\(safe-area-inset-bottom\)/);
 });
 
 test("accepted signed receipts render complete escaped JSON for initial and retry acceptance", () => {
