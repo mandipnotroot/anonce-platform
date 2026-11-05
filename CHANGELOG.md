@@ -37,6 +37,9 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Balance mobile workspace navigation with equal-sized icon-and-label tabs,
+  a compact Account label, and accessible current-page indicators while retaining
+  the full desktop account and recovery label.
 - Match navigation and source-link icon colors to the current light/dark theme.
 - Separate adjacent cards, form controls, and recovery warnings; refresh button
   colors and disabled states, and add local action icons that persist during updates.

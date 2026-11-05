@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./ui.js", import.meta.url), "utf8");
+const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const helperSource = source.slice(source.indexOf("function recoveryPhrasePanel"), source.indexOf("async function load()"));
 
 function harness({ clipboard } = {}) {
@@ -87,4 +88,11 @@ test("registration and account rotation share recovery controls", () => {
   assert.match(source, /bindRecoveryPhraseTools\(phrase, "rotated-recovery"\)/);
   assert.match(source, /const result = await api\.recover\([\s\S]*?phrase = result\.recoveryWords;[\s\S]*?session = result\.session;[\s\S]*?renderAuth\("recover"\)/);
   assert.match(source, /This response could not be decrypted or validated\./);
+});
+
+test("workspace navigation keeps complete accessible names and compact mobile labels", () => {
+  assert.match(source, /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/);
+  assert.match(source, /aria-current="page"/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.nav a\.active \{ box-shadow: inset 0 -2px 0 var\(--blue\) \}/);
 });
