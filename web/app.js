@@ -223,7 +223,9 @@ async function local(objectId) {
   const p=JSON.parse(new TextDecoder().decode(await C.openVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,object})));
   if(p.authorization) {
     const descriptor=JSON.parse(new TextDecoder().decode(bytes(p.descriptor)));
-    p.issuancePayload={request_id:p.requestId,issuer_key_id:descriptor.issuer_key_id,blinded_message:p.authorization.blindedMessage,pending_state:{expected_revision:'0',object}};
+    // Restore sealVaultObject's property order after JSONB storage reorders keys.
+    const issuanceObject={v:object.v,id:object.id,revision:object.revision,nonce:object.nonce,ciphertext:object.ciphertext};
+    p.issuancePayload={request_id:p.requestId,issuer_key_id:descriptor.issuer_key_id,blinded_message:p.authorization.blindedMessage,pending_state:{expected_revision:'0',object:issuanceObject}};
   }
   await pendingSave(p);return p;
 }
@@ -259,6 +261,14 @@ export async function publishReview({reviewId,expectedRevision}) {
     descriptor_signature:await C.signDescriptor({descriptorBytes,membershipSeed:s.membershipSeed}),vault_write:{expected_revision:'0',object}});
 }
 async function pendingSave(p) {await seal(p.pendingId,p,String(p.revision||1));}
+// Only the authenticated issuance copy is padded; local pending objects stay unchanged.
+async function sealIssuancePending(p) {
+  const plaintext=jsonBytes(toWire(p)), size=524288;
+  if(plaintext.length>size)throw new APIError('INVALID_RESPONSE','The response could not be prepared.');
+  const padded=new Uint8Array(size).fill(0x20);padded.set(plaintext);
+  const s=active();
+  return C.sealVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,objectId:bytes(p.pendingId),revision:'1',plaintext:padded});
+}
 export async function prepareResponse({reviewId,answers}) {
   active();const p=await publicDescriptor(reviewId);
   const answerMap=Object.fromEntries(answers.filter(a=>a.value!==null&&a.value!==undefined).map(a=>{
@@ -279,7 +289,7 @@ async function finishPending(p) {
   if(!p.submission) {
     if(!p.issuancePayload) {
       await ensureCertificate(descriptor.org_id);
-      const object=await seal(p.pendingId,p);
+      const object=await sealIssuancePending(p);
       p.issuancePayload=toWire({request_id:p.requestId,issuer_key_id:descriptor.issuer_key_id,
         blinded_message:bytes(p.authorization.blindedMessage),pending_state:{expected_revision:'0',object}});
       p.revision++;await pendingSave(p);
@@ -317,12 +327,16 @@ export async function listResponses({reviewId,after}) {
   if(!privateKey)throw new APIError('KEY_UNAVAILABLE','The encrypted reviewer key is unavailable.');
   const result=await request(`/api/member/reviews/${reviewId}/submissions${after?'?after='+encodeURIComponent(after):''}`),items=[];
   for(const item of result.items) {
+    try {
     const decoded=await C.decryptResponse({...p,recipientPrivateKey:privateKey,enc:bytes(item.enc),ciphertext:bytes(item.ciphertext)});
     const answerMap=decoded.answers;
-    items.push({id:item.id,acceptedAt:item.accepted_at,answers:Object.entries(answerMap).map(([questionId,value])=>{
+    items.push({id:item.id,acceptedAt:item.accepted_at,status:'valid',answers:Object.entries(answerMap).map(([questionId,value])=>{
       const q=p.descriptor.questions.find(q=>q.id===questionId), label=v=>q?.choices.find(c=>c.id===v)?.label||v;
       return {questionId,value:Array.isArray(value)?value.map(label):label(value)};
     })});
+    } catch {
+      items.push({id:item.id,acceptedAt:item.accepted_at,status:'invalid',error:'RESPONSE_UNREADABLE',answers:[]});
+    }
   }
   return {items,next:result.next??null};
 }
@@ -335,7 +349,7 @@ export async function exportResponses({reviewId,format}) {
     if(after)seen.add(after);
   } while(after);
   const csvCell=x=>'"'+String(x??'').replace(/^[=+@\-\t\r]/,"'$&").replaceAll('"','""')+'"';
-  const content=format==='json'?JSON.stringify(result.items,null,2):['response_id,accepted_at,question_id,value',...result.items.flatMap(r=>r.answers.map(a=>[r.id,r.acceptedAt,a.questionId,Array.isArray(a.value)?a.value.join('; '):a.value].map(csvCell).join(',')))].join('\r\n');
+  const content=format==='json'?JSON.stringify(result.items,null,2):['response_id,accepted_at,status,error,question_id,value',...result.items.flatMap(r=>(r.answers.length?r.answers:[{}]).map(a=>[r.id,r.acceptedAt,r.status,r.error,a.questionId,Array.isArray(a.value)?a.value.join('; '):a.value].map(csvCell).join(',')))].join('\r\n');
   const mimeType=format==='json'?'application/json':'text/csv;charset=utf-8';
   return {filename:`review-${reviewId}.${format}`,mimeType,blob:new Blob([content],{type:mimeType})};
 }

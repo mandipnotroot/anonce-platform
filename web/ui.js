@@ -30,8 +30,8 @@ const say = (e) => e?.message || "Something went wrong. Please try again.";
 function frame(body, title = "Workspace") {
   root.setAttribute("aria-busy", "false");
   const sourceURL = esc(api.getSourceURL());
-  const sourceLink = `<a class="source-link" href="${sourceURL}" target="_blank" rel="noopener noreferrer"><img class="nav-icon" src="./assets/icons/external-link.svg" alt=""> Source code</a>`;
-  root.innerHTML = `<div class="shell"><aside class="side"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span> Anonce</a><div class="nav-label">Workspace</div><nav class="nav"><a href="#/" class="${path().length === 0 ? "active" : ""}"><img class="nav-icon" src="./assets/icons/layout-dashboard.svg" alt="">Overview</a><a href="#/orgs" class="${path()[0] === "orgs" ? "active" : ""}"><img class="nav-icon" src="./assets/icons/building-2.svg" alt="">Organizations</a><a href="#/account" class="${path()[0] === "account" ? "active" : ""}"><img class="nav-icon" src="./assets/icons/user-round.svg" alt="">Account & recovery</a></nav><div class="side-bottom"><p class="privacy-note">Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}<div class="user-chip"><div class="avatar">${session ? esc((session.login || "A").slice(0, 1).toUpperCase()) : "A"}</div><div><div class="user-name">${session ? esc(session.login || "Member") : "Your workspace"}</div><div class="user-state">${session ? "Signed in" : "Private feedback"}</div></div></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div><div class="top-actions">${session ? '<a href="#/account" class="top-link">Account</a>' : '<a href="#/login" class="top-link">Sign in</a>'}</div></header><div class="content">${body}</div></main><nav class="mobile-head" aria-label="Main navigation"><a href="#/"><img src="./assets/icons/layout-dashboard.svg" alt="">Home</a><a href="#/orgs"><img src="./assets/icons/building-2.svg" alt="">Teams</a><a href="#/account"><img src="./assets/icons/user-round.svg" alt="">Account</a>${sourceLink}</nav></div>`;
+  const sourceLink = `<a class="source-link" href="${sourceURL}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">↗</span> Source code</a>`;
+  root.innerHTML = `<div class="shell"><aside class="side"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span> Anonce</a><div class="nav-label">Workspace</div><nav class="nav"><a href="#/" class="${path().length === 0 ? "active" : ""}"><span class="nav-icon" aria-hidden="true">⌂</span>Overview</a><a href="#/orgs" class="${path()[0] === "orgs" ? "active" : ""}"><span class="nav-icon" aria-hidden="true">▦</span>Organizations</a><a href="#/account" class="${path()[0] === "account" ? "active" : ""}"><span class="nav-icon" aria-hidden="true">◉</span>Account & recovery</a></nav><div class="side-bottom"><p class="privacy-note">Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}<div class="user-chip"><div class="avatar">${session ? esc((session.login || "A").slice(0, 1).toUpperCase()) : "A"}</div><div><div class="user-name">${session ? esc(session.login || "Member") : "Your workspace"}</div><div class="user-state">${session ? "Signed in" : "Private feedback"}</div></div></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div><div class="top-actions">${session ? '<a href="#/account" class="top-link">Account</a>' : '<a href="#/login" class="top-link">Sign in</a>'}</div></header><div class="content">${body}</div></main><nav class="mobile-head" aria-label="Main navigation"><a href="#/"><span aria-hidden="true">⌂</span>Home</a><a href="#/orgs"><span aria-hidden="true">▦</span>Teams</a><a href="#/account"><span aria-hidden="true">◉</span>Account</a>${sourceLink}</nav></div>`;
   root.querySelectorAll("label:not([for])").forEach((label) => {
     if (label.querySelector("input,select,textarea")) return;
     const control = label.nextElementSibling?.matches("input,select,textarea")
@@ -51,6 +51,40 @@ function button(label, href, cls = "") {
 }
 function errorBox(message) {
   return `<p class="form-error" role="alert">${esc(message)}</p>`;
+}
+function recoveryPhrasePanel(words, prefix = "recovery") {
+  return `<div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><div class="recovery-actions"><button id="${prefix}-copy" class="button secondary" type="button">Copy phrase</button><button id="${prefix}-download" class="button secondary" type="button">Download .txt</button><span id="${prefix}-feedback" role="status" aria-live="polite"></span></div>`;
+}
+function bindRecoveryPhraseTools(words, prefix = "recovery") {
+  const phraseText = words.join(" ");
+  const copyButton = document.querySelector(`#${prefix}-copy`);
+  const downloadButton = document.querySelector(`#${prefix}-download`);
+  const feedback = document.querySelector(`#${prefix}-feedback`);
+  copyButton.onclick = async () => {
+    if (!copyButton.isConnected || phrase !== words) return;
+    try {
+      await navigator.clipboard.writeText(phraseText);
+      if (copyButton.isConnected && phrase === words) feedback.textContent = "Phrase copied.";
+    } catch {
+      if (copyButton.isConnected && phrase === words) feedback.textContent = "Copy failed. Select and copy the words above.";
+    }
+  };
+  downloadButton.onclick = () => {
+    if (!downloadButton.isConnected || phrase !== words) return;
+    const blob = new Blob([`${phraseText}\n`], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "anonce-recovery-phrase.txt";
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+    feedback.textContent = "Text file downloaded.";
+  };
 }
 function bind(form, fn) {
   document.querySelector(form)?.addEventListener("submit", async (e) => {
@@ -297,10 +331,11 @@ function renderAuth(mode, intent = "") {
       ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="login">Login</label><input id="login" name="login" required autocomplete="username"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">Use at least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
       : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="login">Login</label><input id="login" name="login" required autocomplete="username"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}"></div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
   frame(
-    `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down and keep them somewhere private. They will not be shown again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may be able to recover your account.</div><div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><label class="check"><input id="saved" type="checkbox"> I have saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in first to continue to this anonymous response form." : intent === "invite" ? "Sign in to accept your organization invitation." : mode === "register" ? "Create a secure account to take part in trusted feedback spaces." : "Sign in to manage feedback and your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="#/login">Sign in</a>` : `New to Anonce? <a href="#/register">Create an account</a> · <a href="#/recover">Recover account</a>`}</p>`}</section></div>`,
+    `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down and keep them somewhere private. They will not be shown again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may be able to recover your account. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I have saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in first to continue to this anonymous response form." : intent === "invite" ? "Sign in to accept your organization invitation." : mode === "register" ? "Create a secure account to take part in trusted feedback spaces." : "Sign in to manage feedback and your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="#/login">Sign in</a>` : `New to Anonce? <a href="#/register">Create an account</a> · <a href="#/recover">Recover account</a>`}</p>`}</section></div>`,
     title,
   );
   if (words) {
+    bindRecoveryPhraseTools(words);
     document.querySelector("#saved").onchange = (e) =>
       (document.querySelector("#continue").disabled = !e.target.checked);
     document.querySelector("#continue").onclick = () => {
@@ -322,12 +357,14 @@ function renderAuth(mode, intent = "") {
       session = result.session;
       renderAuth("register");
     } else if (mode === "recover") {
-      await api.recover({
+      const result = await api.recover({
         login: fd.get("login"),
         words: fd.get("words"),
         newPassword: fd.get("newPassword"),
       });
-      go("/login");
+      phrase = result.recoveryWords;
+      session = result.session;
+      renderAuth("recover");
     } else {
       session = await api.login({
         login: fd.get("login"),
@@ -441,9 +478,10 @@ async function renderAccount() {
     });
     phrase = r.recoveryWords;
     document.querySelector("#new-phrase").innerHTML =
-      `<div class="alert"><strong>Save your new phrase now.</strong> The old phrase is replaced.</div><div class="word-grid">${phrase.map((w, i) => `<div class="word"><b>${i + 1}</b>${esc(w)}</div>`).join("")}</div><label class="check"><input id="rotated-saved" type="checkbox"> I saved the new phrase</label>`;
+      `<div class="alert"><strong>Save your new phrase now.</strong> The old phrase is replaced. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(phrase, "rotated-recovery")}<label class="check"><input id="rotated-saved" type="checkbox"> I saved the new phrase</label>`;
+    bindRecoveryPhraseTools(phrase, "rotated-recovery");
     document.querySelector("#rotated-saved").onchange = (e) => {
-      if (e.target.checked) {
+        if (e.target.checked && e.target.isConnected && phrase) {
         phrase = null;
         document.querySelector("#new-phrase").innerHTML =
           '<div class="notice">Recovery phrase updated.</div>';
@@ -660,7 +698,7 @@ function renderResponseResults(result, error, r) {
   return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? " · more responses available" : ""}</p></div></div><div class="review-list">${items
     .map(
       (item, index) =>
-        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(new Date(item.acceptedAt).toLocaleString()) : ""}</span></div>${questions
+        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(new Date(item.acceptedAt).toLocaleString()) : ""}</span></div>${item.status === "invalid" ? '<p class="alert" role="status">This response could not be decrypted or validated.</p>' : questions
           .map((q) => {
             const answer = (item.answers || []).find(
                 (a) => a.questionId === q.id,

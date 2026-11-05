@@ -81,6 +81,46 @@ Commands below exited 0 unless a limitation is explicitly stated.
   Served app/UI bytes matched frozen sources including source links. A copied
   fixture key owned by UID65532, mode0400, was readable; original key untouched.
 
+## Dark interface and acceptance checks — 2026-11-05
+
+This change uses a separate disposable PostgreSQL 18.6 instance and source copies,
+not the deployment or databases described above. Execution uses isolated Docker
+containers with no external network, an explicit empty-environment allowlist,
+read-only source/tool mounts, scratch tmpfs storage, dropped capabilities and
+CPU, memory, process, file-size, disk and wall-clock limits. Fixture roles have
+no production credentials. Logs are retained in
+`/tmp/opencode/anonce-current-checks.log` and follow-up logs beside it.
+
+- Node 26.12.1: `node scripts/build.mjs` exited 0.
+- `node --test web/api.test.js web/app.test.js web/crypto.test.js web/storage.test.js web/ui.test.js`
+  exited 0: 31 tests passed, no failures or skips. This includes fixed-size
+  issuance padding, remote JSONB retry reconstruction, per-record decryption
+  failure isolation, exports, and recovery clipboard/download helper behavior.
+- The first Go attempt used local Go 1.27.2, below `go.mod`'s required 1.27.3;
+  backend/vet/interop checks could not run in that attempt. The cached 1.27.3
+  toolchain is selected explicitly for the follow-up. The first browser harness
+  also exposed an HTML MIME error in the test server; the harness was corrected.
+- With Go 1.27.3 and both disposable database URLs configured,
+  `go test -race -count=1 ./...` and `go vet ./...` exited 0. The server tests
+  include assertions that accepted counts equal persisted rows after issuance,
+  invalid fields/signatures, an invisible uncommitted write, rollback,
+  concurrent duplicates, exact retries and conflicting replays.
+- `node scripts/crypto-interop.mjs` exited 0: six interoperability groups passed,
+  including the published RFC 9474 vector, framing, HKDF, ChaCha, blind RSA and
+  HPKE, with the existing tamper-rejection checks.
+- `node scripts/ui-check.mjs` exited 0 for dark computed color scheme,
+  desktop/mobile overflow, phrase copy/download and unreadable response notice.
+  After fixing replacement-phrase display following account recovery,
+  `node --test web/ui.test.js` exited 0 again (4 tests, not additional distinct
+  tests), and `node scripts/ui-check.mjs` exited 0 across registration, recovery
+  and phrase rotation. Final UI evidence is in
+  `/tmp/opencode/anonce-current-checks-ui.log`.
+
+These checks are targeted regression evidence, not a full cryptographic audit.
+The mock browser harness does not establish real HTTPS, account recovery or
+end-to-end server behavior. Previous deployment evidence is historical, not a
+deployment of the current changes.
+
 ## Remaining limitations
 
 Fixed 50-item pagination and partial limit-parameter support remain. Registration,

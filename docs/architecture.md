@@ -26,8 +26,12 @@ Issuance locks member and review rows, checks active membership and review eligi
 
 Anonymous acceptance first checks for an existing spend: an identical submission hash returns the original receipt even after closure; a different hash conflicts. Otherwise validate eligibility, signature and ciphertext framing, then atomically insert spend, ciphertext and signed receipt and increment aggregate accepted count before replying. Submission storage has no member/account/session/issuance-request column or identifying logs. Never join issuance to submissions.
 
+Only committed encrypted records contribute to `accepted_count`; issuance, rejected requests, rolled-back transactions and retries do not. The server cannot validate encrypted answer content. One unreadable record must not block other reviewer results or exports.
+
 ## Privacy boundary
 
 Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`. The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them. Logs, telemetry and errors must not recreate an identifying submission trail.
+
+Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage. Older retained objects remain exposed to that linkage. Response lengths, timing and other deployment metadata remain observable. Reviewer decryption validates HPKE and answer structure but does not independently bind retrieved records to signed receipts against a database-write attacker; database integrity remains a trust assumption.
 
 This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution. Independent source-first security review is required, not an audit claim. Rotating a recovery phrase does not revoke compromised encrypted snapshots: full compromise repair requires a new vault key, object re-encryption and membership-key rotation.

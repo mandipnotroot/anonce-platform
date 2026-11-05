@@ -112,7 +112,7 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	s := testServer(t)
 	h := s.Handler()
 	u := newUser(t, s, h)
-	ctx := context.Background()
+	ctx := t.Context()
 	// Isolation is enforced by PostgreSQL, not merely handler routing.
 	if _, e := s.anonymous.Exec(ctx, "SELECT * FROM member.accounts"); e == nil {
 		t.Fatal("anonymous read accounts")
@@ -214,11 +214,68 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	if issued["blind_signature"] != retry["blind_signature"] {
 		t.Fatal("issuance retry changed")
 	}
+	assertAccepted := func(stage string, want int64) {
+		t.Helper()
+		var accepted, persisted int64
+		if e := s.anonymous.QueryRow(ctx, "SELECT accepted_count,(SELECT count(*) FROM anon.submissions WHERE review_id=$1) FROM anon.reviews WHERE id=$1", id).Scan(&accepted, &persisted); e != nil {
+			t.Fatal(e)
+		}
+		if accepted != want || persisted != want {
+			t.Fatalf("%s: accepted_count=%d persisted=%d want both %d", stage, accepted, persisted, want)
+		}
+		review := result(t, request(h, "GET", path, nil, u), 200)
+		if review["accepted_count"] != strconv.FormatInt(want, 10) {
+			t.Fatalf("%s: member accepted_count=%v want %d", stage, review["accepted_count"], want)
+		}
+	}
+	assertAccepted("issuance and issuance retry", 0)
 	sig, e := client.Finalize(state, mustDecode(issued["blind_signature"].(string)))
 	if e != nil {
 		t.Fatal(e)
 	}
 	sub := submission{id, d.Issuer, protocol.B64(prepared), protocol.B64(sig), protocol.B64(protocol.Random(32)), protocol.B64(protocol.Random(64))}
+	for _, field := range []string{"enc", "ciphertext", "signature"} {
+		invalid := sub
+		switch field {
+		case "enc":
+			invalid.Enc = protocol.B64(protocol.Random(31))
+		case "ciphertext":
+			invalid.Ciphertext = protocol.B64(protocol.Random(15))
+		case "signature":
+			badSignature := bytes.Clone(sig)
+			badSignature[0] ^= 1
+			invalid.Signature = protocol.B64(badSignature)
+		}
+		result(t, request(h, "POST", "/api/anon/submissions", invalid, nil), 400)
+		assertAccepted("invalid "+field, 0)
+	}
+	// Exercise the restricted role's atomic write, then discard both changes.
+	tx, e := s.anonymous.Begin(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer tx.Rollback(context.Background())
+	rid, kid := mustDecode(id), mustDecode(d.Issuer)
+	enc, ciphertext := mustDecode(sub.Enc), mustDecode(sub.Ciphertext)
+	tokenHash := protocol.Hash(protocol.E("token", rid, kid, serial))
+	submissionHash := protocol.Hash(protocol.E("submission", rid, kid, prepared, sig, enc, ciphertext))
+	var rolledBackReceipt json.RawMessage
+	if e := tx.QueryRow(ctx, "SELECT anon.accept_submission($1,$2,$3,$4,$5,$6,$7,$8,$9)", id, d.Issuer, tokenHash, submissionHash, prepared, sig, enc, ciphertext, json.RawMessage(`{"rollback_fixture":true}`)).Scan(&rolledBackReceipt); e != nil {
+		t.Fatal(e)
+	}
+	var pendingAccepted, pendingRows int64
+	if e := tx.QueryRow(ctx, "SELECT accepted_count,(SELECT count(*) FROM anon.submissions WHERE review_id=$1) FROM anon.reviews WHERE id=$1", id).Scan(&pendingAccepted, &pendingRows); e != nil {
+		t.Fatal(e)
+	}
+	if pendingAccepted != 1 || pendingRows != 1 {
+		t.Fatalf("pending transaction: accepted_count=%d persisted=%d want both 1", pendingAccepted, pendingRows)
+	}
+	assertAccepted("uncommitted submission is invisible", 0)
+	if e := tx.Rollback(ctx); e != nil {
+		t.Fatal(e)
+	}
+	assertAccepted("rolled back submission", 0)
+	// The same valid token remains usable after rollback, even under retries.
 	responses = make([]*httptest.ResponseRecorder, 12)
 	for i := range responses {
 		wg.Go(func() { responses[i] = request(h, "POST", "/api/anon/submissions", sub, nil) })
@@ -232,6 +289,7 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 		}
 		receipt = v["receipt_id"].(string)
 	}
+	assertAccepted("concurrent identical submissions after rollback", 1)
 	v = result(t, request(h, "GET", path, nil, u), 200)
 	if v["accepted_count"] != "1" || v["issued_count"] != "1" {
 		t.Fatalf("counters: %v", v)
@@ -239,8 +297,10 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	closeEnv := signed(t, s, h, u, "review-close", revisionRequest{protocol.ID(), "3"}, false)
 	result(t, request(h, "POST", path+"/close", closeEnv, u), 200)
 	result(t, request(h, "POST", "/api/anon/submissions", sub, nil), 200)
+	assertAccepted("exact submission retry after close", 1)
 	sub.Ciphertext = protocol.B64(protocol.Random(64))
 	result(t, request(h, "POST", "/api/anon/submissions", sub, nil), 409)
+	assertAccepted("conflicting replay", 1)
 	lookup := map[string]string{"review_id": id, "issuer_key_id": d.Issuer, "serial": protocol.B64(serial)}
 	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, nil), 200)
 	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, u), 400)

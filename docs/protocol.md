@@ -41,6 +41,8 @@ Dedicated review RSA key: 3072 bits, exponent 65537. Use RFC 9474 **RSABSSA-SHA3
 
 Browser encrypts pending `{request_id,serial,descriptor_hash,prepared_message,blinded_message,inverse}` before requesting issuance. The pending vault write and server quota/signature cache commit together. Preserve exact prepared message, unblinding state and later exact submission for retries.
 
+The browser's authenticated issuance pending object also includes the encrypted response. Pad its serialized UTF-8 JSON plaintext with ASCII spaces to exactly 524288 bytes before vault encryption; reject larger plaintext. The resulting ciphertext is 524304 bytes including the authentication tag. JSON readers accept the trailing whitespace. Reuse the exact encrypted object on issuance retries. This prevents answer-length differences from directly linking newly created issuance objects to submissions; it does not repair previously stored objects or hide timing and other metadata.
+
 ## Response encryption and receipts
 
 RFC 9180 HPKE base mode: X25519/HKDF-SHA256/ChaCha20-Poly1305, suite `0x0020/0x0001/0x0003`. Info is `E('response-hpke',deployment,review_id,descriptor_hash)`; AAD is `E('response-aad',deployment,review_id,descriptor_hash)`. Plaintext JSON: `{v:1,review_id,descriptor_hash,answers:{question_id:string|array}}`. Validate answers against the signed descriptor in the browser; server cannot inspect plaintext.
@@ -50,6 +52,8 @@ Ciphertext has a hard cap of 256 KiB (262144 bytes), including the 16-byte authe
 Submission: `{review_id,issuer_key_id,prepared_message,signature,enc,ciphertext}`; `enc` is 32 bytes. Verify the prepared authorization and extract serial. `token_hash = SHA256(E('token',review_id,issuer_key_id,serial))`. `submission_hash = SHA256(E('submission',review_id,issuer_key_id,prepared_message,signature,enc,ciphertext))`.
 
 Receipt: `{v:1,receipt_id,review_id,issuer_key_id,token_hash,submission_hash,accepted_at,receipt_key_id,signature}`. Ed25519 signature transcript: `E('receipt',deployment,receipt_id,review_id,issuer_key_id,token_hash,submission_hash,U64(accepted_at),receipt_key_id)`. Exact spend retries return the original receipt; changed submissions for a spent token conflict. Acceptance and receipt persistence are one transaction.
+
+Increment `accepted_count` only in the transaction that persists the submission and receipt. Issuance, validation rejection, rollback, exact retries and conflicting replays must not increment it. This counts committed encrypted records, not proven-valid plaintext: the server cannot decrypt answers. Reviewers must isolate unreadable or invalid responses, display their status, and report them in exports without blocking valid records.
 
 ## Browser implementation references
 
