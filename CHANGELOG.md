@@ -31,6 +31,12 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Download receipts as readable PNG cards containing the complete signed receipt
+  in a QR code. Read receipt images locally before applying the existing signature
+  checks; keep signing keys separate from receipt data.
+- Make receipt verification file-first, with a visible desktop/mobile navigation
+  link, optional JSON paste and signing-key details, and clearer result guidance.
+  Keep receipt formats and cryptographic verification unchanged.
 - Replace the raw submission receipt display with verified acceptance, time,
   download controls, and optional JSON details.
 - Use receipt v2 to bind the encrypted response to its deployment, review,

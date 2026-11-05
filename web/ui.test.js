@@ -125,7 +125,8 @@ test("registration and account rotation share recovery controls", () => {
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
   assert.match(source, /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/);
   assert.match(source, /aria-current="page"/);
-  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.nav \{ display: grid; grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/);
   assert.match(styles, /\.nav a\.active \{ box-shadow: inset 0 -2px 0 var\(--blue\) \}/);
   assert.match(source, /aria-label="Current workspace:/);
   assert.doesNotMatch(source, /<small>WORKSPACE<\/small>/);
@@ -150,7 +151,7 @@ test("accepted receipt shows verified success and time, with JSON behind disclos
   const escapeSource = source.slice(source.indexOf("const esc ="), source.indexOf("const path ="));
   const timeSource = source.slice(source.indexOf("function formatReceiptTime("), source.indexOf("async function verifyReceiptLocally("));
   const { rendered } = vm.runInNewContext(`${escapeSource}\n${receiptSource}\n${timeSource}\n({ rendered: receiptHTML(receipt) })`, { receipt, BigInt, Date });
-  assert.ok(rendered.includes(`<details class="receipt-details"><summary>Technical details (JSON)</summary><pre class="receipt-data">${escaped}</pre></details>`));
+  assert.ok(rendered.includes(`<details class="receipt-details"><summary>Technical details (JSON)</summary><button type="button" class="button secondary" data-receipt-copy>Copy receipt data</button><pre class="receipt-data">${escaped}</pre></details>`));
   assert.match(rendered, /Response accepted/);
   assert.match(rendered, /Receipt signature verified/);
   assert.match(rendered, /<time>/);
@@ -164,30 +165,33 @@ test("accepted receipt shows verified success and time, with JSON behind disclos
   assert.match(source, /box\.innerHTML = receiptHTML\(result\.receipt\);[\s\S]*?bindReceiptTools\(box, result\.receipt\)/);
 });
 
-test("receipt tools copy and download complete formatted JSON", async () => {
+test("receipt tools copy JSON only as advanced detail and download a PNG asynchronously", async () => {
   const receipt = { signature: "full-signature", nested: { proof: "complete-proof" } };
   const copied = [];
   const notices = [];
-  let blob;
+  const blob = { type: "image/png" };
   const callbacks = {};
-  const box = { querySelector(selector) { return { set onclick(callback) { callbacks[selector] = callback; } }; } };
+  const download = { isConnected: true, disabled: false, dataset: {}, set onclick(callback) { callbacks["[data-receipt-download]"] = callback; } };
+  const copy = { set onclick(callback) { callbacks["[data-receipt-copy]"] = callback; } };
+  const box = { querySelector(selector) { return selector.includes("download") ? download : copy; } };
   const sourceTools = source.slice(source.indexOf("function bindReceiptTools("), source.indexOf("function icon("));
   const context = {
     JSON,
-    Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; blob = this; } },
+    Blob,
+    renderReceiptPNG: async ({ receipt: value }) => { assert.equal(value, receipt); return blob; },
     URL: { createObjectURL() { return "blob:receipt"; }, revokeObjectURL() {} },
-    document: { body: { appendChild() {} }, createElement() { return { click() {}, remove() {} }; } },
+    document: { body: { appendChild() {} }, createElement() { return { click() {}, remove() {}, set href(value) { this.url = value; }, set download(value) { this.filename = value; } }; } },
     copyText: async (text, label) => copied.push({ text, label }),
+    setButtonText: (control, text) => { control.textContent = text; },
     toast: (message, type = "error") => notices.push({ message, type }),
   };
   vm.runInNewContext(`${sourceTools}\nbindReceiptTools(box, receipt);`, { ...context, box, receipt });
   await callbacks["[data-receipt-copy]"]();
-  callbacks["[data-receipt-download]"]();
+  await callbacks["[data-receipt-download]"]();
   const expected = JSON.stringify(receipt, null, 2);
   assert.deepEqual(copied, [{ text: expected, label: "Receipt" }]);
-  assert.equal(blob.parts[0], `${expected}\n`);
-  assert.equal(blob.type, "application/json;charset=utf-8");
-  assert.deepEqual(notices, [{ message: "Receipt download started.", type: "success" }]);
+  assert.equal(blob.type, "image/png");
+  assert.deepEqual(notices, [{ message: "Receipt PNG download started.", type: "success" }]);
 });
 
 test("receipt details and controls support narrow layouts and keyboard access", () => {
@@ -218,9 +222,96 @@ test("receipt verifier uses local API only and enforces UTF-8 byte bounds", asyn
   assert.match(source, /verifyReceiptLocally\(inputText, selectedTrust\)/);
   assert.match(source, /verifySavedReceipt/);
   assert.match(source, /href="#\/verify-receipt"/);
-  assert.match(source, /does not prove response correctness, permanent storage, anonymity, or trusted time/);
-  assert.match(source, /This does not match the receipt to your original submission/);
+  assert.match(source, /does not prove response contents, storage, anonymity, or trusted time/);
+  assert.match(source, /does not match the receipt to your original response/);
   assert.doesNotMatch(source.slice(source.indexOf("function renderReceiptVerifier"), source.indexOf("function formatReceiptTime")), /fetch\s*\(|api\.(?!getReceiptTrust|verifySavedReceipt)/);
+});
+
+test("receipt verifier is file-first, keeps JSON and trust choices disclosed, and stays in navigation", () => {
+  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  assert.match(source, /href="#\/verify-receipt" aria-label="Verify receipt"/);
+  assert.match(verifier, /Choose the receipt file you downloaded/);
+  assert.match(verifier, /<details class="verifier-paste"><summary>Paste receipt JSON instead/);
+  assert.match(verifier, /<details class="verify-trust"><summary>Choose which public signing keys to trust/);
+  assert.match(verifier, /This check uses public signing keys published by this site unless you choose another configuration/);
+  assert.match(verifier, /A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt/);
+  assert.match(verifier, /independent check, get a configuration from a source you trust/);
+  assert.match(verifier, /decodeReceiptPNG\(\{ file: selectedFile \}\)/);
+  assert.match(verifier, /Receipt image loaded\. Ready to verify\./);
+  assert.match(verifier, /Choose a receipt PNG or paste receipt JSON first\./);
+  assert.match(verifier, /Receipt signature verified/);
+  assert.match(verifier, /Receipt could not be verified/);
+  assert.match(verifier, /does not match the receipt to your original response/);
+});
+
+test("receipt verifier DOM handlers report empty, successful, failed, and stale checks", async () => {
+  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const nodes = new Map();
+  const make = (value = "") => ({ value, textContent: "", innerHTML: "", disabled: false, files: [], listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, replaceChildren() { this.textContent = ""; this.innerHTML = ""; } });
+  for (const id of ["#verify-receipt-text", "#verify-receipt-file", "#verify-trust-text", "#verify-trust-file", "#verify-result", "#verify-receipt", "#receipt-file-status", "#download-trust"]) nodes.set(id, make());
+  const radios = [{ value: "current", checked: true, addEventListener(_type, fn) { this.onchange = fn; } }, { value: "import", checked: false, addEventListener(_type, fn) { this.onchange = fn; } }];
+  const document = { querySelector: selector => selector.includes("trust-source") ? radios.find(radio => radio.checked) : nodes.get(selector), querySelectorAll: selector => selector.includes("trust-source") ? radios : [] };
+  const pending = [];
+  const api = { getReceiptTrust: () => ({ trust: "current" }), verifySavedReceipt: input => new Promise((resolve, reject) => pending.push({ input, resolve, reject })) };
+  const context = { document, api, frame: markup => { context.markup = markup; }, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, formatReceiptTime: () => "accepted time", verifyReceiptLocally: (receiptText, trustText) => api.verifySavedReceipt({ receiptText, trustText }) };
+  vm.runInNewContext(`${verifier}; renderReceiptVerifier()`, context);
+  const input = nodes.get("#verify-receipt-text"), result = nodes.get("#verify-result"), button = nodes.get("#verify-receipt");
+  await button.onclick();
+  assert.match(result.textContent, /Choose a receipt PNG/);
+  input.value = "valid";
+  input.listeners.input();
+  const success = button.onclick();
+  pending.at(-1).resolve({ receipt: { accepted_at: "1" } });
+  await success;
+  assert.match(result.innerHTML, /Receipt signature verified/);
+  input.value = "bad";
+  input.listeners.input();
+  const failure = button.onclick();
+  pending.at(-1).reject(Error("invalid"));
+  await failure;
+  assert.match(result.innerHTML, /Receipt could not be verified/);
+  input.value = "old";
+  input.listeners.input();
+  const stale = button.onclick();
+  input.value = "new";
+  input.listeners.input();
+  pending.at(-1).resolve({ receipt: { accepted_at: "1" } });
+  await stale;
+  assert.equal(result.innerHTML, "");
+  assert.equal(button.disabled, false);
+});
+
+test("pending receipt image decode disables verification and reports invalidation", async () => {
+  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const nodes = new Map();
+  const make = (value = "") => ({ value, textContent: "", innerHTML: "", disabled: false, isConnected: true, files: [], listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, replaceChildren() { this.textContent = ""; this.innerHTML = ""; } });
+  for (const id of ["#verify-receipt-text", "#verify-receipt-file", "#verify-trust-text", "#verify-trust-file", "#verify-result", "#verify-receipt", "#receipt-file-status", "#download-trust"]) nodes.set(id, make());
+  const radios = [{ value: "current", checked: true, addEventListener(_type, fn) { this.onchange = fn; } }, { value: "import", checked: false, addEventListener(_type, fn) { this.onchange = fn; } }];
+  const document = { querySelector: selector => selector.includes("trust-source") ? radios.find(radio => radio.checked) : nodes.get(selector), querySelectorAll: selector => selector.includes("trust-source") ? radios : [] };
+  const pending = [];
+  const api = { getReceiptTrust: () => ({ trust: "current" }) };
+  const context = { document, api, frame() {}, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, decodeReceiptPNG: () => new Promise((resolve, reject) => pending.push({ resolve, reject })), verifyReceiptLocally: async () => ({ receipt: { accepted_at: "1" } }), formatReceiptTime: () => "accepted time" };
+  vm.runInNewContext(`${verifier}; renderReceiptVerifier()`, context);
+  const file = nodes.get("#verify-receipt-file"), button = nodes.get("#verify-receipt"), status = nodes.get("#receipt-file-status"), text = nodes.get("#verify-receipt-text"), trust = nodes.get("#verify-trust-text");
+  file.files = [{ size: 10 }];
+  file.listeners.change();
+  assert.equal(button.disabled, true);
+  assert.match(status.textContent, /Reading receipt image/);
+  await button.onclick();
+  assert.equal(button.disabled, false);
+  assert.match(status.textContent, /loading interrupted/i);
+  pending[0].resolve("stale decoded receipt");
+  await Promise.resolve();
+  assert.equal(text.value, "");
+
+  file.listeners.change();
+  assert.equal(button.disabled, true);
+  trust.listeners.input();
+  assert.equal(button.disabled, false);
+  assert.match(status.textContent, /loading interrupted/i);
+  pending[1].resolve("stale decoded receipt");
+  await Promise.resolve();
+  assert.equal(text.value, "");
 });
 
 test("receipt times never render invalid dates for out-of-range values", () => {
@@ -259,6 +350,33 @@ test("stale receipt file reads cannot replace edits or surface old read errors",
   assert.match(messages.at(-1), /exceeds 64 KiB/);
 });
 
+test("receipt file feedback handles cancel, empty files, failures, and stale edits", async () => {
+  const helper = source.slice(source.indexOf("async function loadVerifierFile("), source.indexOf("function emptyCard("));
+  const load = await vm.runInNewContext(`(async () => { ${helper}; return loadVerifierFile; })()`, {});
+  let generation = 0;
+  const target = { value: "old" };
+  const result = { textContent: "" };
+  const status = { textContent: "" };
+  const clear = () => ++generation;
+  const current = token => token === generation;
+  await load(null, target, result, clear, current, status);
+  assert.equal(status.textContent, "Choose your Anonce receipt PNG.");
+  await load({ size: 0, async text() { return "  \n"; } }, target, result, clear, current, status);
+  assert.match(status.textContent, /File is empty/);
+  assert.match(result.textContent, /file is empty/i);
+  await load({ size: 1, async text() { throw Error("read failed"); } }, target, result, clear, current, status);
+  assert.match(status.textContent, /Could not read file/);
+  let finish;
+  const pending = load({ size: 3, text: () => new Promise(resolve => { finish = resolve; }) }, target, result, clear, current, status);
+  target.value = "edited by user";
+  status.textContent = "Using pasted receipt JSON.";
+  generation++;
+  finish("stale receipt");
+  await pending;
+  assert.equal(target.value, "edited by user");
+  assert.equal(status.textContent, "Using pasted receipt JSON.");
+});
+
 test("shared spacing tokens drive cards, forms, fields, and responsive layouts", () => {
   for (const token of ["--space-2", "--space-3", "--space-4", "--space-6"]) {
     assert.match(styles, new RegExp(`\\bvar\\(${token}\\)`), `${token} must be used`);
@@ -277,7 +395,7 @@ test("browser theme metadata follows light and dark system preference", () => {
 });
 
 test("successful mutations report success without duplicating password inline feedback", () => {
-  for (const message of ["Organization created.", "Invitation created.", "Member approved.", "Membership revoked.", "Password updated.", "Recovery phrase replaced. Save your new phrase.", "Review draft created.", "Review published.", "Review closed.", "Review draft saved.", "Receipt download started.", "Recovery phrase download started."]) {
+  for (const message of ["Organization created.", "Invitation created.", "Member approved.", "Membership revoked.", "Password updated.", "Recovery phrase replaced. Save your new phrase.", "Review draft created.", "Review published.", "Review closed.", "Review draft saved.", "Receipt PNG download started.", "Recovery phrase download started."]) {
     assert.ok(source.includes(`toast("${message}", "success")`), `missing success feedback: ${message}`);
   }
   assert.match(source, /catch \(error\) \{\s*toast\(say\(error\)\);\s*button\.disabled = false;/);

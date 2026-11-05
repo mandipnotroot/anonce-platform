@@ -27,3 +27,5 @@ secrets/
 /web/crypto.bundle.js
 /web/crypto.bundle.js.map
 /web/crypto.bundle.js.LEGAL.txt
+/web/receipt-qr.bundle.js
+/web/receipt-qr.bundle.js.LEGAL.txt

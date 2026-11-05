@@ -5,8 +5,11 @@
 
 The accepted screen appears after the browser verifies the signed receipt
 against your pending encrypted response and its signed review descriptor.
-Choose **Download receipt** and keep the JSON file. **Technical details (JSON)**
-shows the complete machine-readable receipt without placing it in the main view.
+Download and keep the PNG receipt card. Its QR code contains the complete signed
+receipt, not your response contents or private keys. You do not need to open or
+edit JSON. Technical receipt data remains available in the optional disclosure.
+Keep the original image: cropping, resizing, or editing its QR code can make it
+unreadable. The card's printed text is not proof of authenticity.
 
 If delivery is uncertain, use **Check status**. You can return to the original
 signed-in browser to recover pending responses. Do not create a new response
@@ -14,23 +17,28 @@ merely because a network request failed; retry the saved pending response.
 
 ## Check a saved receipt
 
-1. Open **Verify a receipt** (`#/verify-receipt`). Sign-in is not required.
-2. Choose your receipt file or paste its JSON. The limit is 64 KiB.
-3. Choose this deployment's public configuration, or import a configuration
-   obtained through an independently trusted channel. Configuration files also
-   have a 64 KiB limit. Never trust a key merely because it accompanies a receipt.
+1. Choose **Verify receipt** in the navigation (`#/verify-receipt`). Sign-in is
+   not required.
+2. Choose your downloaded PNG receipt card. The browser reads its QR code locally.
+   PNG files must be at most 4 MiB, no more than 4096 pixels in either dimension,
+   and no more than 16 million pixels total. Camera scanning is not enabled.
+3. The default uses this site's public signing keys. To use a configuration
+   obtained through an independently trusted channel, open **Choose which public
+   signing keys to trust** and select the independent configuration option.
+   Configuration files have a 64 KiB limit. Never trust a key merely because it
+   accompanies a receipt or appears in an image.
 4. Choose **Verify receipt**. Receipt checking runs locally without uploading
    either file. Loading the website initially still requires its served assets
    and configuration.
 
-Use **Download current public configuration** to retain trusted public keys for
-later checks. Keep the configuration's origin and authenticity in mind when
+Use **Download this site’s public configuration** inside the signing-key options
+to retain trusted public keys for later checks. Keep the configuration's origin and authenticity in mind when
 sharing it; its contents are public, but substituting them changes whom you trust.
 
 ## Interpret the result
 
-**Signature verified** means a key in the selected trust configuration signed
-the acceptance statement for that deployment. A historical signing key works
+**Receipt signature verified** means a key in the selected trust configuration
+signed the acceptance statement for that deployment. A historical signing key works
 only if the trusted configuration retains it. The displayed time is asserted by
 the signing server, not independently timestamped.
 
