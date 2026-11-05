@@ -573,6 +573,13 @@ textarea {
   background: var(--blue);
   color: #fff
 }
+.toast-region { position: fixed; z-index: 100; top: 18px; right: 18px; width: min(420px, calc(100vw - 36px)); display: grid; gap: 10px; pointer-events: none }
+.toast { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 16px 14px 16px 18px; border: 1px solid var(--line); border-left: 4px solid var(--danger); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-size: 14px; line-height: 1.5; pointer-events: auto; animation: toast-in .18s ease-out }
+.toast-success { border-left-color: var(--blue) }
+.toast-close { flex: none; border: 0; padding: 0 3px; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: translateY(0) } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none } }
+@media (max-width:640px) { .toast-region { top: 10px; right: 10px; width: calc(100vw - 20px) } }
 .skip-link:focus {
   transform: translateY(0)
 }

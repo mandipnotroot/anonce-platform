@@ -37,6 +37,11 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Show request and form failures in shared toast notifications instead of duplicate
+  inline errors or browser alerts, with safe error-specific guidance and readable
+  fallbacks for malformed server errors.
+- Confirm successful clipboard copies through toasts and report failed copies
+  without claiming success or displaying object-shaped error text.
 - Balance mobile workspace navigation with equal-sized icon-and-label tabs,
   a compact Account label, and accessible current-page indicators while retaining
   the full desktop account and recovery label.

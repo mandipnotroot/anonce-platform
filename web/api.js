@@ -46,12 +46,33 @@ export async function request(path, { method = 'GET', body, anonymous = false, s
   }
   let result;
   try { result = response.status === 204 ? null : await response.json(); }
-  catch { throw new APIError('INVALID_RESPONSE', 'The server returned an invalid response.'); }
+  catch { if (response.ok) throw new APIError('INVALID_RESPONSE', 'The server returned an invalid response.'); }
   if (!response.ok) {
     const code = result?.error?.code ?? result?.code;
     // Do not reflect arbitrary server text, request material, or crypto errors.
-    throw new APIError(typeof code === 'string' && /^[A-Z_a-z0-9-]{1,64}$/.test(code) ? code : 'REQUEST_FAILED',
-      response.status === 401 ? 'Please sign in again.' : 'The request could not be completed.');
+    const safeCode = typeof code === 'string' && /^[A-Z_a-z0-9-]{1,64}$/.test(code) ? code.toUpperCase() : 'REQUEST_FAILED';
+    const messages = {
+      INVALID_CREDENTIALS: 'Login or password is incorrect.', INVALID_LOGIN: 'Enter a valid login.',
+      INVALID_REGISTRATION: 'Check your login and password, then try again.', INVALID_NAME: 'Enter a valid organization name.',
+      INVALID_REVIEW: 'Check review title, limits, dates, and questions.', INVALID_NEW_PASSWORD: 'Choose a valid new password.',
+      INVALID_NEW_RECOVERY: 'The new recovery phrase could not be saved. Try again.', EXPIRED_INVITE: 'This invitation has expired. Ask for a new invitation.',
+      LAST_OWNER: 'Organization must keep at least one owner.', NOT_PENDING: 'This membership is no longer awaiting approval.',
+      EPOCH_CONFLICT: 'Account security settings changed. Sign in again.', REQUEST_CONFLICT: 'This request conflicts with a newer change. Refresh and try again.',
+      REVISION_CONFLICT: 'This review changed. Refresh before saving again.', CHALLENGE_USED: 'This request was already used. Retry the action.',
+      CLOSED: 'This review is closed and cannot accept responses.', QUOTA_EXHAUSTED: 'This review has reached its response limit.',
+      INVALID_MEMBERSHIP: 'Your organization membership is no longer active.', INVALID_PROOF: 'Your authorization could not be verified. Sign in again.',
+      UNAUTHENTICATED: 'Your session has expired. Sign in again.', SESSION_REVOKED: 'Your session ended. Sign in again.',
+      FORBIDDEN: 'You do not have permission to do that.',
+      NOT_FOUND: 'That item is no longer available.',
+      RATE_LIMITED: 'Too many attempts. Wait a moment, then try again.',
+    };
+    const statusMessages = {
+      400: 'Check the information you entered and try again.', 403: 'You do not have permission. Sign in or ask an organization owner for access.',
+      401: 'Sign in again, then retry your request.', 409: 'This item changed or conflicts with another action. Refresh and try again.', 410: 'This item has expired or closed. Ask for a new invitation or review link.',
+      429: 'Too many attempts. Wait a moment, then try again.',
+    };
+    const message = messages[safeCode] || (response.status >= 500 ? 'Service is temporarily unavailable. Try again shortly.' : statusMessages[response.status] || `The request failed (${response.status}). Try again.`);
+    throw new APIError(safeCode, message);
   }
   return result;
 }

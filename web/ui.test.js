@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("./ui.js", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const helperSource = source.slice(source.indexOf("function recoveryPhrasePanel"), source.indexOf("async function load()"));
+const toastSource = source.slice(source.indexOf("function toast("), source.indexOf("async function copyText("));
 
 function harness({ clipboard } = {}) {
   const phraseWords = ["alpha", "bravo", "charlie"];
@@ -14,6 +15,7 @@ function harness({ clipboard } = {}) {
   const clicks = [];
   const removed = [];
   const revoked = [];
+  const notices = [];
   let blob;
   let nextURL = "blob:recovery-test";
   class FakeBlob {
@@ -43,6 +45,7 @@ function harness({ clipboard } = {}) {
   }
   const context = {
     phrase: phraseWords,
+    toast(message, type) { notices.push({ message, type }); },
     document,
     navigator: clipboard === undefined ? {} : { clipboard },
     Blob: FakeBlob,
@@ -52,7 +55,7 @@ function harness({ clipboard } = {}) {
     },
   };
   vm.runInNewContext(`${helperSource}\nbindRecoveryPhraseTools(phrase, "test");`, context);
-  return { nodes, clicks, removed, revoked, get blob() { return blob; } };
+  return { nodes, clicks, removed, revoked, notices, get blob() { return blob; } };
 }
 
 test("copy writes exact recovery phrase and confirms success", async () => {
@@ -60,16 +63,44 @@ test("copy writes exact recovery phrase and confirms success", async () => {
   const h = harness({ clipboard: { async writeText(value) { copied = value; } } });
   await h.nodes.get("#test-copy").onclick();
   assert.equal(copied, "alpha bravo charlie");
-  assert.equal(h.nodes.get("#test-feedback").textContent, "Phrase copied.");
+  assert.deepEqual(h.notices, [{ message: "Phrase copied.", type: "success" }]);
 });
 
 test("clipboard rejection and missing clipboard show safe failure feedback", async () => {
   const rejected = harness({ clipboard: { async writeText() { throw new Error("denied"); } } });
   await rejected.nodes.get("#test-copy").onclick();
-  assert.equal(rejected.nodes.get("#test-feedback").textContent, "Copy failed. Select and copy the words above.");
+  assert.match(rejected.notices[0].message, /Could not copy recovery phrase/);
   const missing = harness();
   await missing.nodes.get("#test-copy").onclick();
-  assert.equal(missing.nodes.get("#test-feedback").textContent, "Copy failed. Select and copy the words above.");
+  assert.match(missing.notices[0].message, /Could not copy recovery phrase/);
+});
+
+test("toast DOM updates live priority, text safely, and supports dismissal", () => {
+  const nodes = new Map();
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.removed = false; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    appendChild(child) { this.children.push(child); return child; }
+    replaceChildren() { this.children = []; }
+    remove() { this.removed = true; }
+    set textContent(value) { this.text = value; }
+    get textContent() { return (this.text || "") + this.children.map(child => child.textContent).join(""); }
+  }
+  const document = {
+    body: { appendChild(node) { nodes.set(`#${node.id}`, node); } },
+    createElement(tag) { return new Element(tag); },
+    querySelector(selector) { return nodes.get(selector); },
+  };
+  const context = { document, setTimeout: () => 1, clearTimeout() {} };
+  vm.runInNewContext(`${toastSource}\ntoast("Copied.", "success"); toast("Request failed.");`, context);
+  const region = nodes.get("#toast-region");
+  assert.equal(region.attributes["aria-live"], "assertive");
+  assert.equal(region.attributes.role, "alert");
+  assert.equal(region.children.length, 1);
+  assert.match(region.textContent, /Request failed\./);
+  assert.doesNotMatch(region.textContent, /Copied\./);
+  region.children[0].children[1].onclick();
+  assert.equal(region.children[0].removed, true);
 });
 
 test("download contains exact text, uses expected filename, removes anchor, and revokes URL", () => {

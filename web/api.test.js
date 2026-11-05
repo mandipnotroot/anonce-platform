@@ -22,3 +22,25 @@ test('network and remote errors never echo sensitive messages',async()=>{
   globalThis.fetch=async()=>({status:403,ok:false,json:async()=>({error:{code:'FORBIDDEN',message:'private'}})});
   await assert.rejects(request('/api/member/me'),e=>e.code==='FORBIDDEN'&&!e.message.includes('private'));
 });
+test('remote error envelopes give safe specific context and HTTP fallback',async()=>{
+  for (const payload of [
+    {error:{code:'FORBIDDEN',message:'private'}},
+    {error:{code:{detail:'secret'},message:{detail:'secret'}}},
+    {code:{detail:'secret'}},
+  ]) {
+    globalThis.fetch=async()=>({status:403,ok:false,json:async()=>payload});
+    await assert.rejects(request('/api/member/me'),e=>typeof e.message==='string'&&!e.message.includes('[object Object]')&&!e.message.includes('secret'));
+  }
+  globalThis.fetch=async()=>({status:429,ok:false,json:async()=>({error:{code:'RATE_LIMITED'}})});
+  await assert.rejects(request('/api/member/me'),e=>e.message==='Too many attempts. Wait a moment, then try again.');
+  globalThis.fetch=async()=>({status:401,ok:false,json:async()=>({error:{code:'invalid_credentials'}})});
+  await assert.rejects(request('/api/member/me'),e=>e.message==='Login or password is incorrect.');
+  for (const [status,message] of [[400,/Check the information/],[403,/do not have permission/],[409,/changed or conflicts/],[410,/expired or closed/],[429,/Too many attempts/],[503,/temporarily unavailable/]]) {
+    globalThis.fetch=async()=>({status,ok:false,json:async()=>({error:{code:'unknown_code'}})});
+    await assert.rejects(request('/api/member/me'),e=>message.test(e.message));
+  }
+  globalThis.fetch=async()=>({status:502,ok:false,json:async()=>({error:{message:{raw:'private'}}})});
+  await assert.rejects(request('/api/member/me'),e=>e.message==='Service is temporarily unavailable. Try again shortly.');
+  globalThis.fetch=async()=>({status:502,ok:false,json:async()=>{throw new Error('not JSON');}});
+  await assert.rejects(request('/api/member/me'),e=>e.message.includes('temporarily unavailable')&&!e.message.includes('not JSON'));
+});

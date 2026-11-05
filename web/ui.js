@@ -11,7 +11,6 @@ let session = null,
   review = null,
   pendingResponses = [],
   reviewNext = null,
-  reviewPageError = "",
   busy = false;
 const esc = (s) =>
   String(s ?? "").replace(
@@ -26,7 +25,44 @@ const path = () =>
 const go = (p) => {
   location.hash = "/" + String(p).replace(/^\/+/, "");
 };
-const say = (e) => e?.message || "Something went wrong. Please try again.";
+const say = (e) => typeof e === "string" ? e : typeof e?.message === "string" ? e.message : "Something went wrong. Please try again.";
+function toast(message, type = "error") {
+  let region = document.querySelector("#toast-region");
+  if (!region) {
+    region = document.createElement("div");
+    region.id = "toast-region";
+    region.className = "toast-region";
+    region.setAttribute("aria-atomic", "true");
+    document.body.appendChild(region);
+  }
+  region.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+  region.setAttribute("role", type === "error" ? "alert" : "status");
+  region.replaceChildren();
+  const item = document.createElement("div");
+  item.className = `toast toast-${type}`;
+  const text = document.createElement("span");
+  text.textContent = message;
+  item.appendChild(text);
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.type = "button";
+  close.setAttribute("aria-label", "Dismiss notification");
+  close.textContent = "×";
+  close.onclick = () => item.remove();
+  item.appendChild(close);
+  region.appendChild(item);
+  clearTimeout(region.dismissTimer);
+  region.dismissTimer = setTimeout(() => item.remove(), 10000);
+}
+async function copyText(value, label = "Text") {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(value);
+    toast(`${label} copied.`, "success");
+  } catch {
+    toast(`Could not copy ${label.toLowerCase()}. Select and copy it manually.`, "error");
+  }
+}
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
 }
@@ -74,24 +110,20 @@ function head(title, sub, action = "") {
 function button(label, href, cls = "") {
   return `<a class="button ${cls}" href="#/${href}">${esc(label)}</a>`;
 }
-function errorBox(message) {
-  return `<p class="form-error" role="alert">${esc(message)}</p>`;
-}
 function recoveryPhrasePanel(words, prefix = "recovery") {
-  return `<div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><div class="recovery-actions"><button id="${prefix}-copy" class="button secondary" type="button">Copy phrase</button><button id="${prefix}-download" class="button secondary" type="button">Download .txt</button><span id="${prefix}-feedback" role="status" aria-live="polite"></span></div>`;
+  return `<div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><div class="recovery-actions"><button id="${prefix}-copy" class="button secondary" type="button">Copy phrase</button><button id="${prefix}-download" class="button secondary" type="button">Download .txt</button></div>`;
 }
 function bindRecoveryPhraseTools(words, prefix = "recovery") {
   const phraseText = words.join(" ");
   const copyButton = document.querySelector(`#${prefix}-copy`);
   const downloadButton = document.querySelector(`#${prefix}-download`);
-  const feedback = document.querySelector(`#${prefix}-feedback`);
   copyButton.onclick = async () => {
     if (!copyButton.isConnected || phrase !== words) return;
     try {
       await navigator.clipboard.writeText(phraseText);
-      if (copyButton.isConnected && phrase === words) feedback.textContent = "Phrase copied.";
+      if (copyButton.isConnected && phrase === words) toast("Phrase copied.", "success");
     } catch {
-      if (copyButton.isConnected && phrase === words) feedback.textContent = "Copy failed. Select and copy the words above.";
+      if (copyButton.isConnected && phrase === words) toast("Could not copy recovery phrase. Select and copy the words above.");
     }
   };
   downloadButton.onclick = () => {
@@ -108,7 +140,7 @@ function bindRecoveryPhraseTools(words, prefix = "recovery") {
       link.remove();
       URL.revokeObjectURL(url);
     }
-    feedback.textContent = "Text file downloaded.";
+    toast("Recovery phrase file downloaded.", "success");
   };
 }
 function bind(form, fn) {
@@ -126,9 +158,7 @@ function bind(form, fn) {
     try {
       await fn(new FormData(form), form);
     } catch (err) {
-      let box = form.querySelector(".form-error");
-      if (box) box.textContent = say(err);
-      else form.insertAdjacentHTML("afterbegin", errorBox(say(err)));
+      toast(say(err));
     } finally {
       busy = false;
       if (b) {
@@ -176,7 +206,7 @@ async function load() {
   const p = path();
   if (p[0] === "invite" && p[1]) {
     frame(
-      `${head("You’re invited", "Accept this invitation to join an organization.")}<section class="card form-card"><p class="form-error" id="invite-error"></p><button class="button" id="accept-invite">Accept invitation</button></section>`,
+      `${head("You’re invited", "Accept this invitation to join an organization.")}<section class="card form-card"><button class="button" id="accept-invite">Accept invitation</button></section>`,
       "Invitation",
     );
     document.querySelector("#accept-invite").onclick = async () => {
@@ -185,7 +215,7 @@ async function load() {
         go("/orgs");
         load();
       } catch (e) {
-        document.querySelector("#invite-error").textContent = say(e);
+        toast(say(e));
       }
     };
     return;
@@ -194,10 +224,8 @@ async function load() {
   if (p[0] === "orgs") return renderOrgs();
   if (p[0] === "review" && p[1]) return renderReview(p[1], p[2]);
   if (organizationError) {
-    frame(
-      `${head("Organizations unavailable", organizationError)}`,
-      "Overview",
-    );
+    frame(`${head("Organizations unavailable", "We couldn’t load your organizations. Try again shortly.")}`, "Overview");
+    toast(organizationError);
     return;
   }
   if (!currentOrg) {
@@ -211,15 +239,16 @@ async function load() {
     const result = await api.listReviews({ orgId: currentOrg.id });
     reviews = result.items;
     reviewNext = result.next;
-    reviewPageError = "";
     try {
       pendingResponses = (await api.listPendingResponses()).items;
     } catch (e) {
       pendingResponses = null;
+      toast(say(e));
     }
     renderHome();
   } catch (e) {
-    frame(`${head("Reviews unavailable", say(e))}`, "Overview");
+    frame(`${head("Reviews unavailable", "We couldn’t load reviews. Try again shortly.")}`, "Overview");
+    toast(say(e));
   }
 }
 function emptyCard(t, d, act = "") {
@@ -238,7 +267,7 @@ function renderHome() {
             })
             .join(
               "",
-            )}</div>${reviewNext ? `<button class="button secondary load-more" id="load-more-reviews">Load more reviews</button>` : ""}${reviewPageError ? errorBox(reviewPageError) : ""}`
+            )}</div>${reviewNext ? `<button class="button secondary load-more" id="load-more-reviews">Load more reviews</button>` : ""}`
         : emptyCard(
             "Nothing here yet",
             "Your reviews will appear here once you create one.",
@@ -269,15 +298,15 @@ async function loadMoreReviews(event) {
     });
     reviews = [...reviews, ...result.items];
     reviewNext = result.next;
-    reviewPageError = "";
     renderHome();
     (
       document.querySelector("#load-more-reviews") ||
       document.querySelector("#reviews-heading")
     )?.focus();
   } catch (error) {
-    reviewPageError = say(error);
-    renderHome();
+    toast(say(error));
+    button.disabled = false;
+    setButtonText(button, "Load more reviews");
   }
 }
 function countText(value) {
@@ -309,10 +338,9 @@ function isReviewOwner(r) {
   );
 }
 function renderPendingResponses() {
-  if (pendingResponses === null)
-    return `<section class="card empty" role="status"><strong>Pending responses unavailable</strong>We couldn’t check saved submissions right now.</section>`;
+  if (pendingResponses === null) return "";
   if (!pendingResponses.length) return "";
-  return `<section class="section-row"><h2 class="section-title">Responses to finish</h2></section><div class="review-list">${pendingResponses.map((item) => `<article class="card review-row"><div class="review-info"><strong>${esc(item.title || "Anonymous response")}</strong><small>Submission still processing</small></div><button class="button secondary small" data-pending="${esc(item.pendingId)}">Check status</button></article>`).join("")}</div><p class="form-error" id="pending-error" role="status"></p>`;
+  return `<section class="section-row"><h2 class="section-title">Responses to finish</h2></section><div class="review-list">${pendingResponses.map((item) => `<article class="card review-row"><div class="review-info"><strong>${esc(item.title || "Anonymous response")}</strong><small>Submission still processing</small></div><button class="button secondary small" data-pending="${esc(item.pendingId)}">Check status</button></article>`).join("")}</div>`;
 }
 async function resumePending(pendingId, button) {
   const old = button.textContent;
@@ -337,8 +365,7 @@ async function resumePending(pendingId, button) {
       }, 1800);
     }
   } catch (e) {
-    const error = document.querySelector("#pending-error");
-    if (error) error.textContent = say(e);
+    toast(say(e));
     setButtonText(button, old);
     button.disabled = false;
   }
@@ -434,8 +461,9 @@ function renderOrgs() {
         `<div class="notice">Invite created. Share this link with the member:<div class="share-box"><input readonly value="${esc(location.origin + location.pathname + "#/invite/" + r.token)}" aria-label="Invitation link"><button class="button small" type="button" id="copy">Copy</button></div></div>`;
       renderButtonIcons(document.querySelector("#invite-result"));
       document.querySelector("#copy").onclick = () =>
-        navigator.clipboard?.writeText(
+        copyText(
           location.origin + location.pathname + "#/invite/" + r.token,
+          "Invitation link",
         );
     });
     loadMembers();
@@ -462,7 +490,7 @@ async function loadMembers() {
             });
             loadMembers();
           } catch (e) {
-            alert(say(e));
+            toast(say(e));
           }
         }),
     );
@@ -477,12 +505,13 @@ async function loadMembers() {
               });
               loadMembers();
             } catch (e) {
-              alert(say(e));
+              toast(say(e));
             }
         }),
     );
   } catch (e) {
-    box.textContent = say(e);
+    box.textContent = "Membership could not be loaded.";
+    toast(say(e));
   }
 }
 async function renderAccount() {
@@ -540,11 +569,12 @@ async function renderReview(id, tab) {
   }
   try {
     review = await api.getReview({ reviewId: id });
-  } catch (e) {
-    frame(
-      `${head("Review unavailable", say(e))}${button("Back to reviews", "", "secondary")}`,
+    } catch (e) {
+      frame(
+      `${head("Review unavailable", "We couldn’t load this review. Try again shortly.")}${button("Back to reviews", "", "secondary")}`,
       "Review",
     );
+    toast(say(e));
     return;
   }
   const canManage = isReviewOwner(review);
@@ -575,6 +605,7 @@ async function renderReview(id, tab) {
     `${head(review.title || "Untitled review", `${status} · ${review.revision !== undefined ? "Revision " + review.revision : "Review workspace"}`, `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}${canManage ? '<button class="button secondary" id="share">Share</button>' : ""}</div>`)}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
     "Review",
   );
+  if (responseError) toast(responseError);
   document
     .querySelector("#retry-responses")
     ?.addEventListener("click", () => renderReview(id, "results"));
@@ -598,8 +629,7 @@ async function renderReview(id, tab) {
         .querySelector("#load-more-responses")
         ?.addEventListener("click", loadMoreResponses);
     } catch (e) {
-      const error = document.querySelector("#response-page-error");
-      if (error) error.textContent = say(e);
+      toast(say(e));
       button.disabled = false;
       setButtonText(button, "Load more responses");
     }
@@ -615,7 +645,7 @@ async function renderReview(id, tab) {
       });
       load();
     } catch (e) {
-      alert(say(e));
+      toast(say(e));
     }
   });
   document.querySelector("#close")?.addEventListener("click", async () => {
@@ -627,7 +657,7 @@ async function renderReview(id, tab) {
         });
         load();
       } catch (e) {
-        alert(say(e));
+        toast(say(e));
       }
   });
   document.querySelector("#share")?.addEventListener("click", () => {
@@ -636,8 +666,7 @@ async function renderReview(id, tab) {
       location.pathname +
       "#/respond/" +
       encodeURIComponent(id);
-    navigator.clipboard?.writeText(url);
-    alert("Response link copied when clipboard access is available. " + url);
+    copyText(url, "Response link");
   });
   bind("#edit-review", async (fd) => {
     const questions = [...document.querySelectorAll(".question")].map((q) => ({
@@ -710,19 +739,19 @@ function bindResponseExports(id) {
         a.click();
         URL.revokeObjectURL(url);
       } catch (e) {
-        document.querySelector("#export-error").textContent = say(e);
+        toast(say(e));
       }
     });
 }
 function renderResponseResults(result, error, r) {
   if (error)
-    return `<section class="card empty" role="alert"><strong>Could not load responses</strong>${esc(error)}<button class="button secondary retry-button" id="retry-responses">Try again</button></section>`;
+    return `<section class="card empty"><strong>Could not load responses</strong>Try again shortly.<button class="button secondary retry-button" id="retry-responses">Try again</button></section>`;
   if (!result)
     return `<section class="card form-card"><div class="skeleton" aria-label="Loading responses"></div></section>`;
   const items = Array.isArray(result.items) ? result.items : [],
     questions = r.questions || [];
   if (!items.length)
-    return `<section class="card empty"><strong>No responses yet</strong>Submitted responses will appear here once they are available to review.</section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button><p class="form-error" id="response-page-error" role="status"></p>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div><p class="form-error" id="export-error"></p>`;
+     return `<section class="card empty"><strong>No responses yet</strong>Submitted responses will appear here once they are available to review.</section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
   return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? " · more responses available" : ""}</p></div></div><div class="review-list">${items
     .map(
       (item, index) =>
@@ -744,7 +773,7 @@ function renderResponseResults(result, error, r) {
     )
     .join(
       "",
-    )}</div>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button><p class="form-error" id="response-page-error" role="status"></p>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div><p class="form-error" id="export-error"></p>`;
+     )}</div>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
 }
 function questionHTML(q = {}) {
   return `<div class="question"><div class="question-top"><strong>Question</strong><button class="icon-btn" type="button" data-remove aria-label="Remove question">×</button></div><div class="field"><label>Question text</label><input name="qtext" required maxlength="500" value="${esc(q.text)}"></div><div class="inline"><div class="field"><label>Answer type</label><select name="qtype"><option value="text" ${q.type === "text" ? "selected" : ""}>Text</option><option value="single" ${q.type === "single" ? "selected" : ""}>Choose one</option><option value="multiple" ${q.type === "multiple" ? "selected" : ""}>Choose multiple</option></select></div><label class="check"><input name="qrequired" type="checkbox" ${q.required ? "checked" : ""}> Required</label></div><div class="field"><label>Choices <span class="help">(one per line, for choice questions)</span></label><textarea name="qoptions">${esc((q.options || []).join("\n"))}</textarea></div></div>`;
@@ -773,7 +802,8 @@ async function renderRespond(id) {
   try {
     r = await api.getReview({ reviewId: id });
   } catch (e) {
-    frame(`${head("This review is unavailable", say(e))}`, "Respond");
+    frame(`${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`, "Respond");
+    toast(say(e));
     return;
   }
   const questions = r.questions || [];
@@ -837,7 +867,7 @@ async function renderRespond(id) {
             state.textContent =
               "Still processing. You can check again shortly.";
         } catch (e) {
-          state.textContent = say(e);
+          toast(say(e));
         } finally {
           if (document.querySelector("#retry"))
             document.querySelector("#retry").disabled = false;

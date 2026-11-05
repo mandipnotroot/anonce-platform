@@ -37,7 +37,7 @@ const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
 export const getSourceURL=()=>"https://example.invalid/source";
 export const getSession=async()=>active;
 export const register=async()=>{active={account_id:"acct",login:"demo"};return {recoveryWords:phrase,session:active};};
-export const login=async()=>{active={account_id:"acct",login:"demo"};return active;};
+export const login=async({password})=>{if(password==="fail-password")throw new Error("Login or password is incorrect.");active={account_id:"acct",login:"demo"};return active;};
 export const recover=async()=>{active={account_id:"acct",login:"demo"};return {recoveryWords:phrase,session:active};};
 export const rotateRecovery=async()=>({recoveryWords:phrase,session:active});
 export const listOrganizations=async()=>({items:[{id:"org",name:"Demo",role:"reviewer"}]});
@@ -49,7 +49,9 @@ export const listResponses=async()=>({items:[{id:"r1",acceptedAt:"2026-01-01T00:
 
 async function verifyRecoveryTools(page, expected) {
   await page.getByRole("button", { name: "Copy phrase" }).click();
-  await page.getByText("Phrase copied.").waitFor();
+  await page.locator("#toast-region").getByText("Phrase copied.").waitFor();
+  await page.getByRole("button", { name: "Dismiss notification" }).click();
+  await page.locator("#toast-region").getByText("Phrase copied.").waitFor({ state: "detached" });
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected);
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download .txt" }).click();
@@ -97,6 +99,16 @@ try {
   await captures("recovery");
   assert.ok(await page.locator(".recovery-actions .icon").count() >= 2, "recovery action icons missing");
 
+  const errorContext = await browser.newContext();
+  const errorPage = await errorContext.newPage();
+  await errorPage.goto(`http://127.0.0.1:${port}/index.html#/login`);
+  await errorPage.locator("#login").fill("demo");
+  await errorPage.locator("#password").fill("fail-password");
+  await errorPage.getByRole("button", { name: "Sign in" }).click();
+  await errorPage.locator("#toast-region").getByText("Login or password is incorrect.").waitFor();
+  assert.equal(await errorPage.locator("#toast-region").getByText("Login or password is incorrect.").count(), 1, "form error duplicated toast");
+  assert.equal(await errorPage.locator("#auth .form-error").textContent(), "", "inline error duplicated toast");
+
   for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 375, height: 812 }, { width: 320, height: 720 }]) {
     await page.setViewportSize(viewport);
     const theme = await page.evaluate(() => ({
@@ -117,6 +129,9 @@ try {
 
   await page.evaluate(() => { location.hash = "#/review/review/results"; });
   await page.getByText("This response could not be decrypted or validated.").waitFor();
+  await page.getByRole("button", { name: "Share" }).click();
+  await page.locator("#toast-region").getByText("Response link copied.").waitFor();
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /#\/respond\/review$/);
   await captures("results");
   const routeBeforeSkip = await page.evaluate(() => location.hash);
   const headingBeforeSkip = await page.getByRole("heading", { level: 1 }).textContent();
