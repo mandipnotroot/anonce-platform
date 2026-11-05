@@ -22,6 +22,8 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Simplify the web interface with self-hosted Geist typography, Lucide icons,
+  restrained navigation, and plain review status text instead of badges.
 - Use Alpine containers and current stable Go, Node.js, PostgreSQL, Caddy,
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
