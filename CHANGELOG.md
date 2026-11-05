@@ -23,6 +23,9 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Align the web interface with the reference design: centered header navigation,
+  a constrained content area, a shared footer, and consistent light/dark cards
+  and forms across desktop and mobile screens.
 - Make contributor guidance independent of personal Git identities and coding
   tools, document pull request expectations, and align runtime requirements with CI.
 - Use neutral light/dark surfaces, accessible focus states, responsive navigation,

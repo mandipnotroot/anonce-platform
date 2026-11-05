@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { chromium } from "playwright";
 
 const root = resolve(fileURLToPath(new URL("../web/", import.meta.url)));
+const artifactDir = process.env.ANONCE_UI_ARTIFACT_DIR || join(tmpdir(), "anonce-ui");
+await mkdir(artifactDir, { recursive: true });
 const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, "http://127.0.0.1").pathname;
@@ -65,13 +67,32 @@ try {
   const page = await context.newPage();
   const requestPayloads = [];
   page.on("request", (request) => requestPayloads.push(`${request.url()} ${request.postData() || ""}`));
+  const captures = async (name) => {
+    for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      for (const colorScheme of ["light", "dark"]) {
+        await page.emulateMedia({ colorScheme });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        assert.equal(await page.evaluate(() => Math.abs(document.querySelector("main").getBoundingClientRect().left - document.querySelector(".brand").getBoundingClientRect().left) < 1), true, `${name} main offset suggests phantom sidebar at ${viewport.width}px`);
+        assert.equal(await page.evaluate(() => { const nav = document.querySelector(".site-header nav").getBoundingClientRect(); const header = document.querySelector(".site-header").getBoundingClientRect(); return nav.left >= header.left && nav.right <= header.right; }), true, `${name} navigation exceeds header at ${viewport.width}px`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${name} overflow at ${viewport.width}px`);
+        await page.screenshot({ path: join(artifactDir, `anonce-${name}-${viewport.width}-${colorScheme}.png`), fullPage: true });
+      }
+    }
+  };
+  await page.goto(`http://127.0.0.1:${port}/index.html#/login`);
+  assert.ok(await page.locator(".site-header nav").count(), "reference-style centered navigation missing");
+  assert.equal(await page.locator(".side,.mobile-head").count(), 0, "legacy sidebar or mobile dock remains");
+  assert.ok(await page.locator(".site-footer").count(), "reference-style footer missing");
+  await captures("auth");
   await page.goto(`http://127.0.0.1:${port}/index.html#/register`);
   await page.locator("#login").fill("demo");
   await page.locator("#password").fill("correct horse battery staple");
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("heading", { name: "Your recovery phrase" }).waitFor();
+  await captures("recovery");
 
-  for (const viewport of [{ width: 1365, height: 900 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1365, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     const theme = await page.evaluate(() => ({
       scheme: getComputedStyle(document.documentElement).colorScheme,
@@ -91,6 +112,7 @@ try {
 
   await page.evaluate(() => { location.hash = "#/review/review/results"; });
   await page.getByText("This response could not be decrypted or validated.").waitFor();
+  await captures("results");
   const routeBeforeSkip = await page.evaluate(() => location.hash);
   const headingBeforeSkip = await page.getByRole("heading", { level: 1 }).textContent();
   await page.locator(".skip-link").focus();
@@ -117,11 +139,11 @@ try {
         iconFailures: [...document.querySelectorAll(".icon")].filter((icon) => !icon.complete || icon.naturalWidth === 0).length,
       }));
       assert.equal(theme.scheme, "light dark");
-      assert.equal(theme.background, colorScheme === "dark" ? "#10171c" : "#f5f7f8", `${colorScheme} theme missing at ${viewport.width}px`);
+      assert.equal(theme.background, colorScheme === "dark" ? "#141a1f" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
       iconFilters[colorScheme] = theme.iconFilter;
       assert.equal(theme.overflow, false, `horizontal overflow at ${viewport.width}px`);
       assert.equal(theme.iconFailures, 0, `broken Lucide icon at ${viewport.width}px`);
-      await page.screenshot({ path: join(tmpdir(), `anonce-${viewport.width}-${colorScheme}.png`), fullPage: true });
+      await page.screenshot({ path: join(artifactDir, `anonce-${viewport.width}-${colorScheme}.png`), fullPage: true });
     }
     assert.notEqual(iconFilters.dark, iconFilters.light, `icon filter did not change for dark mode at ${viewport.width}px`);
   }
@@ -136,6 +158,17 @@ try {
   await verifyRecoveryTools(recoveryPage, expectedPhrase);
   await recoveryPage.locator("#saved").check();
   await recoveryPage.getByRole("button", { name: "Continue to Anonce" }).click();
+  await recoveryPage.getByRole("heading", { name: "Overview" }).waitFor();
+  for (const viewport of [{ width: 1365, height: 900 }, { width: 390, height: 844 }]) {
+    await recoveryPage.setViewportSize(viewport);
+    for (const colorScheme of ["light", "dark"]) {
+      await recoveryPage.emulateMedia({ colorScheme });
+      await recoveryPage.evaluate(() => window.scrollTo(0, 0));
+      assert.equal(await recoveryPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `workspace overflow at ${viewport.width}px`);
+      assert.equal(await recoveryPage.evaluate(() => Math.abs(document.querySelector("main").getBoundingClientRect().left - document.querySelector(".brand").getBoundingClientRect().left) < 1), true, `workspace main offset suggests phantom sidebar at ${viewport.width}px`);
+      await recoveryPage.screenshot({ path: join(artifactDir, `anonce-workspace-${viewport.width}-${colorScheme}.png`), fullPage: true });
+    }
+  }
   await recoveryPage.evaluate(() => { location.hash = "#/account"; });
   await recoveryPage.getByRole("heading", { name: "Recovery phrase" }).waitFor();
   await recoveryPage.locator('input[name="currentPassword"]').last().fill("current password");
