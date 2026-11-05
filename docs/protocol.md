@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-# Protocol v1 contract
+# Protocol contracts
 
 Normative formats; implementation and verification status are separate. HTTP fields and endpoints are defined in [openapi.yaml](openapi.yaml); system trust boundaries are in [architecture.md](architecture.md).
 
@@ -62,7 +62,7 @@ Generate random 32-byte master key `V`; wrap it independently for password and r
 | Key | `HKDF(V,SHA256(E('vault-kdf',deployment,account,object_id)),E('vault-object'),32)` |
 | AAD | `E('vault-object',deployment,account,object_id,U64(revision))` |
 | CAS | `expected_revision="0"` creates revision `"1"`; updates increment by one |
-| Contents | Membership seed, recipient keys, pending issuance state, tokens, and exact pending submissions; plaintext never reaches the server |
+| Contents | Membership seed, review content and recipient keys, pending issuance state, tokens, and exact pending submissions; plaintext never reaches the server |
 
 - Same-device automatic unlock persists a nonextractable HKDF CryptoKey in IndexedDB and derives an in-memory ChaCha cache key for encrypted V/private state.
 - This trusted-origin capability is not password-gated defense against malicious served code, XSS, or profile backups.
@@ -71,14 +71,71 @@ Generate random 32-byte master key `V`; wrap it independently for password and r
 
 ## Reviews and blind authorizations
 
-Descriptor is base64url exact JSON bytes containing exactly:
+### Encrypted review content
 
-`{v:1,deployment_id,review_id,org_id,reviewer_account_id,reviewer_membership_id,reviewer_certificate,title,description,questions,recipient_public_key,issuer_key_id,issuer_public_key,max_responses,opens_at,closes_at}`.
+Before creating a draft, the browser generates a random 16-byte review ID,
+an independent random 32-byte content key, and an X25519 recipient key pair.
+The content key does not decrypt responses. Content plaintext contains exactly
+`{v:1,title,description,questions}`. Each question contains exactly
+`{id,type,label,required,choices:[{id,label}]}`, with type `text|single|multiple`.
+Question IDs, types, required flags, choices, and array structure are encrypted too.
 
-- Question: `{id,type,label,required,choices:[{id,label}]}`, type `text|single|multiple`.
+Encrypt UTF-8 JSON with the established ChaCha20-Poly1305 implementation using
+the content key and a fresh random 12-byte nonce. AAD is
+`E('review-content',deployment_id,org_id,review_id,U64(1))`.
+The envelope contains exactly `{v:1,nonce,ciphertext}`; ciphertext includes the
+16-byte tag. Plaintext is at most 32768 bytes; ciphertext is 16–32784 bytes.
+
+The creator's vault object uses the review ID as its object ID. Its plaintext
+contains exactly
+`{v:1,kind:'review-keys',review_id,content_key,recipient_private_key}`.
+Both keys encode 32 bytes independently. Draft creation atomically stores the
+encrypted review and encrypted vault object. Updates reuse keys with fresh
+content nonces. Publication reuses the exact saved content envelope.
+
+Browser content validation requires a 1–300-byte title, a description of at most
+10000 bytes, and 0–100 draft questions. Publication and responding require at
+least one question. Question IDs are unique and 1–100 bytes; labels are
+1–2000 bytes. `required` is boolean. Text questions have no choices; single
+and multiple choice questions have 2–100 choices. Choice IDs are unique within
+their question and 1–100 bytes; choice labels are 1–1000 bytes. These bounds
+measure UTF-8 bytes, and the aggregate plaintext bound also applies.
+The server can validate envelope framing, not question semantics.
+
+### Descriptor v2
+
+Descriptor is base64url exact JSON bytes, at most 65536 decoded bytes, containing exactly:
+
+`{v:2,deployment_id,review_id,org_id,reviewer_account_id,reviewer_membership_id,reviewer_certificate,encrypted_content,recipient_public_key,issuer_key_id,issuer_public_key,max_responses,opens_at,closes_at}`.
+
+- `encrypted_content`: the saved content envelope. Descriptor v1 is not supported.
 - `max_responses`: positive JSON integer, per member.
 - Creator signature: membership Ed25519 over `E('review-descriptor',descriptor_bytes)`.
 - Descriptor hash: SHA256 of exact descriptor bytes. Published metadata is immutable.
+
+Verify the outer descriptor before opening its content. Browser answer
+encryption/decryption requires successfully authenticated, validated content;
+plaintext is not appended to the signed descriptor. Publication compares the
+stored encrypted envelope and operational metadata under revision CAS. Keys
+already exist in the vault; publication does not write another vault object.
+
+### Invitation links
+
+Respondent links have this exact shape:
+`https://<origin>/#/respond/<review_id>?v=1&k=<content_key>`.
+The review ID and key are canonical unpadded base64url encodings of 16 and
+32 bytes respectively. Require exactly one `v=1` and one `k`, with no unknown
+parameters or extra path components. The query-like portion is inside the URL
+fragment, not the HTTP query. Preserve the complete fragment through sign-in,
+registration, and recovery; never put its key in requests, challenges, or logs.
+
+Anyone holding the link can read the review content. The link grants neither
+membership nor response authorization and cannot decrypt submitted answers.
+Creator vault keys restore drafts and links after sign-in. Other organization
+members see only locked review metadata unless given a link. Missing keys fail
+closed rather than producing empty questions. There is no content-key rotation
+or reviewer key-distribution mechanism in this contract. Deleting a draft removes
+its creator vault object, not copies, historical snapshots, or operation caches.
 
 | Verification | Scope and limit |
 | --- | --- |
@@ -109,7 +166,7 @@ Browser encrypts pending `{request_id,serial,descriptor_hash,prepared_message,bl
 
 ## Response encryption and receipts
 
-RFC 9180 HPKE base mode: X25519/HKDF-SHA256/ChaCha20-Poly1305, suite `0x0020/0x0001/0x0003`. Info is `E('response-hpke',deployment,review_id,descriptor_hash)`; AAD is `E('response-aad',deployment,review_id,descriptor_hash)`. Plaintext JSON: `{v:1,review_id,descriptor_hash,answers:{question_id:string|array}}`. Validate answers against the signed descriptor in the browser; server cannot inspect plaintext.
+RFC 9180 HPKE base mode: X25519/HKDF-SHA256/ChaCha20-Poly1305, suite `0x0020/0x0001/0x0003`. Info is `E('response-hpke',deployment,review_id,descriptor_hash)`; AAD is `E('response-aad',deployment,review_id,descriptor_hash)`. Plaintext JSON: `{v:1,review_id,descriptor_hash,answers:{question_id:string|array}}`. Validate answers against the authenticated decrypted descriptor content in the browser; server cannot inspect plaintext.
 
 | Size boundary | Bytes | Meaning |
 | --- | ---: | --- |

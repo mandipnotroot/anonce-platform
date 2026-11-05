@@ -22,7 +22,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	ctx := context.Background()
 	orgEnv := signed(t, s, h, u, "org-create", map[string]string{"request_id": protocol.ID(), "name": "Quota"}, false)
 	org := result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 201)["id"].(string)
-	env := signed(t, s, h, u, "review-create", map[string]any{"request_id": protocol.ID(), "title": "Two per member", "max_responses": 2}, false)
+	env := signed(t, s, h, u, "review-create", fakeReviewCreate(2), false)
 	v := result(t, request(h, "POST", "/api/member/orgs/"+org+"/reviews", env, u), 201)
 	id := v["id"].(string)
 	path := "/api/member/reviews/" + id

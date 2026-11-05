@@ -40,6 +40,17 @@ async function call(request) {
   return JSON.parse(value);
 }
 try {
+  const contentVector = JSON.parse(readFileSync(new URL('../testdata/review-content-v1.json', import.meta.url), 'utf8'));
+  const contentAAD = E('review-content', [hex(contentVector.deployment_id_hex), hex(contentVector.org_id_hex), hex(contentVector.review_id_hex), u64be(1)]);
+  const contentPlaintext = utf8(JSON.stringify(contentVector.content));
+  const contentKey = hex(contentVector.key_hex), contentNonce = hex(contentVector.nonce_hex);
+  const contentCiphertext = chacha20poly1305(contentKey, contentNonce, contentAAD).encrypt(contentPlaintext);
+  assert.deepEqual(contentAAD, hex(contentVector.aad_hex));
+  assert.deepEqual(contentCiphertext, hex(contentVector.ciphertext_hex));
+  assert.equal((await call({ op: 'review-content-context', fields: [contentVector.deployment_id_hex, contentVector.org_id_hex, contentVector.review_id_hex].map(value => b64(hex(value))) })).bytes, b64(contentAAD));
+  assert.equal((await call({ op: 'chacha-seal', key: b64(contentKey), nonce: b64(contentNonce), aad: b64(contentAAD), plaintext: b64(contentPlaintext) })).ciphertext, b64(contentCiphertext));
+  assert.equal((await call({ op: 'chacha-open', key: b64(contentKey), nonce: b64(contentNonce), aad: b64(contentAAD), ciphertext: b64(contentCiphertext) })).plaintext, b64(contentPlaintext));
+  console.log('PASS fixed review-content-v1 Go/browser key, nonce, context and content interop');
   const init = await call({ op: 'init' });
   assert.ok(init.rsa_spki && init.hpke_public_key);
   const fields = [new Uint8Array(0), utf8('deployment'), u64be('18446744073709551615')];

@@ -20,10 +20,15 @@ publicly; wait until a private reporting channel is available.
 
 ## Trust boundaries
 
-Client private keys, vault keys, password/recovery material, and response plaintext
+Client private keys, review content keys, vault keys, password/recovery material, and question/response plaintext
 must remain browser-only. Anonymous requests must omit credentials; submissions
 must not acquire identifying fields or logs. Distinct server-only membership CA,
 blind issuer, and receipt signing keys require protection at rest.
+
+Secret response links grant review-content access to anyone holding the link.
+Their fragment keys must never enter HTTP requests or logs. They do not decrypt
+answers or grant response authorization. Browser history and copied links can
+retain keys; this version does not provide content-key rotation or link revocation.
 
 Browser-delivered code must be trusted. Anonce does not promise anonymity
 against malicious served code or network/timing correlation. Cryptographic

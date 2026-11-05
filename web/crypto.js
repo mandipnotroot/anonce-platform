@@ -168,6 +168,9 @@ export async function generateRecipientKey() {
   const privateKey = random(32);
   return { privateKey, publicKey: x25519.getPublicKey(privateKey) };
 }
+export async function recipientPublicKey({ privateKey }) {
+  return guard(() => x25519.getPublicKey(requireBytes(privateKey, 32)));
+}
 export async function authenticationPublicKey({ authSeed }) { return guard(() => ed25519.getPublicKey(requireBytes(authSeed, 32))); }
 
 function wrapAAD(accountId, kind, wrapperId, metadataHash) {
@@ -238,7 +241,7 @@ export async function signDescriptor({ descriptorBytes, membershipSeed }) {
 }
 
 const verifiedDescriptors = new WeakMap();
-const descriptorKeys = ['v', 'deployment_id', 'review_id', 'org_id', 'reviewer_account_id', 'reviewer_membership_id', 'reviewer_certificate', 'title', 'description', 'questions', 'recipient_public_key', 'issuer_key_id', 'issuer_public_key', 'max_responses', 'opens_at', 'closes_at'];
+const descriptorKeys = ['v', 'deployment_id', 'review_id', 'org_id', 'reviewer_account_id', 'reviewer_membership_id', 'reviewer_certificate', 'encrypted_content', 'recipient_public_key', 'issuer_key_id', 'issuer_public_key', 'max_responses', 'opens_at', 'closes_at'];
 function exactKeys(object, keys) {
   check(object && typeof object === 'object' && !Array.isArray(object) && Object.keys(object).length === keys.length && keys.every(k => Object.hasOwn(object, k)), 'INVALID_SCHEMA');
 }
@@ -265,22 +268,77 @@ function parseJSON(bytes) {
   }
   return result;
 }
-function validateQuestions(questions) {
-  check(Array.isArray(questions) && questions.length > 0 && questions.length <= 100, 'INVALID_QUESTIONS');
+function boundedText(value, min, max) {
+  check(typeof value === 'string' && value.isWellFormed() && utf8(value).length >= min && utf8(value).length <= max, 'INVALID_CONTENT_STRING');
+}
+function validateQuestions(questions, publish) {
+  check(Array.isArray(questions) && questions.length >= (publish ? 1 : 0) && questions.length <= 100, 'INVALID_QUESTIONS');
   const ids = new Set();
   for (const q of questions) {
     exactKeys(q, ['id', 'type', 'label', 'required', 'choices']);
-    check(typeof q.id === 'string' && q.id.length > 0 && !ids.has(q.id) && typeof q.label === 'string' && q.label.length > 0 && typeof q.required === 'boolean', 'INVALID_QUESTION');
+    boundedText(q.id, 1, 100); boundedText(q.label, 1, 2000);
+    check(!ids.has(q.id) && typeof q.required === 'boolean', 'INVALID_QUESTION');
     ids.add(q.id);
     check(['text', 'single', 'multiple'].includes(q.type) && Array.isArray(q.choices), 'INVALID_QUESTION');
-    check(q.type === 'text' ? q.choices.length === 0 : q.choices.length >= 2, 'INVALID_CHOICES');
+    check(q.type === 'text' ? q.choices.length === 0 : q.choices.length >= 2 && q.choices.length <= 100, 'INVALID_CHOICES');
     const choices = new Set();
     for (const c of q.choices) {
       exactKeys(c, ['id', 'label']);
-      check(typeof c.id === 'string' && c.id.length > 0 && !choices.has(c.id) && typeof c.label === 'string' && c.label.length > 0, 'INVALID_CHOICES');
+      boundedText(c.id, 1, 100); boundedText(c.label, 1, 1000);
+      check(!choices.has(c.id), 'INVALID_CHOICES');
       choices.add(c.id);
     }
   }
+}
+// Drafts allow no questions; publication and responses require at least one.
+export function validateReviewContent(content, { publish = false } = {}) {
+  exactKeys(content, ['v', 'title', 'description', 'questions']);
+  check(content.v === 1, 'INVALID_VERSION');
+  boundedText(content.title, 1, 300); boundedText(content.description, 0, 10000);
+  validateQuestions(content.questions, publish);
+  check(utf8(JSON.stringify(content)).length <= 32768, 'CONTENT_TOO_LARGE');
+  return structuredClone(content);
+}
+// Invitation content keys are random and independent of response recipient keys.
+export async function generateContentKey() { return random(32); }
+// All content operations accept a 32-byte Uint8Array or canonical base64url key.
+// Review and organization IDs are 16-byte Uint8Arrays; deployment comes from init.
+const contentKeyBytes = key => typeof key === 'string' ? decode(key, 32) : requireBytes(key, 32);
+function contentAAD(reviewId, orgId) {
+  return encodeContext('review-content', [deployment(), requireBytes(orgId, 16), requireBytes(reviewId, 16), u64be(1)]);
+}
+function validateContentEnvelope(envelope) {
+  exactKeys(envelope, ['v', 'nonce', 'ciphertext']);
+  check(envelope.v === 1, 'INVALID_VERSION');
+  decode(envelope.nonce, 12);
+  const ciphertext = decode(envelope.ciphertext);
+  check(ciphertext.length >= 16 && ciphertext.length <= 32784, 'CONTENT_TOO_LARGE');
+  return ciphertext;
+}
+export async function sealReviewContent({ reviewId, orgId, contentKey, content }) {
+  return guard(() => {
+    const plaintext = utf8(JSON.stringify(validateReviewContent(content)));
+    const nonce = random(12);
+    const ciphertext = chacha20poly1305(contentKeyBytes(contentKey), nonce, contentAAD(reviewId, orgId)).encrypt(plaintext);
+    return { v: 1, nonce: toBase64url(nonce), ciphertext: toBase64url(ciphertext) };
+  });
+}
+export async function openDraftContent({ reviewId, orgId, contentKey, encryptedContent }) {
+  return guard(() => {
+    const ciphertext = validateContentEnvelope(encryptedContent);
+    const plaintext = chacha20poly1305(contentKeyBytes(contentKey), decode(encryptedContent.nonce, 12), contentAAD(reviewId, orgId)).decrypt(ciphertext);
+    return validateReviewContent(parseJSON(plaintext));
+  });
+}
+export async function openDescriptorContent({ descriptor, contentKey }) {
+  return guard(async () => {
+    const state = trustedDescriptor(descriptor);
+    const content = await openDraftContent({ reviewId: decode(descriptor.review_id, 16), orgId: decode(descriptor.org_id, 16), contentKey, encryptedContent: descriptor.encrypted_content });
+    validateReviewContent(content, { publish: true });
+    trustedDescriptor(descriptor);
+    state.content = structuredClone(content);
+    return content;
+  });
 }
 async function issuerKey(d) {
   const spki = decode(d.issuer_public_key);
@@ -295,11 +353,10 @@ export async function verifyDescriptor({ descriptorBytes, signature, expectedRev
     check(bytes.length <= 65536, 'DESCRIPTOR_TOO_LARGE');
     const d = parseJSON(bytes);
     exactKeys(d, descriptorKeys);
-    check(d.v === 1 && equal(decode(d.deployment_id, 32), deployment()), 'INVALID_DESCRIPTOR');
+    check(d.v === 2 && equal(decode(d.deployment_id, 32), deployment()), 'INVALID_DESCRIPTOR');
     check(equal(decode(d.review_id, 16), requireBytes(expectedReviewId, 16)), 'REVIEW_MISMATCH');
     decode(d.org_id, 16); decode(d.reviewer_account_id, 16); decode(d.reviewer_membership_id, 16); decode(d.recipient_public_key, 32);
-    check(typeof d.title === 'string' && d.title.length > 0 && typeof d.description === 'string', 'INVALID_DESCRIPTOR');
-    validateQuestions(d.questions);
+    validateContentEnvelope(d.encrypted_content);
     check(Number.isSafeInteger(d.max_responses) && d.max_responses >= 1 && d.max_responses <= 1000000, 'INVALID_QUOTA');
     for (const t of [d.opens_at, d.closes_at]) if (t !== null) { check(typeof t === 'string'); u64be(t); }
     if (d.opens_at !== null && d.closes_at !== null) check(BigInt(d.opens_at) < BigInt(d.closes_at), 'INVALID_WINDOW');
@@ -372,7 +429,8 @@ function validateAnswers(d, answers) {
 export async function encryptResponse({ descriptorBytes, descriptor, answers }) {
   return guard(async () => {
     const state = trustedDescriptor(descriptor, descriptorBytes);
-    validateAnswers(descriptor, answers);
+    check(state.content, 'CONTENT_NOT_OPENED');
+    validateAnswers(state.content, answers);
     const plaintext = utf8(JSON.stringify({ v: 1, review_id: descriptor.review_id, descriptor_hash: toBase64url(sha256(state.bytes)), answers }));
     check(plaintext.length + 16 <= 262144, 'RESPONSE_TOO_LARGE');
     const publicKey = await suite.kem.deserializePublicKey(decode(descriptor.recipient_public_key, 32));
@@ -384,6 +442,7 @@ export async function encryptResponse({ descriptorBytes, descriptor, answers }) 
 export async function decryptResponse({ descriptorBytes, descriptor, recipientPrivateKey, enc, ciphertext }) {
   return guard(async () => {
     const state = trustedDescriptor(descriptor, descriptorBytes);
+    check(state.content, 'CONTENT_NOT_OPENED');
     requireBytes(ciphertext);
     check(ciphertext.length >= 16 && ciphertext.length <= 262144, 'RESPONSE_TOO_LARGE');
     requireBytes(recipientPrivateKey, 32);
@@ -394,7 +453,7 @@ export async function decryptResponse({ descriptorBytes, descriptor, recipientPr
     const result = parseJSON(plaintext);
     exactKeys(result, ['v', 'review_id', 'descriptor_hash', 'answers']);
     check(result.v === 1 && result.review_id === descriptor.review_id && result.descriptor_hash === toBase64url(sha256(state.bytes)), 'RESPONSE_CONTEXT_MISMATCH');
-    validateAnswers(descriptor, result.answers);
+    validateAnswers(state.content, result.answers);
     return result;
   });
 }

@@ -122,6 +122,53 @@ test("registration and account rotation share recovery controls", () => {
   assert.match(source, /This response could not be decrypted or validated\./);
 });
 
+test("response invitation routes use strict app parser and fail closed", () => {
+  const routeSource = source.slice(source.indexOf("const routeHash"), source.indexOf("const go ="));
+  const parser = source.slice(source.indexOf("function responseInvitation()"), source.indexOf("function authHref("));
+  const api = { parseResponseInvitation(fragment) { if (fragment.includes("duplicate")) throw Error("invalid"); return { reviewId: "canonical", contentKey: new Uint8Array(32) }; } };
+  const parse = vm.runInNewContext(`${routeSource}\n${parser}\nresponseInvitation`, { api, location: { hash: "#/respond/id?v=1&k=duplicate" } });
+  assert.equal(parse().invalid, true);
+  const valid = vm.runInNewContext(`${routeSource}\n${parser}\nresponseInvitation`, { api, location: { hash: "#/respond/id?v=1&k=canonical" } });
+  assert.equal(valid().reviewId, "canonical");
+  assert.match(source, /This invitation could not be read/);
+  assert.match(source, /contentState === "locked"/);
+  assert.match(source, /Encrypted review/);
+  assert.match(source, /api\.getReview\(\{ reviewId: id, contentKey: invitation\.contentKey \}\)/);
+  assert.match(source, /api\.prepareResponse\(\{ reviewId: id, contentKey: invitation\.contentKey, answers \}\)/);
+});
+
+test("auth continuation preserves full invitation fragment through refresh and auth switches", () => {
+  assert.match(source, /returnRoute = route\[0\] === "respond" \? routeHash\(\)/);
+  assert.match(source, /hashParams\.has\("next"\)[\s\S]*?returnRoute = hashParams\.get\("next"\)/);
+  assert.match(source, /function authHref\(mode\)[\s\S]*?encodeURIComponent\(returnRoute\)/);
+  assert.match(source, /go\(destination\);\s*load\(\);/);
+});
+
+test("same-hash auth continuation reloads route without waiting for hashchange", () => {
+  const goSource = source.slice(source.indexOf("const go ="), source.indexOf("const say ="));
+  let loads = 0;
+  let hash = "#/respond/review?v=1&k=secret";
+  const location = {
+    get hash() { return hash; },
+    set hash(value) { hash = value.startsWith("#") ? value : `#${value}`; },
+  };
+  const go = vm.runInNewContext(`${goSource}\ngo`, { location, load: () => { loads++; } });
+  go("/respond/review?v=1&k=secret");
+  assert.equal(loads, 1);
+  assert.equal(location.hash, "#/respond/review?v=1&k=secret");
+  go("/overview");
+  assert.equal(location.hash, "#/overview");
+  assert.equal(loads, 1);
+});
+
+test("creator share copies app-produced secret invitation URL", () => {
+  assert.match(source, /api\.getInvitationURL\(\{ reviewId: id \}\)/);
+  assert.match(source, /copyText\(await api\.getInvitationURL/);
+  assert.match(source, /Anyone with this link can read the review title and questions/);
+  assert.match(source, /does not grant response authorization or let its holder decrypt answers/);
+  assert.match(source, /Browsers and link-sharing tools may retain fragments/);
+});
+
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
   assert.match(source, /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/);
   assert.match(source, /aria-current="page"/);

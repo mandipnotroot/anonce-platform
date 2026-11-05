@@ -9,6 +9,10 @@ No version has been released.
 ## Unreleased
 
 ### Added
+- Browser-side encryption of review titles, descriptions, and complete questions,
+  including drafts, with separate invitation-link content keys and answer keys.
+  Secret links permit question reading, not membership or answer decryption.
+  Descriptor v2 replaces plaintext content; no legacy-format migration is provided.
 - Browser-local receipt verification with explicit public trust configuration,
   receipt-file import, and downloadable current/historical verification keys.
 - Shared Go/browser receipt-v2 test vectors and negative cases for context,

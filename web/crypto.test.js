@@ -6,6 +6,7 @@ import { CryptoError, toBase64url, fromBase64url } from './crypto.js';
 import * as c from './crypto.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { RSABSSA } from '@cloudflare/blindrsa-ts';
 import { X509CertificateGenerator, BasicConstraintsExtension, KeyUsagesExtension, SubjectAlternativeNameExtension } from '@peculiar/x509';
 
@@ -36,10 +37,14 @@ const rsaSuite = RSABSSA.SHA384.PSS.Randomized();
 const rsa = await rsaSuite.generateKey({ modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]) });
 const spki = new Uint8Array(await crypto.subtle.exportKey('spki', rsa.publicKey));
 const recipient = await c.generateRecipientKey();
-const descriptorJSON = { v: 1, deployment_id: b64(deploymentId), review_id: b64(reviewId), org_id: b64(accountId), reviewer_account_id: b64(accountId), reviewer_membership_id: b64(accountId), reviewer_certificate: b64(new Uint8Array(certificate.rawData)), title: 'Review', description: '', questions: [{ id: 'q1', type: 'text', label: 'Feedback', required: true, choices: [] }], recipient_public_key: b64(recipient.publicKey), issuer_key_id: b64(sha256(spki)), issuer_public_key: b64(spki), max_responses: 2, opens_at: null, closes_at: null };
+const contentKey = await c.generateContentKey();
+const content = { v: 1, title: 'Review', description: '', questions: [{ id: 'q1', type: 'text', label: 'Feedback', required: true, choices: [] }] };
+const encrypted_content = await c.sealReviewContent({ reviewId, orgId: accountId, contentKey, content });
+const descriptorJSON = { v: 2, deployment_id: b64(deploymentId), review_id: b64(reviewId), org_id: b64(accountId), reviewer_account_id: b64(accountId), reviewer_membership_id: b64(accountId), reviewer_certificate: b64(new Uint8Array(certificate.rawData)), encrypted_content, recipient_public_key: b64(recipient.publicKey), issuer_key_id: b64(sha256(spki)), issuer_public_key: b64(spki), max_responses: 2, opens_at: null, closes_at: null };
 const descriptorBytes = c.utf8(JSON.stringify(descriptorJSON));
 const descriptorSignature = await c.signDescriptor({ descriptorBytes, membershipSeed: membership.seed });
 const descriptor = await c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: reviewId });
+await c.openDescriptorContent({ descriptor, contentKey });
 
 test('base64url is unpadded and canonical', () => {
   const bytes = new Uint8Array([0, 255, 254, 128]);
@@ -49,6 +54,74 @@ test('base64url is unpadded and canonical', () => {
   for (const input of ['A', 'AB', 'AB==', 'a+b/', 'AA\n', ' AA', null]) {
     assert.throws(() => fromBase64url(input), CryptoError);
   }
+});
+
+test('content key is independent; encryption authenticates context, key and envelope', async () => {
+  assert.notDeepEqual(contentKey, recipient.privateKey);
+  assert.deepEqual(await c.recipientPublicKey({ privateKey: recipient.privateKey }), recipient.publicKey);
+  const args = { reviewId, orgId: accountId, contentKey, content };
+  const first = await c.sealReviewContent(args), second = await c.sealReviewContent(args);
+  assert.notEqual(first.nonce, second.nonce);
+  assert.deepEqual(await c.openDraftContent({ ...args, contentKey: b64(contentKey), encryptedContent: first }), content);
+  for (const change of [{ reviewId: bytes(16, 9) }, { orgId: bytes(16, 9) }, { contentKey: recipient.privateKey }, { contentKey: b64(contentKey) + '=' }]) {
+    await assert.rejects(c.openDraftContent({ ...args, encryptedContent: first, ...change }), CryptoError);
+  }
+  for (const change of [{ v: 2 }, { nonce: 'AB' }, { extra: true }, { ciphertext: b64(bytes(15)) }, { ciphertext: b64(bytes(32785)) }]) {
+    await assert.rejects(c.openDraftContent({ ...args, encryptedContent: { ...first, ...change } }), CryptoError);
+  }
+  const tampered = fromBase64url(first.ciphertext); tampered[0] ^= 1;
+  await assert.rejects(c.openDraftContent({ ...args, encryptedContent: { ...first, ciphertext: b64(tampered) } }), CryptoError);
+  const other = await import('./crypto.js?other-content-deployment');
+  await other.initCrypto({ ...init, deploymentId: bytes(32, 99) });
+  await assert.rejects(other.openDraftContent({ ...args, encryptedContent: first }), other.CryptoError);
+});
+
+test('content validation enforces exact schema, UTF8 byte bounds and draft versus publication', async () => {
+  assert.deepEqual(c.validateReviewContent({ ...content, questions: [] }).questions, []);
+  assert.throws(() => c.validateReviewContent({ ...content, questions: [] }, { publish: true }), CryptoError);
+  const q = content.questions[0];
+  const invalid = [
+    { ...content, v: 2 }, { ...content, extra: true }, { ...content, title: '' },
+    { ...content, title: '界'.repeat(101) }, { ...content, title: '\ud800' },
+    { ...content, description: 'x'.repeat(10001) },
+    { ...content, questions: Array(101).fill(q) }, { ...content, questions: [q, q] },
+    ...[{ id: '' }, { id: 'x'.repeat(101) }, { label: 'x'.repeat(2001) }, { required: 1 }, { type: 'other' }, { extra: 1 }, { choices: [{ id: 'a', label: 'A' }] }].map(change => ({ ...content, questions: [{ ...q, ...change }] })),
+    { ...content, questions: [{ ...q, type: 'single', choices: [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }] }] },
+    { ...content, questions: Array.from({ length: 20 }, (_, i) => ({ ...q, id: String(i), label: 'x'.repeat(2000) })) },
+  ];
+  for (const value of invalid) assert.throws(() => c.validateReviewContent(value), CryptoError);
+  const nonce = bytes(12), aad = c.encodeContext('review-content', [deploymentId, accountId, reviewId, c.u64be(1)]);
+  for (const plaintext of [c.utf8('{"v":1,"v":1}'), new Uint8Array([0xff]), c.utf8(JSON.stringify({ ...content, extra: 1 }))]) {
+    const encryptedContent = { v: 1, nonce: b64(nonce), ciphertext: b64(chacha20poly1305(contentKey, nonce, aad).encrypt(plaintext)) };
+    await assert.rejects(c.openDraftContent({ reviewId, orgId: accountId, contentKey, encryptedContent }), CryptoError);
+  }
+});
+
+test('verified descriptor must be opened; signed data and internal content remain separate', async () => {
+  const fresh = await c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: reviewId });
+  const args = { descriptorBytes, descriptor: fresh, answers: { q1: 'answer' } };
+  await assert.rejects(c.encryptResponse(args), e => e.code === 'CONTENT_NOT_OPENED');
+  await assert.rejects(c.decryptResponse({ ...args, recipientPrivateKey: recipient.privateKey, enc: bytes(32), ciphertext: bytes(16) }), e => e.code === 'CONTENT_NOT_OPENED');
+  await assert.rejects(c.openDescriptorContent({ descriptor: structuredClone(fresh), contentKey }), CryptoError);
+  const opened = await c.openDescriptorContent({ descriptor: fresh, contentKey });
+  assert.deepEqual(fresh, descriptorJSON);
+  opened.questions[0].required = false;
+  await assert.rejects(c.encryptResponse({ ...args, answers: {} }), e => e.code === 'MISSING_ANSWER');
+  const sealed = await c.encryptResponse(args);
+  await assert.rejects(c.decryptResponse({ ...args, ...sealed, recipientPrivateKey: contentKey }), e => e.code === 'RECIPIENT_KEY_MISMATCH');
+  fresh.encrypted_content.nonce = b64(bytes(12));
+  await assert.rejects(c.openDescriptorContent({ descriptor: fresh, contentKey }), e => e.code === 'UNVERIFIED_DESCRIPTOR');
+  await assert.rejects(c.encryptResponse(args), e => e.code === 'UNVERIFIED_DESCRIPTOR');
+});
+
+test('shared deterministic review-content inputs decrypt with fixed nonce and key', async () => {
+  const vector = JSON.parse(await readFile(new URL('../testdata/review-content-v1.json', import.meta.url), 'utf8'));
+  const hex = value => new Uint8Array(Buffer.from(value, 'hex'));
+  const aad = c.encodeContext('review-content', [hex(vector.deployment_id_hex), hex(vector.org_id_hex), hex(vector.review_id_hex), c.u64be(1)]);
+  const ciphertext = chacha20poly1305(hex(vector.key_hex), hex(vector.nonce_hex), aad).encrypt(c.utf8(JSON.stringify(vector.content)));
+  assert.equal(Buffer.from(aad).toString('hex'), vector.aad_hex);
+  assert.equal(Buffer.from(ciphertext).toString('hex'), vector.ciphertext_hex);
+  assert.deepEqual(await c.openDraftContent({ reviewId: hex(vector.review_id_hex), orgId: hex(vector.org_id_hex), contentKey: hex(vector.key_hex), encryptedContent: { v: 1, nonce: b64(hex(vector.nonce_hex)), ciphertext: b64(ciphertext) } }), vector.content);
 });
 
 test('framing exact lengths and unsigned integers', () => {
@@ -121,12 +194,12 @@ test('descriptor certificate verification, strict schema, signature and review b
   await assert.rejects(c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: bytes(16, 7) }), CryptoError);
   const wrong = descriptorSignature.slice(); wrong[0] ^= 1;
   await assert.rejects(c.verifyDescriptor({ descriptorBytes, signature: wrong, expectedReviewId: reviewId }), CryptoError);
-  for (const data of [{ ...descriptorJSON, max_responses: '2' }, { ...descriptorJSON, suite: 'alternate' }, { ...descriptorJSON, reviewer_membership_id: b64(bytes(16, 4)) }]) {
+  for (const data of [{ ...descriptorJSON, v: 1 }, { ...descriptorJSON, title: 'leak' }, { ...descriptorJSON, max_responses: '2' }, { ...descriptorJSON, suite: 'alternate' }, { ...descriptorJSON, reviewer_membership_id: b64(bytes(16, 4)) }]) {
     const bytes = c.utf8(JSON.stringify(data));
     const signature = await c.signDescriptor({ descriptorBytes: bytes, membershipSeed: membership.seed });
     await assert.rejects(c.verifyDescriptor({ descriptorBytes: bytes, signature, expectedReviewId: reviewId }), CryptoError);
   }
-  const duplicate = c.utf8(JSON.stringify(descriptorJSON).replace('"v":1', '"v":1,"v":1'));
+  const duplicate = c.utf8(JSON.stringify(descriptorJSON).replace('"v":2', '"v":2,"v":2'));
   await assert.rejects(c.verifyDescriptor({ descriptorBytes: duplicate, signature: descriptorSignature, expectedReviewId: reviewId }), e => e.code === 'DUPLICATE_JSON_FIELD');
 });
 
@@ -146,6 +219,7 @@ test('HPKE roundtrip, ciphertext/enc/context tamper and answers validation', asy
 test('expired CA and leaf retain historical descriptor verification/decryption, not forged signatures', async () => {
   assert.ok(ca.notAfter.getTime() < Date.now() && certificate.notAfter.getTime() < Date.now());
   const historical = await c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: reviewId });
+  await c.openDescriptorContent({ descriptor: historical, contentKey });
   const sealed = await c.encryptResponse({ descriptorBytes, descriptor: historical, answers: { q1: 'Historical response' } });
   assert.equal((await c.decryptResponse({ descriptorBytes, descriptor: historical, recipientPrivateKey: recipient.privateKey, ...sealed })).answers.q1, 'Historical response');
   const bad = descriptorSignature.slice(); bad[0] ^= 1;
@@ -153,9 +227,12 @@ test('expired CA and leaf retain historical descriptor verification/decryption, 
 });
 
 async function withQuestions(questions) {
-  const bytes = c.utf8(JSON.stringify({ ...descriptorJSON, questions }));
+  const encrypted_content = await c.sealReviewContent({ reviewId, orgId: accountId, contentKey, content: { ...content, questions } });
+  const bytes = c.utf8(JSON.stringify({ ...descriptorJSON, encrypted_content }));
   const signature = await c.signDescriptor({ descriptorBytes: bytes, membershipSeed: membership.seed });
-  return { descriptorBytes: bytes, descriptor: await c.verifyDescriptor({ descriptorBytes: bytes, signature, expectedReviewId: reviewId }) };
+  const descriptor = await c.verifyDescriptor({ descriptorBytes: bytes, signature, expectedReviewId: reviewId });
+  await c.openDescriptorContent({ descriptor, contentKey });
+  return { descriptorBytes: bytes, descriptor };
 }
 
 test('aggregate UTF8 byte bounds reject multibyte and oversized encrypted responses', async () => {

@@ -13,7 +13,9 @@ See [verification evidence and remaining gates](docs/verification.md).
 
 - Register, unlock an encrypted vault, and save a 12-word recovery phrase.
 - Create or join organizations; owners and admins manage membership.
-- Publish signed reviews and obtain blind response authorizations.
+- Encrypt review titles, descriptions, and questions, including drafts; publish
+  signed encrypted reviews and share secret response links.
+- Obtain blind response authorizations through approved membership.
 - Submit encrypted answers anonymously; recipients decrypt and export responses.
 - Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
   access on another device.
@@ -33,9 +35,14 @@ flowchart LR
     App --> Keys[Protected server-only keys]
 ```
 
-Client private keys, vault keys, password/recovery material, and response plaintext
+Client private keys, review content keys, vault keys, password/recovery material, and question/response plaintext
 remain browser-only. Membership CA, blind issuer, and receipt signing keys are
 distinct server-only keys. Anonymous requests omit credentials.
+
+Anyone holding a secret response link can read its review content. The key stays
+in the URL fragment, not HTTP requests. It does not decrypt submitted answers or
+grant membership. Keep links private; browser history and sharing tools may retain
+them. Operational metadata and ciphertext lengths remain visible to the server.
 
 Browser-delivered code must be trusted. Anonce does not protect anonymity against
 malicious served code, operators/issuers, or network/timing correlation. Public

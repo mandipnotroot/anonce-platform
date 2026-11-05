@@ -459,7 +459,7 @@ paths:
     post:
       operationId: createReview
       summary: Create draft and dedicated RSA-3072 issuer key
-      description: 'SignedEnvelope payload decodes to ReviewCreate. Action review-create; approved member, full session, membership_sig. max_responses 0 or omitted defaults to 1; otherwise 1..100 per member, not global capacity. Exact retry returns 200.'
+      description: 'SignedEnvelope payload decodes to ReviewCreate. Action review-create; approved member, full session, membership_sig. Browser supplies review_id and encrypted content. Atomically creates review and creator vault object with matching ID, expected_revision "0", and revision "1". max_responses is 1..100 per member, not global capacity. Exact retry returns 200.'
       x-challenge-action: review-create
       x-payload-schema: '#/components/schemas/ReviewCreate'
       parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
@@ -510,7 +510,7 @@ paths:
     post:
       operationId: publishReview
       summary: Freeze signed descriptor and atomically save encrypted recipient secret
-      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor matches draft, deployment, reviewer account/membership, current certificate, issuer and limits. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). CAS review and vault_write atomically.'
+      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v2 matches saved encrypted content, deployment, reviewer account/membership, current certificate, issuer and limits. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor with review revision CAS. No vault write at publication; server cannot validate encrypted question semantics.'
       x-challenge-action: review-publish
       x-payload-schema: '#/components/schemas/ReviewPublish'
       parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
@@ -893,29 +893,55 @@ components:
     Question:
       type: object
       additionalProperties: false
-      required: [id, type, label]
-      description: IDs unique within review; UTF-8 byte bounds. text has no choices (omitted/null/empty accepted); single/multiple require 2..100 choices. Omitted required flag is false.
+      required: [id, type, label, required, choices]
+      description: Browser-only decrypted content; never sent in plaintext. IDs unique within review; UTF-8 byte bounds. text has empty choices; single/multiple require 2..100 choices.
       properties:
         id: {type: string, minLength: 1, maxLength: 100}
         type: {enum: [text, single, multiple]}
         label: {type: string, minLength: 1, maxLength: 2000}
-        required: {type: boolean, default: false}
-        choices: {type: [array, 'null'], maxItems: 100, items: {$ref: '#/components/schemas/Choice'}}
+        required: {type: boolean}
+        choices: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Choice'}}
       allOf:
         - if: {properties: {type: {const: text}}}
           then: {properties: {choices: {maxItems: 0}}}
           else: {required: [choices], properties: {choices: {type: array, minItems: 2}}}
-    ReviewCreate: {type: object, additionalProperties: false, required: [request_id, title], properties: {request_id: {$ref: '#/components/schemas/ID'}, title: {type: string, minLength: 1, maxLength: 300}, max_responses: {type: integer, minimum: 0, maximum: 100, default: 1, description: Zero also defaults to 1.}}}
+    ReviewContent:
+      type: object
+      additionalProperties: false
+      description: Browser-only plaintext, at most 32768 UTF-8 JSON bytes. Drafts may have zero questions; publication and responding require at least one. Never sent to the server in plaintext.
+      required: [v, title, description, questions]
+      properties:
+        v: {const: 1}
+        title: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, maxLength: 10000}
+        questions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+    EncryptedReviewContent:
+      type: object
+      additionalProperties: false
+      description: ChaCha20-Poly1305 content envelope; AAD binds deployment, organization, review, and content version. See protocol.md.
+      required: [v, nonce, ciphertext]
+      properties:
+        v: {const: 1}
+        nonce: {$ref: '#/components/schemas/Binary', description: Canonical base64url of exactly 12 bytes.}
+        ciphertext: {$ref: '#/components/schemas/Binary', description: Canonical base64url of 16..32784 bytes including authentication tag.}
+    ReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, review_id, encrypted_content, max_responses, vault_write]
+      properties:
+        request_id: {$ref: '#/components/schemas/ID'}
+        review_id: {$ref: '#/components/schemas/ID'}
+        encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
+        max_responses: {type: integer, minimum: 1, maximum: 100}
+        vault_write: {$ref: '#/components/schemas/VaultWrite', description: Matching review object ID; expected_revision "0", object revision "1".}
     ReviewUpdate:
       type: object
       additionalProperties: false
-      required: [request_id, expected_revision, title, questions, max_responses]
+      required: [request_id, expected_revision, encrypted_content, max_responses]
       properties:
         request_id: {$ref: '#/components/schemas/ID'}
         expected_revision: {$ref: '#/components/schemas/Decimal'}
-        title: {type: string, minLength: 1, maxLength: 300}
-        description: {type: string, maxLength: 10000, default: ''}
-        questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+        encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
         max_responses: {type: integer, minimum: 1, maximum: 100}
         opens_at: {$ref: '#/components/schemas/NullableDecimal'}
         closes_at: {$ref: '#/components/schemas/NullableDecimal'}
@@ -923,19 +949,17 @@ components:
     Descriptor:
       type: object
       additionalProperties: false
-      description: Decoded JSON inside descriptor binary string. Publication compares exact parsed draft and all reviewer/issuer/schedule fields with stored review; this is not sent as a raw descriptor object.
-      required: [v, deployment_id, review_id, org_id, reviewer_account_id, reviewer_membership_id, reviewer_certificate, title, questions, recipient_public_key, issuer_key_id, issuer_public_key, max_responses]
+      description: At most 65536 decoded strict JSON bytes. Publication compares encrypted envelope values and all reviewer/issuer/schedule fields with stored review. No plaintext content or question skeleton. Version 1 is unsupported.
+      required: [v, deployment_id, review_id, org_id, reviewer_account_id, reviewer_membership_id, reviewer_certificate, encrypted_content, recipient_public_key, issuer_key_id, issuer_public_key, max_responses, opens_at, closes_at]
       properties:
-        v: {const: 1}
+        v: {const: 2}
         deployment_id: {$ref: '#/components/schemas/Bytes32'}
         review_id: {$ref: '#/components/schemas/ID'}
         org_id: {$ref: '#/components/schemas/ID'}
         reviewer_account_id: {$ref: '#/components/schemas/ID'}
         reviewer_membership_id: {$ref: '#/components/schemas/ID'}
         reviewer_certificate: {$ref: '#/components/schemas/Binary'}
-        title: {type: string, minLength: 1, maxLength: 300}
-        description: {type: string, maxLength: 10000, default: ''}
-        questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+        encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
         recipient_public_key: {$ref: '#/components/schemas/Bytes32'}
         issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
         issuer_public_key: {$ref: '#/components/schemas/Binary', description: DER SubjectPublicKeyInfo RSA-3072 key.}
@@ -945,26 +969,23 @@ components:
     ReviewPublish:
       type: object
       additionalProperties: false
-      required: [request_id, expected_revision, descriptor, descriptor_signature, vault_write]
+      required: [request_id, expected_revision, descriptor, descriptor_signature]
       properties:
         request_id: {$ref: '#/components/schemas/ID'}
         expected_revision: {$ref: '#/components/schemas/Decimal'}
         descriptor: {$ref: '#/components/schemas/Binary', description: Base64url strict JSON bytes of Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}
         descriptor_signature: {$ref: '#/components/schemas/Signature'}
-        vault_write: {$ref: '#/components/schemas/VaultWrite'}
     Review:
       type: object
       additionalProperties: false
-      required: [id, org_id, creator_account_id, reviewer_account_id, reviewer_membership_id, title, description, questions, max_responses, opens_at, closes_at, state, revision, issuer_public_key, issuer_key_id, descriptor, descriptor_signature, issued_count, accepted_count]
+      required: [id, org_id, creator_account_id, reviewer_account_id, reviewer_membership_id, encrypted_content, max_responses, opens_at, closes_at, state, revision, issuer_public_key, issuer_key_id, descriptor, descriptor_signature, issued_count, accepted_count]
       properties:
         id: {$ref: '#/components/schemas/ID'}
         org_id: {$ref: '#/components/schemas/ID'}
         creator_account_id: {$ref: '#/components/schemas/ID'}
         reviewer_account_id: {$ref: '#/components/schemas/ID'}
         reviewer_membership_id: {$ref: '#/components/schemas/ID'}
-        title: {type: string}
-        description: {type: string}
-        questions: {type: array, items: {$ref: '#/components/schemas/Question'}, description: Empty for new draft.}
+        encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
         max_responses: {type: integer, minimum: 1, maximum: 100}
         opens_at: {$ref: '#/components/schemas/NullableDecimal'}
         closes_at: {$ref: '#/components/schemas/NullableDecimal'}

@@ -125,18 +125,56 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	// Exact mutation retry is cached; changed/reused challenge cannot create again.
 	result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 200)
 	path := "/api/member/orgs/" + org + "/reviews"
-	env := signed(t, s, h, u, "review-create", map[string]any{"request_id": protocol.ID(), "title": "Feedback", "max_responses": 1}, false)
+	env := signed(t, s, h, u, "review-create", fakeReviewCreate(1), false)
 	v := result(t, request(h, "POST", path, env, u), 201)
 	id := v["id"].(string)
+	result(t, request(h, "POST", path, env, u), 200)
+	var vaultCount int
+	if e := s.member.QueryRow(ctx, "SELECT count(*) FROM member.vault_objects WHERE account_id=$1 AND id=$2", u.id, id).Scan(&vaultCount); e != nil || vaultCount != 1 {
+		t.Fatalf("create did not atomically save review keys: %d, %v", vaultCount, e)
+	}
+	// A conflicting vault write must roll back the review and operation cache.
+	conflict := fakeReviewCreate(1)
+	conflictID := conflict["review_id"].(string)
+	if _, e := s.member.Exec(ctx, "INSERT INTO member.vault_objects VALUES($1,$2,1,$3)", u.id, conflictID, []byte(`{}`)); e != nil {
+		t.Fatal(e)
+	}
+	conflictEnv := signed(t, s, h, u, "review-create", conflict, false)
+	if got := request(h, "POST", path, conflictEnv, u); got.Code < 400 {
+		t.Fatal("accepted conflicting vault insertion")
+	}
+	var rolledBack bool
+	if e := s.member.QueryRow(ctx, "SELECT NOT EXISTS(SELECT 1 FROM member.reviews WHERE id=$1) AND NOT EXISTS(SELECT 1 FROM member.operations WHERE account_id=$2 AND request_id=$3)", conflictID, u.id, conflict["request_id"]).Scan(&rolledBack); e != nil || !rolledBack {
+		t.Fatalf("partial create committed: %v", e)
+	}
+	if _, e := s.member.Exec(ctx, "DELETE FROM member.vault_objects WHERE account_id=$1 AND id=$2", u.id, conflictID); e != nil {
+		t.Fatal(e)
+	}
+	result(t, request(h, "POST", path, conflictEnv, u), 201)
+	deletePath := "/api/member/reviews/" + conflictID
+	deleteEnv := signed(t, s, h, u, "review-delete", revisionRequest{protocol.ID(), "1"}, false)
+	result(t, request(h, "DELETE", deletePath, deleteEnv, u), 200)
+	if e := s.member.QueryRow(ctx, "SELECT count(*) FROM member.vault_objects WHERE account_id=$1 AND id=$2", u.id, conflictID).Scan(&vaultCount); e != nil || vaultCount != 0 {
+		t.Fatalf("draft deletion retained vault object: %d, %v", vaultCount, e)
+	}
 	path = "/api/member/reviews/" + id
-	questions := []question{{"q1", "text", "Feedback", true, []choice{}}}
-	update := map[string]any{"request_id": protocol.ID(), "expected_revision": "1", "title": "Feedback", "description": "Private", "questions": questions, "max_responses": 1, "opens_at": nil, "closes_at": nil}
+	content := fakeContent()
+	update := map[string]any{"request_id": protocol.ID(), "expected_revision": "1", "encrypted_content": content, "max_responses": 1, "opens_at": nil, "closes_at": nil}
 	env = signed(t, s, h, u, "review-update", update, false)
 	v = result(t, request(h, "PUT", path, env, u), 200)
+	result(t, request(h, "PUT", path, env, u), 200)
+	stale := signed(t, s, h, u, "review-update", map[string]any{"request_id": protocol.ID(), "expected_revision": "1", "encrypted_content": fakeContent(), "max_responses": 1, "opens_at": nil, "closes_at": nil}, false)
+	result(t, request(h, "PUT", path, stale, u), 409)
 	cert := result(t, request(h, "GET", "/api/member/orgs/"+org+"/certificate", nil, u), 200)
-	d := descriptor{V: 1, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Account: u.id, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Title: "Feedback", Description: "Private", Questions: questions, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string), Max: 1}
+	d := descriptor{V: 2, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Account: u.id, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Content: content, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string), Max: 1}
 	desc, _ := json.Marshal(d)
-	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc))), "vault_write": vaultWrite{"0", fakeObject()}}
+	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc)))}
+	// A correctly signed descriptor cannot substitute a different encrypted envelope.
+	mismatch := d
+	mismatch.Content = fakeContent()
+	mismatchBytes, _ := json.Marshal(mismatch)
+	mismatchPayload := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(mismatchBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", mismatchBytes)))}
+	result(t, request(h, "POST", path+"/publish", signed(t, s, h, u, "review-publish", mismatchPayload, false), u), 400)
 	// An otherwise exact, genuinely CA-signed but expired leaf cannot publish.
 	expired := expiredCert(t, s, org, d.Membership, u.member.Public().(ed25519.PublicKey))
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
@@ -145,13 +183,14 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	badD := d
 	badD.Certificate = expired
 	badBytes, _ := json.Marshal(badD)
-	badPublish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(badBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", badBytes))), "vault_write": vaultWrite{"0", fakeObject()}}
+	badPublish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(badBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", badBytes)))}
 	badEnv := signed(t, s, h, u, "review-publish", badPublish, false)
 	result(t, request(h, "POST", path+"/publish", badEnv, u), 400)
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", d.Certificate, d.Membership); e != nil {
 		t.Fatal(e)
 	}
 	env = signed(t, s, h, u, "review-publish", publish, false)
+	result(t, request(h, "POST", path+"/publish", env, u), 200)
 	result(t, request(h, "POST", path+"/publish", env, u), 200)
 	pub, e := x509.ParsePKIXPublicKey(mustDecode(d.Public))
 	if e != nil {

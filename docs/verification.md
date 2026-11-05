@@ -2,8 +2,8 @@
 # Verification contract and evidence
 
 **No security audit or production approval is claimed.** Required coverage,
-configured automation, and recorded results are different evidence. This
-documentation rewrite did not rerun application tests or deploy anything.
+configured automation, and recorded results are different evidence. Historical
+results below do not validate the encrypted-review-content change.
 
 ## Reproduce the gates
 
@@ -32,7 +32,49 @@ tests, vet, dependency installation, build, module tests, and interop. It define
 no PostgreSQL service/test URLs or live HTTPS E2E step. Workflow configuration
 does not establish a successful run or database coverage.
 
-## Latest recorded receipt-v2 checks — 2026-11-05
+## Encrypted review content checks — 2026-11-05
+
+Final checks used Node.js 26.12.1 and Go 1.27.3 in an isolated namespace/chroot
+with a read-only, explicitly allowlisted source snapshot and dependencies. The
+snapshot excluded deployment configuration, secrets, backups, and Git metadata.
+The environment was allowlisted, external networking was unavailable, and only
+ephemeral scratch was writable. Capabilities were dropped and no-new-privileges
+was enabled. Limits were 600 seconds wall time, 240 CPU seconds per process,
+8 GiB virtual memory per process, 128 processes, 1024 file descriptors, 1 GiB
+per file, and 3 GiB scratch. CPU/memory limits were not aggregate cgroup limits.
+
+| Recorded command | Exit/result | Scope |
+| --- | --- | --- |
+| `node scripts/build.mjs` | 0 | Browser bundles built; hash-checked crypto bundle and license notice copied to ignored local build outputs, not deployed |
+| `node --test --test-concurrency=1 web/*.test.js` | 0; 78 passed, no failures/skips | Content encryption/context/tampering, independent answer keys, encrypted app lifecycle, strict invitations, auth navigation, existing receipt/storage coverage |
+| `node scripts/crypto-interop.mjs` | 0; seven groups | Review-content context and deterministic encryption, existing framing/HKDF/ChaCha/RFC 9474/HPKE interoperability |
+| `CGO_ENABLED=0 go test -p=1 ./...` | 0 | Non-database protocol/server checks; database integration tests remained opt-in |
+| `CGO_ENABLED=1 go test -race -p=1 ./internal/protocol ./internal/server` | 0 | Non-database race checks, not database concurrency evidence |
+| `go vet ./...` | 0 | Go static checks |
+
+Evidence: `/tmp/opencode/anonce-final-strict.log`. Earlier attempts were stopped
+after discovering that the initial sandbox exposed repository-local configuration
+paths. No secret contents were deliberately read, but those attempts do not
+establish secret isolation. Only the final allowlisted run supports the isolation
+description above. An initial negative crypto test compared error classes from
+different module instances; the corrected assertion is included in the final run.
+
+After pinning expected review-content AAD/ciphertext outputs and making vector
+assertions mandatory, focused revalidation passed: `node --test
+web/crypto.test.js` exited 0 with 22 passing tests, `node
+scripts/crypto-interop.mjs` exited 0, and `node --check scripts/e2e.mjs` exited 0.
+Evidence: `/tmp/opencode/anonce-focused-final.log`. OpenAPI YAML parsing was
+skipped with exit 77 because PyYAML was unavailable; no dependency was installed.
+Production source remained unchanged, so the other final-run results still apply.
+
+Database atomicity/CAS tests were added but not executed against PostgreSQL.
+Live HTTPS E2E, HTTP secrecy capture, fresh-browser draft restoration, full
+registration/recovery invitation continuation, and real browser rendering remain
+unverified for this change. No disposable database or HTTPS deployment was
+provisioned. Module tests and source inspection do not close those gates.
+No upgrade migration or retroactive protection of existing plaintext is provided.
+
+## Recorded receipt-v2 checks — 2026-11-05
 
 These are previously recorded results, not new runs for this documentation change.
 Older baselines do not validate receipt-v2. Execution used disposable snapshots
@@ -73,7 +115,9 @@ another machine retains them.
 | Authentication | Registration key proofs; password/recovery; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, duplicate/unknown fields, body limits, CSRF |
 | Vault/credentials | Revision/epoch CAS races; nonce/AAD tampering; recovery scope; session/challenge revocation; old/new proofs; unchanged vault after rewrap; logout prevents pending writes restoring capabilities |
 | Membership | Normalized email uniqueness/invalid addresses; owner/admin/member/pending/revoked boundaries; direct addition/retry; owner-only admin appointment; escalation/cross-account/org denial; certificate proof/renewal is not database authorization |
-| Publication/issuance | Descriptor/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count |
+| Review content | Atomic encrypted draft/key creation; title/description/full question confidentiality in API/storage/operation caches; independent content/answer keys; authenticated deployment/org/review context; strict schemas and UTF-8 bounds; fresh nonces; descriptor v2 saved-envelope comparison; creator vault restoration |
+| Invitations | Fragment-only canonical secret links; missing/wrong/duplicate keys fail closed; login/register/recovery/refresh preserve full fragment; keyless members see locked metadata; link holders cannot decrypt answers; captured HTTP and decoded signed payloads contain no plaintext content or raw key |
+| Publication/issuance | Encrypted draft/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count |
 | Anonymous acceptance | Cookie/Authorization rejection and proxy stripping; no identifying fields/logs/joins; concurrent spends, closure races, lost replies/exact retries; spend/ciphertext/receipt/counter commit or roll back together; lookup returns original verifiable receipt |
 | Cryptography | Shared framing/JSON hashes/KDF/wrapper/vault vectors; decimal U64/canonical base64url; prescribed Argon2id, 12-English-word BIP-39, Ed25519, RFC 9474/RFC 9180; wrong key/context/nonce/tag/hash/signature rejection |
 | Receipt v2 | Go/browser `testdata/receipt-v2.json` transcripts, hash/key ID/signature; reject changed context/envelope, noncanonical timestamp/encoding, unknown/duplicate fields; maximum U64; explicit historical trust and removed/substituted-key rejection |

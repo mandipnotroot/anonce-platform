@@ -82,6 +82,14 @@ func main() {
 					fields[i] = dec(f)
 				}
 				return map[string]any{"bytes": protocol.B64(protocol.E(r.Label, fields...))}
+			case "review-content-context":
+				if len(r.Fields) != 3 {
+					panic("invalid review content context")
+				}
+				deployment := must(protocol.Decode(r.Fields[0], 32))
+				org := must(protocol.Decode(r.Fields[1], 16))
+				review := must(protocol.Decode(r.Fields[2], 16))
+				return map[string]any{"bytes": protocol.B64(protocol.E("review-content", deployment, org, review, protocol.U64(1)))}
 			case "hkdf":
 				out := make([]byte, 32)
 				_, err := io.ReadFull(hkdf.New(sha256.New, dec(r.Key), dec(r.Salt), dec(r.Info)), out)

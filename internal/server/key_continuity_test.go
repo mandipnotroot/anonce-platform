@@ -63,7 +63,7 @@ func TestIntegrationServerKeyRestartContinuity(t *testing.T) {
 	u := newUser(t, s, h)
 	orgEnv := signed(t, s, h, u, "org-create", map[string]string{"request_id": protocol.ID(), "name": "Key continuity fixture"}, false)
 	org := result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 201)["id"].(string)
-	env := signed(t, s, h, u, "review-create", map[string]any{"request_id": protocol.ID(), "title": "Key continuity", "max_responses": 1}, false)
+	env := signed(t, s, h, u, "review-create", fakeReviewCreate(1), false)
 	v := result(t, request(h, "POST", "/api/member/orgs/"+org+"/reviews", env, u), 201)
 	id := v["id"].(string)
 	var encrypted, public []byte

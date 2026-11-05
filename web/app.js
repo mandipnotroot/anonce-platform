@@ -169,11 +169,51 @@ export async function register({email,password}) {
 }
 export async function logout() {
   generation++;
+  pendingCreates.clear();
   try { await request('/api/member/session',{method:'DELETE'}); }
   finally { if(state) {await deleteDeviceRecord('key:'+state.accountId);await deleteDeviceRecord('cache:'+state.accountId);state.masterKey.fill(0);state.authSeed.fill(0);state.membershipSeed.fill(0);} state=undefined;setCSRF(undefined); }
 }
 const normalizeQuestion = q => ({id:q.id,text:q.label,type:q.type,required:q.required,options:(q.choices||[]).map(c=>c.label)});
-function reviewView(r) {return {...r,id:r.id||r.review_id,status:r.status||r.state,questions:(r.questions||[]).map(normalizeQuestion),maxResponses:r.max_responses,opensAt:r.opens_at,closesAt:r.closes_at};}
+function reviewView(r,content) {return {...r,...content,content,contentState:content?'open':'locked',id:r.id||r.review_id,status:r.status||r.state,questions:content?.questions.map(normalizeQuestion)||[],maxResponses:r.max_responses,opensAt:r.opens_at,closesAt:r.closes_at};}
+function canonical(value,length) {
+  if(typeof value!=='string'||!/^[A-Za-z0-9_-]+$/.test(value))return false;
+  try {const raw=bytes(value);return raw.length===length&&C.toBase64url(raw)===value;}catch{return false;}
+}
+const keyUnavailable=()=>new APIError('KEY_UNAVAILABLE','The encrypted review keys are unavailable.');
+async function reviewKeys(reviewId) {
+  const s=active(),vault=await request('/api/member/vault');
+  const object=(vault.vault_objects||vault.objects||[]).find(o=>o.id===reviewId);
+  if(!object||String(object.revision)!=='1')throw keyUnavailable();
+  try {
+    const value=receiptJSON(new TextDecoder('utf-8',{fatal:true}).decode(await C.openVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,object})));
+    const fields=['v','kind','review_id','content_key','recipient_private_key'];
+    if(!value||Object.keys(value).length!==fields.length||!fields.every(k=>Object.hasOwn(value,k))||value.v!==1||value.kind!=='review-keys'||value.review_id!==reviewId||!canonical(reviewId,16)||!canonical(value.content_key,32)||!canonical(value.recipient_private_key,32))throw keyUnavailable();
+    return {contentKey:bytes(value.content_key),privateKey:bytes(value.recipient_private_key)};
+  }catch{throw keyUnavailable();}
+}
+export function parseResponseInvitation(fragment) {
+  const match=typeof fragment==='string'&&/^#\/respond\/([A-Za-z0-9_-]+)\?([^#]+)$/.exec(fragment);
+  const invalid=()=>{throw new APIError('INVALID_INVITATION','Invalid secret invitation link.');};
+  if(!match||!canonical(match[1],16))invalid();
+  const params=new URLSearchParams(match[2]);
+  if([...params].length!==2||params.getAll('v').length!==1||params.getAll('k').length!==1||params.get('v')!=='1'||!canonical(params.get('k'),32)||![`v=1&k=${params.get('k')}`,`k=${params.get('k')}&v=1`].includes(match[2]))invalid();
+  return {reviewId:match[1],contentKey:bytes(params.get('k'))};
+}
+function validateContent(content) {
+  return C.validateReviewContent(content);
+}
+async function openedReview(r,contentKey) {
+  const reviewId=r.review_id||r.id;
+  if(!contentKey) {
+    if(r.reviewer_account_id!==state?.accountId&&r.creator_account_id!==state?.accountId)return reviewView(r);
+    contentKey=(await reviewKeys(reviewId)).contentKey;
+  }
+  if((r.state||r.status)!=='draft') {
+    const p=await publicDescriptor(reviewId),content=await C.openDescriptorContent({descriptor:p.descriptor,contentKey});
+    return reviewView({...r,descriptor:p.descriptor},content);
+  }
+  return reviewView(r,await C.openDraftContent({reviewId:bytes(reviewId),orgId:bytes(r.org_id),contentKey,encryptedContent:r.encrypted_content}));
+}
 const list = (r, fn=x=>x) => ({items:(r.items||[]).map(fn),next:r.next??null});
 export const listOrganizations = async()=>list(await request('/api/member/orgs'),o=>({...o,id:o.org_id||o.id,status:o.status||o.state}));
 export const createOrganization = ({name})=>mutation('/orgs','org-create',{name});
@@ -187,22 +227,55 @@ export const acceptInvite = ({token})=>mutation('/invites/accept','invite-accept
 export const approveMember = ({orgId,memberId})=>mutation(`/orgs/${orgId}/members/${memberId}/approve`,'member-approve');
 export const revokeMember = ({orgId,memberId})=>mutation(`/orgs/${orgId}/members/${memberId}/revoke`,'member-revoke');
 export const changeMemberRole = ({orgId,memberId,role})=>mutation(`/orgs/${orgId}/members/${memberId}/role`,'member-role',{role});
-export const listReviews = async({orgId,after})=>list(await request(`/api/member/orgs/${orgId}/reviews${after?'?after='+encodeURIComponent(after):''}`),reviewView);
-export async function getReview({reviewId}) {
+export const listReviews = async({orgId,after})=>{const r=await request(`/api/member/orgs/${orgId}/reviews${after?'?after='+encodeURIComponent(after):''}`);return {items:await Promise.all((r.items||[]).map(r=>openedReview(r))),next:r.next??null};};
+export async function getReview({reviewId,contentKey}) {
   await initialize();
-  try {return reviewView(await request(`/api/member/reviews/${reviewId}`));}
+   try {return await openedReview(await request(`/api/member/reviews/${reviewId}`),contentKey);}
   catch(e) { if(!['UNAUTHENTICATED','unauthenticated','FORBIDDEN','forbidden'].includes(e.code)) throw e; }
-  const p=await publicDescriptor(reviewId);return reviewView({...p.descriptor,status:p.state});
+   const p=await publicDescriptor(reviewId);if(!contentKey)throw keyUnavailable();return reviewView({...p.descriptor,descriptor:p.descriptor,status:p.state},await C.openDescriptorContent({descriptor:p.descriptor,contentKey}));
 }
-export const createReview = async({orgId,title,maxResponses=1})=>reviewView(await mutation(`/orgs/${orgId}/reviews`,'review-create',{title,max_responses:maxResponses}));
+const pendingCreates=new Map();
+export async function createReview({orgId,title,maxResponses=1}) {
+  const s=active();await initialize();const slot=s.accountId+':'+orgId;
+  let pending=pendingCreates.get(slot)||s.pendingReviewCreates?.[orgId];
+  if(pending)pending.contentKey=bytes(pending.contentKey);
+  if(!pending) {
+    const reviewId=id(),contentKey=random(32),recipient=await C.generateRecipientKey(),content=validateContent({v:1,title,description:'',questions:[]});
+    const object=await C.sealVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,objectId:bytes(reviewId),revision:'1',plaintext:jsonBytes({v:1,kind:'review-keys',review_id:reviewId,content_key:C.toBase64url(contentKey),recipient_private_key:C.toBase64url(recipient.privateKey)})});
+    pending={content,contentKey,payload:toWire({request_id:id(),review_id:reviewId,encrypted_content:await C.sealReviewContent({reviewId:bytes(reviewId),orgId:bytes(orgId),contentKey,content}),max_responses:maxResponses,vault_write:{expected_revision:'0',object}})};
+    pendingCreates.set(slot,pending);
+    (s.pendingReviewCreates||={})[orgId]=pending;
+    await cacheState();
+  } else {
+    try {const r=await request(`/api/member/reviews/${pending.payload.review_id}`);const view=await openedReview(r,pending.contentKey);pendingCreates.delete(slot);delete s.pendingReviewCreates?.[orgId];await cacheState();return view;}
+    catch(e){if(!['NOT_FOUND','not_found'].includes(e.code))throw e;}
+  }
+  const r=await signed(`/api/member/orgs/${orgId}/reviews`,'review-create',pending.payload);
+  pendingCreates.delete(slot);delete s.pendingReviewCreates?.[orgId];await cacheState();return reviewView(r,pending.content);
+}
 export async function updateReview({reviewId,expectedRevision,title,description,questions,maxResponses,opensAt,closesAt}) {
-  const old=await request(`/api/member/reviews/${reviewId}`);
-  const wireQuestions=questions.map((q,i)=>({id:q.id||old.questions?.[i]?.id||id(),type:q.type,label:q.text,required:!!q.required,
-    choices:(q.options||[]).map((label,j)=>({id:old.questions?.find(x=>x.id===q.id)?.choices?.find(c=>c.label===label)?.id||id(),label}))}));
-  return reviewView(await mutation(`/reviews/${reviewId}`,'review-update',{expected_revision:String(expectedRevision),title,description,questions:wireQuestions,max_responses:maxResponses,opens_at:time(opensAt),closes_at:time(closesAt)},'PUT'));
+   const old=await request(`/api/member/reviews/${reviewId}`),keys=await reviewKeys(reviewId);
+   const previous=await C.openDraftContent({reviewId:bytes(reviewId),orgId:bytes(old.org_id),contentKey:keys.contentKey,encryptedContent:old.encrypted_content});
+   const wireQuestions=questions.map((q,i)=>({id:q.id||previous.questions[i]?.id||id(),type:q.type,label:q.text,required:!!q.required,
+     choices:(q.options||[]).map(label=>({id:previous.questions.find(x=>x.id===q.id)?.choices?.find(c=>c.label===label)?.id||id(),label}))}));
+   const content=validateContent({v:1,title,description,questions:wireQuestions});
+   const encrypted_content=await C.sealReviewContent({reviewId:bytes(reviewId),orgId:bytes(old.org_id),contentKey:keys.contentKey,content});
+   return reviewView(await mutation(`/reviews/${reviewId}`,'review-update',{expected_revision:String(expectedRevision),encrypted_content,max_responses:maxResponses,opens_at:time(opensAt),closes_at:time(closesAt)},'PUT'),content);
 }
 export const closeReview=({reviewId,expectedRevision})=>mutation(`/reviews/${reviewId}/close`,'review-close',{expected_revision:String(expectedRevision)});
-export const deleteReview=({reviewId,expectedRevision})=>mutation(`/reviews/${reviewId}`,'review-delete',{expected_revision:String(expectedRevision)},'DELETE');
+export async function deleteReview({reviewId,expectedRevision}) {
+  const result=await mutation(`/reviews/${reviewId}`,'review-delete',{expected_revision:String(expectedRevision)},'DELETE');
+  for(const [slot,pending] of pendingCreates)if(pending.payload.review_id===reviewId)pendingCreates.delete(slot);
+  if(state?.pendingReviewCreates)for(const [orgId,pending] of Object.entries(state.pendingReviewCreates))if(pending.payload.review_id===reviewId)delete state.pendingReviewCreates[orgId];
+  if(state)await cacheState();
+  return result;
+}
+export async function getInvitationURL({reviewId}) {
+  const r=await request(`/api/member/reviews/${reviewId}`);
+  if(!['published','closed'].includes(r.state||r.status))throw new APIError('INVALID_STATE','Publish the review before sharing an invitation.');
+  const keys=await reviewKeys(reviewId);
+  return `${location.origin}/#/respond/${reviewId}?v=1&k=${C.toBase64url(keys.contentKey)}`;
+}
 async function publicDescriptor(reviewId) {
   const p=await request(`/api/public/reviews/${reviewId}`,{anonymous:true});
   const descriptorBytes=bytes(p.descriptor);
@@ -285,18 +358,20 @@ export async function listPendingResponses() {
     const old=found.get(p.pendingId);
     if(!old||Number(p.revision)>Number(old.revision))found.set(p.pendingId,p);
   }
-  return {items:[...found.values()].filter(p=>!p.receipt).map(p=>({pendingId:p.pendingId,reviewId:p.reviewId,title:JSON.parse(new TextDecoder().decode(bytes(p.descriptor))).title,status:'pending'})),next:null};
+   return {items:[...found.values()].filter(p=>!p.receipt).map(p=>({pendingId:p.pendingId,reviewId:p.reviewId,title:p.title||'Encrypted review',status:'pending'})),next:null};
 }
 export async function publishReview({reviewId,expectedRevision}) {
   const s=active(),r=await request(`/api/member/reviews/${reviewId}`), cert=await ensureCertificate(r.org_id);
-  const recipient=await C.generateRecipientKey(), objectId=id();
-  const descriptor={v:1,deployment_id:config.deployment_id,review_id:reviewId,org_id:r.org_id,reviewer_account_id:s.accountId,
-    reviewer_membership_id:cert.membership_id||s.session.memberships?.find(m=>m.org_id===r.org_id)?.id,reviewer_certificate:cert.certificate,title:r.title,description:r.description,questions:r.questions,
-    recipient_public_key:C.toBase64url(recipient.publicKey),issuer_key_id:r.issuer_key_id,issuer_public_key:r.issuer_public_key,max_responses:r.max_responses,opens_at:r.opens_at,closes_at:r.closes_at};
+   const keys=await reviewKeys(reviewId);
+   const content=await C.openDraftContent({reviewId:bytes(reviewId),orgId:bytes(r.org_id),contentKey:keys.contentKey,encryptedContent:r.encrypted_content});
+   C.validateReviewContent(content,{publish:true});
+   const descriptor={v:2,deployment_id:config.deployment_id,review_id:reviewId,org_id:r.org_id,reviewer_account_id:s.accountId,
+     reviewer_membership_id:cert.membership_id||s.session.memberships?.find(m=>m.org_id===r.org_id)?.id,reviewer_certificate:cert.certificate,encrypted_content:r.encrypted_content,
+     recipient_public_key:C.toBase64url(await C.recipientPublicKey({privateKey:keys.privateKey})),issuer_key_id:r.issuer_key_id,issuer_public_key:r.issuer_public_key,max_responses:r.max_responses,opens_at:r.opens_at,closes_at:r.closes_at};
   const descriptorBytes=jsonBytes(descriptor);
-  const object=await seal(objectId,{kind:'recipient',reviewId,privateKey:C.toBase64url(recipient.privateKey)});
+   if(descriptorBytes.length>65536)throw new APIError('INVALID_CONTENT','Review descriptor is too large.');
   return mutation(`/reviews/${reviewId}/publish`,'review-publish',{expected_revision:String(expectedRevision),descriptor:descriptorBytes,
-    descriptor_signature:await C.signDescriptor({descriptorBytes,membershipSeed:s.membershipSeed}),vault_write:{expected_revision:'0',object}});
+     descriptor_signature:await C.signDescriptor({descriptorBytes,membershipSeed:s.membershipSeed})});
 }
 async function pendingSave(p) {await seal(p.pendingId,p,String(p.revision||1));}
 // Only the authenticated issuance copy is padded; local pending objects stay unchanged.
@@ -307,10 +382,12 @@ async function sealIssuancePending(p) {
   const s=active();
   return C.sealVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,objectId:bytes(p.pendingId),revision:'1',plaintext:padded});
 }
-export async function prepareResponse({reviewId,answers}) {
+export async function prepareResponse({reviewId,contentKey,answers}) {
   active();const p=await publicDescriptor(reviewId);
-  const answerMap=Object.fromEntries(answers.filter(a=>a.value!==null&&a.value!==undefined).map(a=>{
-    const q=p.descriptor.questions.find(q=>q.id===a.questionId);
+   if(!contentKey)throw keyUnavailable();
+   const content=await C.openDescriptorContent({descriptor:p.descriptor,contentKey});
+   const answerMap=Object.fromEntries(answers.filter(a=>a.value!==null&&a.value!==undefined).map(a=>{
+     const q=content.questions.find(q=>q.id===a.questionId);
     const convert=v=>q?.type==='text'?v:(q?.choices.find(c=>c.label===v||c.id===v)?.id||v);
     return [a.questionId,Array.isArray(a.value)?a.value.map(convert):convert(a.value)];
   }));
@@ -318,7 +395,7 @@ export async function prepareResponse({reviewId,answers}) {
   const encrypted=await C.encryptResponse({...p,answers:answerMap});
   const authorization=await C.prepareAuthorization(p);
   const pending={pendingId,reviewId,requestId:id(),descriptor:C.toBase64url(p.descriptorBytes),descriptorSignature:p.descriptor_signature,
-    authorization:toWire(authorization),encrypted:toWire(encrypted),revision:1};
+     title:content.title,authorization:toWire(authorization),encrypted:toWire(encrypted),revision:1};
   await pendingSave(pending);
   return {pendingId};
 }
@@ -367,12 +444,8 @@ export async function lookupReceipt({pendingId}) {
   catch(e) {if(['NOT_FOUND','not_found','NETWORK_ERROR'].includes(e.code))return {status:'pending',pendingId};throw e;}
 }
 export async function listResponses({reviewId,after}) {
-  const s=active(),p=await publicDescriptor(reviewId),vault=await request('/api/member/vault');let privateKey;
-  for(const object of vault.vault_objects||vault.objects||[]) {
-    const value=JSON.parse(new TextDecoder().decode(await C.openVaultObject({accountId:bytes(s.accountId),masterKey:s.masterKey,object})));
-    if(value.kind==='recipient'&&value.reviewId===reviewId)privateKey=bytes(value.privateKey);
-  }
-  if(!privateKey)throw new APIError('KEY_UNAVAILABLE','The encrypted reviewer key is unavailable.');
+   active();const p=await publicDescriptor(reviewId),keys=await reviewKeys(reviewId),privateKey=keys.privateKey;
+   const content=await C.openDescriptorContent({descriptor:p.descriptor,contentKey:keys.contentKey});
   const result=await request(`/api/member/reviews/${reviewId}/submissions${after?'?after='+encodeURIComponent(after):''}`),items=[];
   for(const item of result.items) {
     let acceptedAt=null;
@@ -383,7 +456,7 @@ export async function listResponses({reviewId,after}) {
     const decoded=await C.decryptResponse({...p,recipientPrivateKey:privateKey,enc:bytes(item.enc),ciphertext:bytes(item.ciphertext)});
     const answerMap=decoded.answers;
     items.push({id:item.id,acceptedAt,status:'valid',answers:Object.entries(answerMap).map(([questionId,value])=>{
-      const q=p.descriptor.questions.find(q=>q.id===questionId), label=v=>q?.choices.find(c=>c.id===v)?.label||v;
+       const q=content.questions.find(q=>q.id===questionId), label=v=>q?.choices.find(c=>c.id===v)?.label||v;
       return {questionId,value:Array.isArray(value)?value.map(label):label(value)};
     })});
     } catch {

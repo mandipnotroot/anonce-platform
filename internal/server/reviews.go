@@ -14,39 +14,35 @@ import (
 	"time"
 )
 
-type choice struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+type encryptedContent struct {
+	V          int    `json:"v"`
+	Nonce      string `json:"nonce"`
+	Ciphertext string `json:"ciphertext"`
 }
-type question struct {
-	ID       string   `json:"id"`
-	Type     string   `json:"type"`
-	Label    string   `json:"label"`
-	Required bool     `json:"required"`
-	Choices  []choice `json:"choices"`
+
+func (c encryptedContent) valid() bool {
+	_, ne := protocol.Decode(c.Nonce, 12)
+	b, ce := protocol.Decode(c.Ciphertext, -1)
+	return c.V == 1 && ne == nil && ce == nil && len(b) >= 16 && len(b) <= 32784
 }
-type draft struct {
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Questions   []question `json:"questions"`
-}
+
 type review struct {
 	ID, Org, Account, Membership, Issuer, State string
-	Draft                                       draft
+	Content                                     encryptedContent
 	Revision, Max, Issued, Accepted             int64
 	Opens, Closes                               *int64
 	Private, Public, Descriptor, Signature      []byte
 }
 
-const reviewColumns = "r.id,r.org_id,r.account_id,r.membership_id,r.issuer_key_id,r.state,r.draft,r.revision,r.max_responses,r.opens_at,r.closes_at,r.issued_count,r.issuer_private,r.issuer_public,r.descriptor,r.descriptor_signature,COALESCE((SELECT accepted_count FROM anon.reviews a WHERE a.id=r.id),0)"
+const reviewColumns = "r.id,r.org_id,r.account_id,r.membership_id,r.issuer_key_id,r.state,r.encrypted_content,r.revision,r.max_responses,r.opens_at,r.closes_at,r.issued_count,r.issuer_private,r.issuer_public,r.descriptor,r.descriptor_signature,COALESCE((SELECT accepted_count FROM anon.reviews a WHERE a.id=r.id),0)"
 
 func scanReview(row pgx.Row) (*review, error) {
 	v := new(review)
-	e := row.Scan(&v.ID, &v.Org, &v.Account, &v.Membership, &v.Issuer, &v.State, &v.Draft, &v.Revision, &v.Max, &v.Opens, &v.Closes, &v.Issued, &v.Private, &v.Public, &v.Descriptor, &v.Signature, &v.Accepted)
+	e := row.Scan(&v.ID, &v.Org, &v.Account, &v.Membership, &v.Issuer, &v.State, &v.Content, &v.Revision, &v.Max, &v.Opens, &v.Closes, &v.Issued, &v.Private, &v.Public, &v.Descriptor, &v.Signature, &v.Accepted)
 	return v, e
 }
 func (v *review) view() map[string]any {
-	return map[string]any{"id": v.ID, "org_id": v.Org, "creator_account_id": v.Account, "reviewer_account_id": v.Account, "reviewer_membership_id": v.Membership, "title": v.Draft.Title, "description": v.Draft.Description, "questions": v.Draft.Questions, "max_responses": v.Max, "opens_at": nullableFormat(v.Opens), "closes_at": nullableFormat(v.Closes), "state": v.State, "revision": format(v.Revision), "issuer_public_key": protocol.B64(v.Public), "issuer_key_id": v.Issuer, "descriptor": protocol.B64(v.Descriptor), "descriptor_signature": protocol.B64(v.Signature), "issued_count": format(v.Issued), "accepted_count": format(v.Accepted)}
+	return map[string]any{"id": v.ID, "org_id": v.Org, "creator_account_id": v.Account, "reviewer_account_id": v.Account, "reviewer_membership_id": v.Membership, "encrypted_content": v.Content, "max_responses": v.Max, "opens_at": nullableFormat(v.Opens), "closes_at": nullableFormat(v.Closes), "state": v.State, "revision": format(v.Revision), "issuer_public_key": protocol.B64(v.Public), "issuer_key_id": v.Issuer, "descriptor": protocol.B64(v.Descriptor), "descriptor_signature": protocol.B64(v.Signature), "issued_count": format(v.Issued), "accepted_count": format(v.Accepted)}
 }
 func (s *Server) reviewRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/member/orgs/{org}/reviews", s.listReviews)
@@ -120,9 +116,11 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Request string `json:"request_id"`
-		Title   string `json:"title"`
-		Max     int64  `json:"max_responses"`
+		Request string           `json:"request_id"`
+		Review  string           `json:"review_id"`
+		Content encryptedContent `json:"encrypted_content"`
+		Vault   vaultWrite       `json:"vault_write"`
+		Max     int64            `json:"max_responses"`
 	}
 	x, e := s.verify(r, "review-create", &p, false)
 	if e != nil {
@@ -134,10 +132,8 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	if p.Max == 0 {
-		p.Max = 1
-	}
-	if p.Max < 1 || p.Max > 100 || len(p.Title) < 1 || len(p.Title) > 300 {
+	_, idErr := protocol.Decode(p.Review, 16)
+	if p.Max < 1 || p.Max > 100 || idErr != nil || !p.Content.valid() || p.Vault.Expected != "0" || p.Vault.Object.ID != p.Review || !p.Vault.Object.valid(0) {
 		fail(w, bad("invalid_review"))
 		return
 	}
@@ -166,15 +162,18 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	id := protocol.ID()
+	id := p.Review
 	priv, e := s.crypt("issuer/"+id, x509.MarshalPKCS1PrivateKey(key), false)
 	if e != nil {
 		fail(w, e)
 		return
 	}
-	v := &review{ID: id, Org: r.PathValue("org"), Account: x.Session.Account, Membership: member, Issuer: protocol.B64(protocol.Hash(pub)), State: "draft", Draft: draft{p.Title, "", []question{}}, Revision: 1, Max: p.Max, Public: pub}
-	b, _ := json.Marshal(v.Draft)
-	_, e = tx.Exec(r.Context(), "INSERT INTO member.reviews(id,org_id,account_id,membership_id,draft,issuer_private,issuer_public,issuer_key_id,max_responses,opens_at,closes_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, v.Org, v.Account, member, b, priv, pub, v.Issuer, p.Max, v.Opens, v.Closes)
+	v := &review{ID: id, Org: r.PathValue("org"), Account: x.Session.Account, Membership: member, Issuer: protocol.B64(protocol.Hash(pub)), State: "draft", Content: p.Content, Revision: 1, Max: p.Max, Public: pub}
+	b, _ := json.Marshal(v.Content)
+	_, e = tx.Exec(r.Context(), "INSERT INTO member.reviews(id,org_id,account_id,membership_id,encrypted_content,issuer_private,issuer_public,issuer_key_id,max_responses,opens_at,closes_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, v.Org, v.Account, member, b, priv, pub, v.Issuer, p.Max, v.Opens, v.Closes)
+	if e == nil {
+		e = saveObject(r, tx, x.Session.Account, p.Vault)
+	}
 	if e == nil {
 		e = cache(r, tx, x, p.Request, v.view())
 	}
@@ -187,45 +186,14 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 	}
 	write(w, 201, v.view())
 }
-func validDraft(d draft) bool {
-	if len(d.Title) < 1 || len(d.Title) > 300 || len(d.Description) > 10000 || len(d.Questions) < 1 || len(d.Questions) > 100 {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, q := range d.Questions {
-		if q.ID == "" || len(q.ID) > 100 || seen[q.ID] || len(q.Label) < 1 || len(q.Label) > 2000 {
-			return false
-		}
-		seen[q.ID] = true
-		if q.Type != "text" && q.Type != "single" && q.Type != "multiple" {
-			return false
-		}
-		if q.Type == "text" && len(q.Choices) != 0 {
-			return false
-		}
-		if q.Type != "text" && (len(q.Choices) < 2 || len(q.Choices) > 100) {
-			return false
-		}
-		cs := map[string]bool{}
-		for _, c := range q.Choices {
-			if c.ID == "" || len(c.ID) > 100 || cs[c.ID] || len(c.Label) < 1 || len(c.Label) > 1000 {
-				return false
-			}
-			cs[c.ID] = true
-		}
-	}
-	return true
-}
 func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Request     string     `json:"request_id"`
-		Expected    string     `json:"expected_revision"`
-		Title       string     `json:"title"`
-		Description string     `json:"description"`
-		Questions   []question `json:"questions"`
-		Max         int64      `json:"max_responses"`
-		Opens       *string    `json:"opens_at"`
-		Closes      *string    `json:"closes_at"`
+		Request  string           `json:"request_id"`
+		Expected string           `json:"expected_revision"`
+		Content  encryptedContent `json:"encrypted_content"`
+		Max      int64            `json:"max_responses"`
+		Opens    *string          `json:"opens_at"`
+		Closes   *string          `json:"closes_at"`
 	}
 	x, e := s.verify(r, "review-update", &p, false)
 	if e != nil {
@@ -240,8 +208,7 @@ func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 	rev, e := decimal(p.Expected)
 	opens, oe := nullableDecimal(p.Opens)
 	closes, ce := nullableDecimal(p.Closes)
-	d := draft{p.Title, p.Description, p.Questions}
-	if e != nil || oe != nil || ce != nil || (closes != nil && opens != nil && *closes <= *opens) || p.Max < 1 || p.Max > 100 || !validDraft(d) {
+	if e != nil || oe != nil || ce != nil || (closes != nil && opens != nil && *closes <= *opens) || p.Max < 1 || p.Max > 100 || !p.Content.valid() {
 		fail(w, bad("invalid_review"))
 		return
 	}
@@ -260,12 +227,12 @@ func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, old)
 		return
 	}
-	b, _ := json.Marshal(d)
-	tag, e := tx.Exec(r.Context(), "UPDATE member.reviews SET draft=$1,max_responses=$2,opens_at=$3,closes_at=$4,revision=revision+1 WHERE id=$5 AND revision=$6 AND state='draft'", b, p.Max, opens, closes, v.ID, rev)
+	b, _ := json.Marshal(p.Content)
+	tag, e := tx.Exec(r.Context(), "UPDATE member.reviews SET encrypted_content=$1,max_responses=$2,opens_at=$3,closes_at=$4,revision=revision+1 WHERE id=$5 AND revision=$6 AND state='draft'", b, p.Max, opens, closes, v.ID, rev)
 	if e == nil && tag.RowsAffected() != 1 {
 		e = problem{409, "revision_conflict"}
 	}
-	v.Draft, v.Max, v.Opens, v.Closes, v.Revision = d, p.Max, opens, closes, rev+1
+	v.Content, v.Max, v.Opens, v.Closes, v.Revision = p.Content, p.Max, opens, closes, rev+1
 	if e == nil {
 		e = cache(r, tx, x, p.Request, v.view())
 	}
@@ -334,6 +301,9 @@ func (s *Server) reviewState(w http.ResponseWriter, r *http.Request, del bool) {
 	if e == nil && tag.RowsAffected() != 1 {
 		e = problem{409, "revision_conflict"}
 	}
+	if e == nil && del {
+		_, e = tx.Exec(r.Context(), "DELETE FROM member.vault_objects WHERE account_id=$1 AND id=$2", v.Account, v.ID)
+	}
 	result := map[string]any{"id": v.ID, "state": "closed", "revision": format(rev + 1), "deleted": del}
 	if e == nil {
 		e = cache(r, tx, x, p.Request, result)
@@ -349,31 +319,45 @@ func (s *Server) reviewState(w http.ResponseWriter, r *http.Request, del bool) {
 }
 
 type descriptor struct {
-	V           int        `json:"v"`
-	Deployment  string     `json:"deployment_id"`
-	Review      string     `json:"review_id"`
-	Org         string     `json:"org_id"`
-	Account     string     `json:"reviewer_account_id"`
-	Membership  string     `json:"reviewer_membership_id"`
-	Certificate string     `json:"reviewer_certificate"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Questions   []question `json:"questions"`
-	Recipient   string     `json:"recipient_public_key"`
-	Issuer      string     `json:"issuer_key_id"`
-	Public      string     `json:"issuer_public_key"`
-	Max         int64      `json:"max_responses"`
-	Opens       *string    `json:"opens_at"`
-	Closes      *string    `json:"closes_at"`
+	V           int              `json:"v"`
+	Deployment  string           `json:"deployment_id"`
+	Review      string           `json:"review_id"`
+	Org         string           `json:"org_id"`
+	Account     string           `json:"reviewer_account_id"`
+	Membership  string           `json:"reviewer_membership_id"`
+	Certificate string           `json:"reviewer_certificate"`
+	Content     encryptedContent `json:"encrypted_content"`
+	Recipient   string           `json:"recipient_public_key"`
+	Issuer      string           `json:"issuer_key_id"`
+	Public      string           `json:"issuer_public_key"`
+	Max         int64            `json:"max_responses"`
+	Opens       *string          `json:"opens_at"`
+	Closes      *string          `json:"closes_at"`
+}
+
+func decodeDescriptor(b []byte) (descriptor, error) {
+	var d descriptor
+	if len(b) > 65536 || protocol.StrictJSON(b, &d) != nil || d.V != 2 || !d.Content.valid() {
+		return d, bad("invalid_descriptor")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(b, &fields) != nil || len(fields) != 14 {
+		return d, bad("invalid_descriptor")
+	}
+	for _, name := range []string{"v", "deployment_id", "review_id", "org_id", "reviewer_account_id", "reviewer_membership_id", "reviewer_certificate", "encrypted_content", "recipient_public_key", "issuer_key_id", "issuer_public_key", "max_responses", "opens_at", "closes_at"} {
+		if _, ok := fields[name]; !ok {
+			return d, bad("invalid_descriptor")
+		}
+	}
+	return d, nil
 }
 
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Request    string     `json:"request_id"`
-		Expected   string     `json:"expected_revision"`
-		Descriptor string     `json:"descriptor"`
-		Signature  string     `json:"descriptor_signature"`
-		Vault      vaultWrite `json:"vault_write"`
+		Request    string `json:"request_id"`
+		Expected   string `json:"expected_revision"`
+		Descriptor string `json:"descriptor"`
+		Signature  string `json:"descriptor_signature"`
 	}
 	x, e := s.verify(r, "review-publish", &p, false)
 	if e != nil {
@@ -395,22 +379,9 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		fail(w, bad("invalid_descriptor"))
 		return
 	}
-	var d descriptor
-	if e = protocol.StrictJSON(b, &d); e != nil {
+	d, e := decodeDescriptor(b)
+	if e != nil {
 		fail(w, bad("invalid_descriptor"))
-		return
-	}
-	var cert string
-	if e = s.member.QueryRow(r.Context(), "SELECT certificate FROM member.memberships WHERE id=$1 AND state='approved'", v.Membership).Scan(&cert); e != nil {
-		fail(w, problem{403, "forbidden"})
-		return
-	}
-	db, _ := json.Marshal(v.Draft)
-	incoming, _ := json.Marshal(draft{d.Title, d.Description, d.Questions})
-	_, recipientErr := protocol.Decode(d.Recipient, 32)
-	sig, se := protocol.Decode(p.Signature, 64)
-	if d.V != 1 || d.Deployment != protocol.B64(s.deployment) || d.Review != v.ID || d.Org != v.Org || d.Account != v.Account || d.Membership != v.Membership || d.Certificate != cert || !equal(db, incoming) || d.Public != protocol.B64(v.Public) || d.Issuer != v.Issuer || d.Max != v.Max || !sameNullable(d.Opens, v.Opens) || !sameNullable(d.Closes, v.Closes) || recipientErr != nil || se != nil || !s.validCertificate(cert, x.Session.Membership, v.Org, v.Membership) || !validDraft(v.Draft) || !checkSig(x.Session.Membership, p.Signature, protocol.E("review-descriptor", b)) {
-		fail(w, bad("descriptor_mismatch"))
 		return
 	}
 	tx, e := s.member.Begin(r.Context())
@@ -428,12 +399,25 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, old)
 		return
 	}
+	v, e = scanReview(tx.QueryRow(r.Context(), "SELECT "+reviewColumns+" FROM member.reviews r WHERE r.id=$1 FOR UPDATE OF r", v.ID))
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	var cert string
+	if e = tx.QueryRow(r.Context(), "SELECT certificate FROM member.memberships WHERE id=$1 AND org_id=$2 AND account_id=$3 AND state='approved' FOR SHARE", v.Membership, v.Org, x.Session.Account).Scan(&cert); e != nil {
+		fail(w, problem{403, "forbidden"})
+		return
+	}
+	_, recipientErr := protocol.Decode(d.Recipient, 32)
+	sig, se := protocol.Decode(p.Signature, 64)
+	if d.V != 2 || d.Deployment != protocol.B64(s.deployment) || d.Review != v.ID || d.Org != v.Org || d.Account != v.Account || d.Membership != v.Membership || d.Certificate != cert || d.Content != v.Content || !d.Content.valid() || d.Public != protocol.B64(v.Public) || d.Issuer != v.Issuer || d.Max != v.Max || !sameNullable(d.Opens, v.Opens) || !sameNullable(d.Closes, v.Closes) || recipientErr != nil || se != nil || !s.validCertificate(cert, x.Session.Membership, v.Org, v.Membership) || !checkSig(x.Session.Membership, p.Signature, protocol.E("review-descriptor", b)) {
+		fail(w, bad("descriptor_mismatch"))
+		return
+	}
 	tag, e := tx.Exec(r.Context(), "UPDATE member.reviews SET state='published',revision=revision+1,descriptor=$1,descriptor_signature=$2 WHERE id=$3 AND revision=$4 AND state='draft'", b, sig, v.ID, rev)
 	if e == nil && tag.RowsAffected() != 1 {
 		e = problem{409, "revision_conflict"}
-	}
-	if e == nil {
-		e = saveObject(r, tx, x.Session.Account, p.Vault)
 	}
 	if e == nil {
 		_, e = tx.Exec(r.Context(), "INSERT INTO anon.reviews(id,issuer_key_id,issuer_public,descriptor,descriptor_hash,descriptor_signature,state,opens_at,closes_at) VALUES($1,$2,$3,$4,$5,$6,'published',$7,$8)", v.ID, v.Issuer, v.Public, b, protocol.Hash(b), sig, v.Opens, v.Closes)

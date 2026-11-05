@@ -7,8 +7,8 @@ This document describes system boundaries, not evidence of completed verificatio
 
 | Boundary | Responsibility and sensitive state |
 | --- | --- |
-| Browser | HTML/CSS/JavaScript ES modules with locally bundled crypto. Holds password/recovery material, authentication and membership seeds, recipient private keys, vault master key, unblinding secrets, and response plaintext. |
-| Go modular monolith | Separates authentication, organization authorization, vault, reviews, issuance, anonymous submission, and receipts. Stores public authentication keys and encrypted vault objects, not browser secrets or plaintext answers. |
+| Browser | HTML/CSS/JavaScript ES modules with locally bundled crypto. Holds password/recovery material, authentication and membership seeds, review content keys, recipient private keys, vault master key, unblinding secrets, and review/response plaintext. |
+| Go modular monolith | Separates authentication, organization authorization, vault, reviews, issuance, anonymous submission, and receipts. Stores public authentication keys, encrypted review content, and encrypted vault objects, not browser secrets or plaintext questions/answers. |
 | Server signing keys | Separate protected-at-rest membership CA, per-review RSA blind issuer, and Ed25519 receipt keys. Keys are not interchangeable. |
 | PostgreSQL | Parameterized SQL and transactional state changes enforce quotas, replay protection, and idempotency. Database integrity remains a trust requirement. |
 
@@ -22,7 +22,14 @@ flowchart LR
     S -->|Encrypted results| R[Reviewer browser]
 ```
 
-The browser encrypts answers before submission; only the recipient browser decrypts them. Anonymous transport is separate from authenticated issuance, not proof against traffic correlation.
+The browser encrypts review titles, descriptions, and complete questions before
+draft creation. Signed descriptors contain encrypted content, not plaintext
+questions. Respondents decrypt with an invitation-link secret in the URL
+fragment. Anyone holding that link can read the content, but still needs the
+existing membership and issuance authorization to respond. The separate X25519
+recipient private key stays in the creator's encrypted vault; the invitation
+key cannot decrypt answers. Anonymous transport remains separate from
+authenticated issuance, not proof against traffic correlation.
 
 ## State and transactions
 
@@ -54,7 +61,7 @@ Same-device automatic unlock trusts the origin; it does not protect against mali
 
 | Operation | State and security behavior |
 | --- | --- |
-| Draft/publication | Drafts are revisioned. Publication atomically freezes signed descriptor bytes and writes the encrypted recipient-key vault object. Each review has a dedicated RSA issuer. |
+| Draft/publication | Draft creation atomically stores encrypted content and the creator's encrypted content/recipient keys. Drafts are revisioned. Publication freezes signed descriptor bytes containing the saved encrypted envelope. Each review has a dedicated RSA issuer. |
 | Quota | `max_responses` is a configurable positive integer, default 1, limiting authorizations **per member**, not global submissions. |
 | Issuance reservation | Locks member and review rows, checks active membership and eligibility, and reserves unique `(review,membership,slot)` with `slot <= max_responses`. |
 | Issuance retry | Each new issuance uses a new `request_id`. The same ID and request hash returns the cached signature; changed content conflicts. |
@@ -66,9 +73,17 @@ Same-device automatic unlock trusts the origin; it does not protect against mali
 - `issued_count` and aggregate `accepted_count` are separate; neither implies the other.
 - Only committed encrypted records contribute to `accepted_count`, not issuance, rejected requests, rollbacks, or retries.
 - Submission storage has no member/account/session/issuance-request column or identifying logs. Never join issuance to submissions.
-- The server cannot validate encrypted answers. One unreadable record must not block other reviewer results or exports.
+- The server cannot validate encrypted question or answer semantics. Browser validation enforces content and answer rules. One unreadable response must not block other reviewer results or exports.
 
 ## Privacy boundary
+
+Invitation fragments are not sent in HTTP requests. Sharing a link shares its
+content key; browser history, extensions, copied links, and malicious served
+code can expose it. There is no link revocation or content-key rotation in this
+version. Review content is not padded: ciphertext lengths remain visible.
+Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions,
+and counts remain server-visible. Existing plaintext data or copied snapshots
+are not retroactively protected; this unreleased format has no upgrade migration.
 
 Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`. The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them. Logs, telemetry and errors must not recreate an identifying submission trail.
 

@@ -22,10 +22,23 @@ const esc = (s) =>
         c
       ],
   );
+const routeHash = () => location.hash.replace(/^#/, "");
 const path = () =>
-  location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  routeHash().replace(/^\/?/, "").split(/[?]/, 1)[0].split("/").filter(Boolean);
+function responseInvitation() {
+  try { return api.parseResponseInvitation(location.hash); }
+  catch { return { invalid: true, missingKey: !location.hash.includes("?") }; }
+}
+function authHref(mode) {
+  return returnRoute ? `#/${mode}?next=${encodeURIComponent(returnRoute)}` : `#/${mode}`;
+}
 const go = (p) => {
-  location.hash = "/" + String(p).replace(/^\/+/, "");
+  const next = "/" + String(p).replace(/^\/+/, "");
+  if (location.hash === `#${next}`) {
+    load();
+    return;
+  }
+  location.hash = next;
 };
 const say = (e) => typeof e === "string" ? e : typeof e?.message === "string" ? e.message : "Something went wrong. Please try again.";
 function toast(message, type = "error") {
@@ -222,6 +235,9 @@ function bind(form, fn) {
 }
 async function load() {
   const route = path();
+  const hashParams = new URLSearchParams(routeHash().split("?")[1] || "");
+  if (["login", "register", "recover"].includes(route[0]) && hashParams.has("next"))
+    returnRoute = hashParams.get("next");
   if (route[0] === "verify-receipt") {
     session = null;
     return await renderReceiptVerifier();
@@ -232,11 +248,11 @@ async function load() {
     session = null;
   }
   if (!session && (route[0] === "respond" || route[0] === "invite"))
-    returnRoute = `/${route[0]}/${encodeURIComponent(route[1] || "")}`;
+    returnRoute = route[0] === "respond" ? routeHash() : `/${route[0]}/${encodeURIComponent(route[1] || "")}`;
   else if (session && (route[0] === "respond" || route[0] === "invite"))
     returnRoute = null;
   if (!session) {
-    if (route[0] === "respond") return renderAuth("login", "respond");
+      if (route[0] === "respond") return renderAuth("login", "respond");
     if (route[0] === "invite") return renderAuth("login", "invite");
     renderAuth(
       route[0] === "register"
@@ -248,7 +264,7 @@ async function load() {
     return;
   }
   if (route[0] === "respond") {
-    renderRespond(route[1]);
+    renderRespond(responseInvitation(), route[1]);
     return;
   }
   let organizationError = "";
@@ -480,7 +496,7 @@ function renderHome() {
               const mine = isReviewOwner(r);
               const accepted = countText(r.accepted_count);
               const issued = countText(r.issued_count);
-             return `<article class="card review-row"><div class="review-info"><strong>${esc(r.title || "Untitled review")}</strong><small>${statusBadge(r.status)} · <span aria-label="Accepted responses">${accepted} accepted</span> · <span aria-label="Issued authorizations">${issued} issued</span></small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
+              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)} · <span aria-label="Accepted responses">${accepted} accepted</span> · <span aria-label="Issued authorizations">${issued} issued</span></small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" && r.contentState !== "locked" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
             })
             .join(
               "",
@@ -600,7 +616,7 @@ function renderAuth(mode, intent = "") {
       ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
       : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="you@organization.org"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}"></div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
   frame(
-      `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down somewhere private. You cannot view them again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may recover your account. Downloaded copies are sensitive credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in to continue to this response form." : intent === "invite" ? "Sign in to accept your invitation." : mode === "register" ? "Create an account to join feedback spaces." : "Sign in to manage your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="#/login">Sign in</a>` : `New to Anonce? <a href="#/register">Create an account</a> · <a href="#/recover">Recover account</a>`}</p>`}</section></div>`,
+    `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down somewhere private. You cannot view them again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may recover your account. Downloaded copies are sensitive credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in to continue to this response form." : intent === "invite" ? "Sign in to accept your invitation." : mode === "register" ? "Create an account to join feedback spaces." : "Sign in to manage your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="${authHref("login")}">Sign in</a>` : `New to Anonce? <a href="${authHref("register")}">Create an account</a> · <a href="${authHref("recover")}">Recover account</a>`}</p>`}</section></div>`,
     title,
   );
   if (words) {
@@ -828,11 +844,14 @@ async function renderReview(id, tab) {
   try {
     review = await api.getReview({ reviewId: id });
     } catch (e) {
-      frame(
-      `${head("Review unavailable", "We couldn’t load this review. Try again shortly.")}${button("Back to reviews", "", "secondary")}`,
+    frame(
+      `${head("Encrypted review", "Review content is unavailable or cannot be decrypted.")}${button("Back to reviews", "", "secondary")}`,
       "Review",
     );
-    toast(say(e));
+    return;
+  }
+  if (review.contentState === "locked") {
+    frame(emptyCard("Encrypted review", "Review content is available only to its creator."), "Review");
     return;
   }
   const reviewOrgId = review.org_id || review.orgId || review.descriptor?.org_id;
@@ -922,13 +941,9 @@ async function renderReview(id, tab) {
         toast(say(e));
       }
   });
-  document.querySelector("#share")?.addEventListener("click", () => {
-    const url =
-      location.origin +
-      location.pathname +
-      "#/respond/" +
-      encodeURIComponent(id);
-    copyText(url, "Response link");
+  document.querySelector("#share")?.addEventListener("click", async () => {
+    try { await copyText(await api.getInvitationURL({ reviewId: id }), "Secret response link"); }
+    catch (e) { toast(say(e)); }
   });
   bind("#edit-review", async (fd) => {
     const questions = [...document.querySelectorAll(".question")].map((q) => ({
@@ -1051,12 +1066,21 @@ function dt(v) {
         .toISOString()
         .slice(0, 16);
 }
-async function renderRespond(id) {
-  if (!id) {
+async function renderRespond(invitation, routedId) {
+  if (invitation?.invalid && invitation.missingKey) {
+    frame(emptyCard("Complete invitation link required.", "Ask the person who shared this review for its complete secret link."), "Respond");
+    return;
+  }
+  if ((!invitation || invitation.invalid) && routedId) {
+    frame(emptyCard("This invitation could not be read", "Check that you have the complete, unchanged invitation link."), "Respond");
+    return;
+  }
+  const id = invitation?.reviewId;
+  if (!id || invitation.invalid || !invitation.contentKey) {
     frame(
       emptyCard(
-        "Link not complete",
-        "Ask the person who shared this review for a complete response link.",
+        "Complete invitation link required.",
+        "Ask the person who shared this review for its complete secret link.",
       ),
       "Respond",
     );
@@ -1064,15 +1088,19 @@ async function renderRespond(id) {
   }
   let r;
   try {
-    r = await api.getReview({ reviewId: id });
+    r = await api.getReview({ reviewId: id, contentKey: invitation.contentKey });
   } catch (e) {
     frame(`${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`, "Respond");
     toast(say(e));
     return;
   }
+  if (r.contentState === "locked" || !Array.isArray(r.questions)) {
+    frame(emptyCard("This invitation could not be read", "Check that you have the complete, unchanged invitation link."), "Respond");
+    return;
+  }
   const questions = r.questions || [];
   frame(
-    `<section class="card response-card"><p class="eyebrow">ANONYMOUS FEEDBACK</p><h1>${esc(r.title || "Share your thoughts")}</h1><p class="subtitle">${esc(r.description || "Your thoughtful answer can help make things better.")}</p><div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
+    `<section class="card response-card"><p class="eyebrow">ANONYMOUS FEEDBACK</p><h1>${esc(r.title || "Share your thoughts")}</h1><p class="subtitle">${esc(r.description || "Your thoughtful answer can help make things better.")}</p><div class="alert">Anyone with this link can read the review title and questions. The link does not grant response authorization or let its holder decrypt answers. Keep link private. Browsers and link-sharing tools may retain fragments; this site cannot prevent that.</div><div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
     "Respond",
   );
   document.querySelectorAll("#respond input[type=checkbox]").forEach((input) =>
@@ -1109,7 +1137,7 @@ async function renderRespond(id) {
       index: i,
       value: q.type === "multiple" ? fd.getAll(`q-${i}`) : fd.get(`q-${i}`),
     }));
-    let p = await api.prepareResponse({ reviewId: id, answers });
+    let p = await api.prepareResponse({ reviewId: id, contentKey: invitation.contentKey, answers });
     let result = await api.submitResponse({ pendingId: p.pendingId });
     const box = document.querySelector("#receipt");
     if (result.status === "pending") {

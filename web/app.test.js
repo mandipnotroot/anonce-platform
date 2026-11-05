@@ -11,14 +11,18 @@ async function service(overrides={}) {
     .replace(/^import .*;$/gm,'').replace(/\bexport /g,'');
   const wire=value=>JSON.parse(JSON.stringify(value,(_,v)=>v instanceof Uint8Array?Buffer.from(v).toString('base64url'):v));
   class MockAPIError extends Error {constructor(code,message){super(message);this.code=code;}}
-  const context=vm.createContext({Uint8Array,TextDecoder,TextEncoder,Blob,URL,APIError:MockAPIError,
+  let randomCounter=0;
+  const context=vm.createContext({Uint8Array,TextDecoder,TextEncoder,Blob,URL,URLSearchParams,crypto:{getRandomValues:value=>value.fill(++randomCounter)},APIError:MockAPIError,
     jsonBytes:value=>new TextEncoder().encode(JSON.stringify(value)),toWire:wire,
     C:{fromBase64url:value=>new Uint8Array(Buffer.from(value,'base64url')),toBase64url:value=>Buffer.from(value).toString('base64url'),...overrides.C},
     request:overrides.request||(()=>{throw Error('Unexpected request');}),
     loadSealed:overrides.loadSealed,saveSealed:overrides.saveSealed|| (async()=>{}),
   });
   vm.runInContext(source+`;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust};
+    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,parseResponseInvitation,reviewKeys};
+    globalThis.setReviewKeys=value=>{reviewKeys=value;};
+    globalThis.lifecycle={createReview,updateReview,publishReview,deleteReview};
+    globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'member',certificate:'certificate'});};
     globalThis.setSigned=value=>{signed=value;};`,context);
   return context;
 }
@@ -98,16 +102,19 @@ test('remote recovery restores exact issuance bytes after JSONB key reordering',
 });
 
 async function responseService({networkFailure=false,keyFailure=false,descriptorFailure=false}={}) {
-   return service({C:{verifyDescriptor:async()=>{if(descriptorFailure)throw Error('descriptor');return {deployment_id:'YQ',review_id:'Yw',issuer_key_id:'Yg',questions:[{id:'q',type:'text',choices:[]}]};},
+   const context=await service({C:{verifyDescriptor:async()=>{if(descriptorFailure)throw Error('descriptor');return {deployment_id:'YQ',review_id:'Yw',issuer_key_id:'Yg'};},
+    openDescriptorContent:async({descriptor,contentKey})=>{assert.equal(descriptor.questions,undefined);assert.equal(contentKey.length,32);return {questions:[{id:'q',type:'text',choices:[]}]};},
     hashBytes:async()=>new Uint8Array(32),responseHash:async()=>new Uint8Array(32),getReceiptTrust:()=>({}),verifyReceipt:async({receipt})=>receipt,
     openVaultObject:async()=>{if(keyFailure)throw Error('key');return new TextEncoder().encode(JSON.stringify({kind:'recipient',reviewId:'Yw',privateKey:'YQ'}));},
-    decryptResponse:async({ciphertext})=>{if(ciphertext[0]===2)throw Error('raw secret provider error');if(ciphertext[0]===3)return {answers:null};return {answers:{q:'good answer'}};}},
+    decryptResponse:async({ciphertext,recipientPrivateKey,descriptor})=>{assert.equal(recipientPrivateKey.length,32);assert.equal(descriptor.questions,undefined);if(ciphertext[0]===2)throw Error('raw secret provider error');if(ciphertext[0]===3)return {answers:null};return {answers:{q:'good answer'}};}},
     request:async path=>{
       if(path.startsWith('/api/public/'))return {descriptor:'e30',descriptor_signature:''};
       if(path==='/api/member/vault')return {objects:[{}]};
       if(networkFailure)throw Error('network');
        return {items:[1,2,3].map(n=>({id:String(n),accepted_at:'untrusted',receipt:{receipt_id:String(n),accepted_at:'today'},enc:'YQ',ciphertext:Buffer.from([n]).toString('base64url')})),next:null};
     }});
+   context.setReviewKeys(async()=>{if(keyFailure)throw Error('key');return {privateKey:new Uint8Array(32),contentKey:new Uint8Array(32)};});
+   return context;
 }
 
 test('mixed responses retain readable answers and report unreadable records in JSON and CSV',async()=>{
@@ -183,11 +190,74 @@ test('cached and lookup receipts reverify descriptor, envelope and every expecte
 test('reviewer rejects receipt and identifier mismatches before decrypting',async()=>{
   for(const badSignature of [false,true]) {
     let decrypts=0;
-    const context=await service({C:{verifyDescriptor:async()=>({deployment_id:'YQ',review_id:'Yw',issuer_key_id:'ZQ'}),hashBytes:async()=>new Uint8Array(32),responseHash:async()=>new Uint8Array(32),getReceiptTrust:()=>portableTrust,
+    const context=await service({C:{openDescriptorContent:async()=>({questions:[]}),verifyDescriptor:async()=>({deployment_id:'YQ',review_id:'Yw',issuer_key_id:'ZQ'}),hashBytes:async()=>new Uint8Array(32),responseHash:async()=>new Uint8Array(32),getReceiptTrust:()=>portableTrust,
       verifyReceipt:async()=>{if(badSignature)throw Error('signature');return {...portableReceipt,receipt_id:'different'};},
       openVaultObject:async()=>new TextEncoder().encode(JSON.stringify({kind:'recipient',reviewId:'Yw',privateKey:'YQ'})),decryptResponse:async()=>{decrypts++;}},
       request:async path=>path.startsWith('/api/public/')?{descriptor:'e30',descriptor_signature:'YQ'}:path==='/api/member/vault'?{objects:[{}]}:{items:[{id:'Yg',accepted_at:'forged',enc:'YQ',ciphertext:'Yg',receipt:portableReceipt}]}});
+    context.setReviewKeys(async()=>({privateKey:new Uint8Array(32),contentKey:new Uint8Array(32)}));
     const result=await context.service.listResponses({reviewId:'Yw'});
     assert.equal(decrypts,0);assert.equal(result.items[0].acceptedAt,null);assert.equal(result.items[0].status,'invalid');assert.equal(result.items[0].answers.length,0);
   }
+});
+test('secret invitation parser accepts canonical fragment only',async()=>{
+  const context=await service(),reviewId=Buffer.alloc(16,1).toString('base64url'),key=Buffer.alloc(32,2).toString('base64url');
+  const fragment=`#/respond/${reviewId}?v=1&k=${key}`;
+  const parsed=context.service.parseResponseInvitation(fragment);
+  assert.equal(parsed.reviewId,reviewId);assert.equal(Buffer.from(parsed.contentKey).toString('base64url'),key);
+  for(const value of [fragment+'&v=1',fragment+'&x=1',fragment+'#extra',fragment.replace('?v=1','/extra?v=1'),fragment.replace('v=1','v=2'),fragment.replace(key,key+'='),fragment.replace(reviewId,'YQ'),`https://example.test/${fragment}`])assert.throws(()=>context.service.parseResponseInvitation(value),e=>e.code==='INVALID_INVITATION'&&!e.message.includes(key));
+});
+test('review keys require authoritative vault and exact review binding',async()=>{
+  const reviewId=Buffer.alloc(16,1).toString('base64url'),key=Buffer.alloc(32,2).toString('base64url');
+  for(const change of [{},{review_id:Buffer.alloc(16,3).toString('base64url')},{content_key:'YQ'},{extra:true}]) {
+    let localReads=0;
+    const context=await service({loadSealed:async()=>{localReads++;throw Error('must not read local');},request:async()=>({objects:[{id:reviewId,revision:'1'}]}),C:{openVaultObject:async()=>new TextEncoder().encode(JSON.stringify({v:1,kind:'review-keys',review_id:reviewId,content_key:key,recipient_private_key:key,...change}))}});
+    if(Object.keys(change).length)await assert.rejects(context.service.reviewKeys(reviewId),e=>e.code==='KEY_UNAVAILABLE');
+    else assert.equal((await context.service.reviewKeys(reviewId)).contentKey.length,32);
+    assert.equal(localReads,0);
+  }
+});
+test('missing and unreadable authoritative review keys fail closed',async()=>{
+  const reviewId=Buffer.alloc(16,1).toString('base64url');
+  for(const objects of [[],[{id:reviewId,revision:'2'}],[{id:reviewId,revision:'1'}]]) {
+    const context=await service({request:async()=>({objects}),C:{openVaultObject:async()=>{throw Error('private provider detail');}}});
+    await assert.rejects(context.service.reviewKeys(reviewId),e=>e.code==='KEY_UNAVAILABLE'&&!e.message.includes('private provider detail'));
+  }
+});
+test('encrypted review lifecycle binds separate keys and keeps all content out of server payloads',async()=>{
+  const orgId=Buffer.alloc(16,9).toString('base64url'),privateKey=new Uint8Array(32).fill(77),publicKey=new Uint8Array(32).fill(78);
+  const marker='PRIVATE-TITLE-MARKER',description='PRIVATE-DESCRIPTION-MARKER',question='PRIVATE-QUESTION-MARKER',choice='PRIVATE-CHOICE-MARKER';
+  let stored,keys,content,nonce=0,recipientCalls=0;
+  const payloads=[],envelopes=[],opened=[];
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  const context=await service({request:async path=>{
+    if(path==='/api/member/vault')return {objects:[stored.vault_write.object]};
+    return {...stored,id:stored.review_id,org_id:orgId,state:'draft'};
+  },C:{
+    validateReviewContent:value=>clone(value),
+    generateRecipientKey:async()=>{recipientCalls++;return {privateKey,publicKey};},
+    sealVaultObject:async options=>{keys=JSON.parse(new TextDecoder().decode(options.plaintext));assert.equal(options.revision,'1');assert.equal(Buffer.from(options.objectId).toString('base64url'),keys.review_id);return {v:1,id:keys.review_id,revision:'1',nonce:'vault-nonce',ciphertext:'opaque-vault'};},
+    openVaultObject:async()=>new TextEncoder().encode(JSON.stringify(keys)),
+    sealReviewContent:async options=>{content=clone(options.content);assert.equal(Buffer.from(options.contentKey).toString('base64url'),keys.content_key);assert.equal(Buffer.from(options.reviewId).toString('base64url'),keys.review_id);assert.equal(Buffer.from(options.orgId).toString('base64url'),orgId);const envelope={v:1,nonce:String(++nonce),ciphertext:'opaque-content'};envelopes.push(envelope);return envelope;},
+    openDraftContent:async options=>{opened.push(options);return clone(content);},
+    recipientPublicKey:async({privateKey:raw})=>{assert.deepEqual(Buffer.from(raw),Buffer.from(privateKey));return publicKey;},
+    signDescriptor:async({descriptorBytes})=>{const descriptor=JSON.parse(new TextDecoder().decode(descriptorBytes));assert.equal(descriptor.v,2);assert.deepEqual(descriptor.encrypted_content,envelopes.at(-1));assert.equal(descriptor.recipient_public_key,Buffer.from(publicKey).toString('base64url'));assert.ok(!('title' in descriptor));return new Uint8Array(64);},
+  }});
+  context.configureLifecycle();
+  context.setSigned(async(_path,action,payload)=>{payloads.push({action,payload:clone(payload)});if(action==='review-create'){stored=clone(payload);throw Error('uncertain create');}if(action==='review-update')stored={...stored,...clone(payload)};return {...stored,id:stored.review_id,org_id:orgId,state:'draft'};});
+  await assert.rejects(context.lifecycle.createReview({orgId,title:marker,maxResponses:4}),/uncertain create/);
+  const created=await context.lifecycle.createReview({orgId,title:'must not create another review',maxResponses:4});
+  assert.equal(created.title,marker);
+  const create=payloads[0].payload;
+  assert.deepEqual(Object.keys(create).sort(),['request_id','review_id','encrypted_content','max_responses','vault_write'].sort());
+  assert.equal(keys.review_id,create.review_id);assert.equal(keys.kind,'review-keys');assert.equal(keys.v,1);
+  assert.notEqual(keys.content_key,keys.recipient_private_key);assert.equal(keys.recipient_private_key,Buffer.from(privateKey).toString('base64url'));
+  await context.lifecycle.updateReview({reviewId:create.review_id,expectedRevision:'1',title:marker,description,questions:[{type:'single',text:question,required:true,options:[choice,'OTHER-PRIVATE-CHOICE']}],maxResponses:5});
+  assert.equal(envelopes.length,2);assert.notEqual(envelopes[0].nonce,envelopes[1].nonce);
+  const update=payloads[1].payload;
+  assert.deepEqual(Object.keys(update).sort(),['request_id','expected_revision','encrypted_content','max_responses','opens_at','closes_at'].sort());
+  await context.lifecycle.publishReview({reviewId:create.review_id,expectedRevision:'2'});
+  const publish=payloads[2].payload;
+  assert.deepEqual(Object.keys(publish).sort(),['request_id','expected_revision','descriptor','descriptor_signature'].sort());
+  assert.equal(recipientCalls,1);assert.equal(opened.length,3);assert.equal(envelopes.length,2);
+  for(const {payload} of payloads)for(const secret of [marker,description,question,choice,keys.content_key,keys.recipient_private_key])assert.ok(!JSON.stringify(payload).includes(secret));
 });
