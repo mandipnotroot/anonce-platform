@@ -174,7 +174,7 @@ export async function logout() {
   finally { if(state) {await deleteDeviceRecord('key:'+state.accountId);await deleteDeviceRecord('cache:'+state.accountId);state.masterKey.fill(0);state.authSeed.fill(0);state.membershipSeed.fill(0);} state=undefined;setCSRF(undefined); }
 }
 const normalizeQuestion = q => ({id:q.id,text:q.label,type:q.type,required:q.required,options:(q.choices||[]).map(c=>c.label)});
-function reviewView(r,content) {return {...r,...content,content,contentState:content?'open':'locked',id:r.id||r.review_id,status:r.status||r.state,questions:content?.questions.map(normalizeQuestion)||[],maxResponses:r.max_responses,opensAt:r.opens_at,closesAt:r.closes_at};}
+function reviewView(r,content) {return {...r,...content,content,contentState:content?'open':'locked',id:r.id||r.review_id,status:r.status||r.state,questions:content?.questions.map(normalizeQuestion)||[],...(r.is_creator===true?{maxResponses:r.max_responses,opensAt:r.opens_at,closesAt:r.closes_at}:{})};}
 function canonical(value,length) {
   if(typeof value!=='string'||!/^[A-Za-z0-9_-]+$/.test(value))return false;
   try {const raw=bytes(value);return raw.length===length&&C.toBase64url(raw)===value;}catch{return false;}
@@ -205,7 +205,7 @@ function validateContent(content) {
 async function openedReview(r,contentKey) {
   const reviewId=r.review_id||r.id;
   if(!contentKey) {
-    if(r.reviewer_account_id!==state?.accountId&&r.creator_account_id!==state?.accountId)return reviewView(r);
+    if(r.is_creator!==true)return reviewView(r);
     contentKey=(await reviewKeys(reviewId)).contentKey;
   }
   if((r.state||r.status)!=='draft') {
@@ -365,9 +365,9 @@ export async function publishReview({reviewId,expectedRevision}) {
    const keys=await reviewKeys(reviewId);
    const content=await C.openDraftContent({reviewId:bytes(reviewId),orgId:bytes(r.org_id),contentKey:keys.contentKey,encryptedContent:r.encrypted_content});
    C.validateReviewContent(content,{publish:true});
-   const descriptor={v:2,deployment_id:config.deployment_id,review_id:reviewId,org_id:r.org_id,reviewer_account_id:s.accountId,
+    const descriptor={v:3,deployment_id:config.deployment_id,review_id:reviewId,org_id:r.org_id,
      reviewer_membership_id:cert.membership_id||s.session.memberships?.find(m=>m.org_id===r.org_id)?.id,reviewer_certificate:cert.certificate,encrypted_content:r.encrypted_content,
-     recipient_public_key:C.toBase64url(await C.recipientPublicKey({privateKey:keys.privateKey})),issuer_key_id:r.issuer_key_id,issuer_public_key:r.issuer_public_key,max_responses:r.max_responses,opens_at:r.opens_at,closes_at:r.closes_at};
+      recipient_public_key:C.toBase64url(await C.recipientPublicKey({privateKey:keys.privateKey})),issuer_key_id:r.issuer_key_id,issuer_public_key:r.issuer_public_key};
   const descriptorBytes=jsonBytes(descriptor);
    if(descriptorBytes.length>65536)throw new APIError('INVALID_CONTENT','Review descriptor is too large.');
   return mutation(`/reviews/${reviewId}/publish`,'review-publish',{expected_revision:String(expectedRevision),descriptor:descriptorBytes,

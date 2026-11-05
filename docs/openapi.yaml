@@ -510,7 +510,7 @@ paths:
     post:
       operationId: publishReview
       summary: Freeze signed descriptor and atomically save encrypted recipient secret
-      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v2 matches saved encrypted content, deployment, reviewer account/membership, current certificate, issuer and limits. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor with review revision CAS. No vault write at publication; server cannot validate encrypted question semantics.'
+      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v3 matches saved encrypted content, deployment, reviewer membership, current certificate, and issuer. Creator association and quota/schedule enforcement remain internal. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor with review revision CAS. No vault write at publication; server cannot validate encrypted question semantics.'
       x-challenge-action: review-publish
       x-payload-schema: '#/components/schemas/ReviewPublish'
       parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
@@ -949,23 +949,19 @@ components:
     Descriptor:
       type: object
       additionalProperties: false
-      description: At most 65536 decoded strict JSON bytes. Publication compares encrypted envelope values and all reviewer/issuer/schedule fields with stored review. No plaintext content or question skeleton. Version 1 is unsupported.
-      required: [v, deployment_id, review_id, org_id, reviewer_account_id, reviewer_membership_id, reviewer_certificate, encrypted_content, recipient_public_key, issuer_key_id, issuer_public_key, max_responses, opens_at, closes_at]
+      description: At most 65536 decoded strict JSON bytes. Publication compares encrypted envelope, membership, and issuer fields with stored review. No account IDs, quotas, schedules, plaintext content, or question skeleton. Versions 1 and 2 are unsupported. Quotas/schedules remain plaintext server-side for enforcement.
+      required: [v, deployment_id, review_id, org_id, reviewer_membership_id, reviewer_certificate, encrypted_content, recipient_public_key, issuer_key_id, issuer_public_key]
       properties:
-        v: {const: 2}
+        v: {const: 3}
         deployment_id: {$ref: '#/components/schemas/Bytes32'}
         review_id: {$ref: '#/components/schemas/ID'}
         org_id: {$ref: '#/components/schemas/ID'}
-        reviewer_account_id: {$ref: '#/components/schemas/ID'}
         reviewer_membership_id: {$ref: '#/components/schemas/ID'}
         reviewer_certificate: {$ref: '#/components/schemas/Binary'}
         encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
         recipient_public_key: {$ref: '#/components/schemas/Bytes32'}
         issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
         issuer_public_key: {$ref: '#/components/schemas/Binary', description: DER SubjectPublicKeyInfo RSA-3072 key.}
-        max_responses: {type: integer, minimum: 1, maximum: 100}
-        opens_at: {$ref: '#/components/schemas/NullableDecimal'}
-        closes_at: {$ref: '#/components/schemas/NullableDecimal'}
     ReviewPublish:
       type: object
       additionalProperties: false
@@ -978,13 +974,12 @@ components:
     Review:
       type: object
       additionalProperties: false
-      required: [id, org_id, creator_account_id, reviewer_account_id, reviewer_membership_id, encrypted_content, max_responses, opens_at, closes_at, state, revision, issuer_public_key, issuer_key_id, descriptor, descriptor_signature, issued_count, accepted_count]
+      description: Minimal member metadata. Only the creator receives settings, revision, and activity counters; creator association is represented by a session-derived boolean, not account or membership IDs. Published descriptors/signatures are fetched separately from the public endpoint.
+      required: [id, org_id, is_creator, encrypted_content, state, issuer_public_key, issuer_key_id]
       properties:
         id: {$ref: '#/components/schemas/ID'}
         org_id: {$ref: '#/components/schemas/ID'}
-        creator_account_id: {$ref: '#/components/schemas/ID'}
-        reviewer_account_id: {$ref: '#/components/schemas/ID'}
-        reviewer_membership_id: {$ref: '#/components/schemas/ID'}
+        is_creator: {type: boolean}
         encrypted_content: {$ref: '#/components/schemas/EncryptedReviewContent'}
         max_responses: {type: integer, minimum: 1, maximum: 100}
         opens_at: {$ref: '#/components/schemas/NullableDecimal'}
@@ -993,10 +988,20 @@ components:
         revision: {$ref: '#/components/schemas/Decimal'}
         issuer_public_key: {$ref: '#/components/schemas/Binary', description: DER SubjectPublicKeyInfo RSA-3072 key.}
         issuer_key_id: {$ref: '#/components/schemas/Bytes32'}
-        descriptor: {$ref: '#/components/schemas/Binary', description: Empty string for draft; otherwise encoded Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}
-        descriptor_signature: {$ref: '#/components/schemas/Binary', description: Empty string for draft; otherwise 64-byte Ed25519 signature.}
         issued_count: {$ref: '#/components/schemas/Decimal'}
         accepted_count: {$ref: '#/components/schemas/Decimal'}
+      allOf:
+        - if: {properties: {is_creator: {const: true}}}
+          then: {required: [revision, max_responses, opens_at, closes_at, issued_count, accepted_count]}
+          else:
+            not:
+              anyOf:
+                - required: [revision]
+                - required: [max_responses]
+                - required: [opens_at]
+                - required: [closes_at]
+                - required: [issued_count]
+                - required: [accepted_count]
     ReviewState: {type: object, additionalProperties: false, required: [id, state, revision, deleted], properties: {id: {$ref: '#/components/schemas/ID'}, state: {const: closed}, revision: {$ref: '#/components/schemas/Decimal'}, deleted: {type: boolean}}}
     PublicReview: {type: object, additionalProperties: false, required: [state, descriptor, descriptor_signature], properties: {state: {enum: [published, closed]}, descriptor: {$ref: '#/components/schemas/Binary', description: Base64url JSON Descriptor., x-decoded-schema: '#/components/schemas/Descriptor'}, descriptor_signature: {$ref: '#/components/schemas/Signature'}}}
     IssuanceRequest: {type: object, additionalProperties: false, required: [request_id, issuer_key_id, blinded_message, pending_state], properties: {request_id: {$ref: '#/components/schemas/ID'}, issuer_key_id: {$ref: '#/components/schemas/Bytes32'}, blinded_message: {$ref: '#/components/schemas/RSASignature'}, pending_state: {$ref: '#/components/schemas/VaultWrite'}}}

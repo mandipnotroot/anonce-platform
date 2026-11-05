@@ -12,7 +12,7 @@ No version has been released.
 - Browser-side encryption of review titles, descriptions, and complete questions,
   including drafts, with separate invitation-link content keys and answer keys.
   Secret links permit question reading, not membership or answer decryption.
-  Descriptor v2 replaces plaintext content; no legacy-format migration is provided.
+  Signed descriptors replace plaintext content; no legacy-format migration is provided.
 - Browser-local receipt verification with explicit public trust configuration,
   receipt-file import, and downloadable current/historical verification keys.
 - Shared Go/browser receipt-v2 test vectors and negative cases for context,
@@ -35,6 +35,10 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Minimize review metadata disclosure: descriptor v3 omits account IDs, quotas,
+  and schedules. Member responses use a creator flag and restrict review settings
+  and activity counters to creators. Server-side quota/schedule enforcement remains
+  unchanged; operational metadata is not E2EE. Earlier descriptors are unsupported.
 - Rewrite project documentation around setup, browser workflows, trust boundaries,
   operations, and verification evidence; replace the prose API reference with an
   OpenAPI contract. This documentation change does not change application behavior

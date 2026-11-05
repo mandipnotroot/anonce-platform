@@ -166,7 +166,7 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	stale := signed(t, s, h, u, "review-update", map[string]any{"request_id": protocol.ID(), "expected_revision": "1", "encrypted_content": fakeContent(), "max_responses": 1, "opens_at": nil, "closes_at": nil}, false)
 	result(t, request(h, "PUT", path, stale, u), 409)
 	cert := result(t, request(h, "GET", "/api/member/orgs/"+org+"/certificate", nil, u), 200)
-	d := descriptor{V: 2, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Account: u.id, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Content: content, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string), Max: 1}
+	d := descriptor{V: 3, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Content: content, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string)}
 	desc, _ := json.Marshal(d)
 	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc)))}
 	// A correctly signed descriptor cannot substitute a different encrypted envelope.

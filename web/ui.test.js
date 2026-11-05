@@ -164,9 +164,31 @@ test("same-hash auth continuation reloads route without waiting for hashchange",
 test("creator share copies app-produced secret invitation URL", () => {
   assert.match(source, /api\.getInvitationURL\(\{ reviewId: id \}\)/);
   assert.match(source, /copyText\(await api\.getInvitationURL/);
-  assert.match(source, /Anyone with this link can read the review title and questions/);
-  assert.match(source, /does not grant response authorization or let its holder decrypt answers/);
-  assert.match(source, /Browsers and link-sharing tools may retain fragments/);
+  assert.doesNotMatch(source, /Anyone with this link can read the review title and questions/);
+  assert.doesNotMatch(source, /does not grant response authorization or let its holder decrypt answers/);
+  assert.doesNotMatch(source, /Browsers and link-sharing tools may retain fragments/);
+});
+
+test("review dashboard hides locked member metadata and aggregates creator-owned reviews only", () => {
+  const dashboard = source.slice(source.indexOf("function renderHome()"), source.indexOf("async function loadMoreReviews("));
+  const helpers = source.slice(source.indexOf("function countText("), source.indexOf("function renderPendingResponses("));
+  const creator = { id: "creator", is_creator: true, status: "published", contentState: "unlocked", accepted_count: "4", issued_count: "7", title: "Creator review" };
+  const member = { id: "member", is_creator: false, status: "published", contentState: "locked", title: "Secret title" };
+  let rendered;
+  const context = {
+    reviews: [creator, member], reviewNext: null, pendingResponses: [], frame(markup) { rendered = markup; },
+    head: () => "", renderPendingResponses: () => "", button: () => "", statusBadge: () => "Open",
+    emptyCard: () => "", esc: String, encodeURIComponent, countText(value) { return String(value); },
+    root: { querySelectorAll() { return []; } },
+    document: { querySelectorAll() { return []; }, querySelector() { return null; } },
+  };
+  vm.runInNewContext(`${helpers}\n${dashboard}\nrenderHome()`, context);
+  assert.match(rendered, /Your reviews/);
+  assert.match(rendered, /4 accepted/);
+  assert.match(rendered, /7 issued/);
+  assert.doesNotMatch(rendered, /Secret title|Unavailable accepted|0 accepted/);
+  assert.match(source, /return r\.is_creator === true/);
+  assert.doesNotMatch(source, /Anyone with this link/);
 });
 
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {

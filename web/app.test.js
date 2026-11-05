@@ -19,7 +19,7 @@ async function service(overrides={}) {
     loadSealed:overrides.loadSealed,saveSealed:overrides.saveSealed|| (async()=>{}),
   });
   vm.runInContext(source+`;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,parseResponseInvitation,reviewKeys};
+    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,parseResponseInvitation,reviewKeys,listReviews};
     globalThis.setReviewKeys=value=>{reviewKeys=value;};
     globalThis.lifecycle={createReview,updateReview,publishReview,deleteReview};
     globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'member',certificate:'certificate'});};
@@ -223,15 +223,25 @@ test('missing and unreadable authoritative review keys fail closed',async()=>{
     await assert.rejects(context.service.reviewKeys(reviewId),e=>e.code==='KEY_UNAVAILABLE'&&!e.message.includes('private provider detail'));
   }
 });
+test('noncreator review list stays locked without vault reads or private metadata',async()=>{
+  const review={id:'review',org_id:'org',is_creator:false,encrypted_content:{v:1,nonce:'nonce',ciphertext:'opaque'},state:'published',issuer_public_key:'public',issuer_key_id:'issuer'};
+  let requests=0;
+  const context=await service({request:async path=>{requests++;assert.equal(path,'/api/member/orgs/org/reviews');return {items:[review]};}});
+  const result=await context.service.listReviews({orgId:'org'}),item=result.items[0];
+  assert.equal(requests,1);assert.equal(item.contentState,'locked');assert.equal(item.content,undefined);assert.equal(item.questions.length,0);
+  for(const key of ['title','description','creator_account_id','reviewer_account_id','reviewer_membership_id','descriptor','descriptor_signature','revision','max_responses','opens_at','closes_at','issued_count','accepted_count','maxResponses','opensAt','closesAt'])assert.equal(Object.hasOwn(item,key),false,key);
+});
+
 test('encrypted review lifecycle binds separate keys and keeps all content out of server payloads',async()=>{
   const orgId=Buffer.alloc(16,9).toString('base64url'),privateKey=new Uint8Array(32).fill(77),publicKey=new Uint8Array(32).fill(78);
   const marker='PRIVATE-TITLE-MARKER',description='PRIVATE-DESCRIPTION-MARKER',question='PRIVATE-QUESTION-MARKER',choice='PRIVATE-CHOICE-MARKER';
   let stored,keys,content,nonce=0,recipientCalls=0;
   const payloads=[],envelopes=[],opened=[];
   const clone=value=>JSON.parse(JSON.stringify(value));
+  const serverReview=()=>({id:stored.review_id,org_id:orgId,is_creator:true,encrypted_content:stored.encrypted_content,state:'draft',issuer_key_id:'issuer-key-id',issuer_public_key:'issuer-public-key',revision:String(envelopes.length),max_responses:stored.max_responses,opens_at:stored.opens_at??null,closes_at:stored.closes_at??null,issued_count:0,accepted_count:0});
   const context=await service({request:async path=>{
     if(path==='/api/member/vault')return {objects:[stored.vault_write.object]};
-    return {...stored,id:stored.review_id,org_id:orgId,state:'draft'};
+    return serverReview();
   },C:{
     validateReviewContent:value=>clone(value),
     generateRecipientKey:async()=>{recipientCalls++;return {privateKey,publicKey};},
@@ -240,10 +250,10 @@ test('encrypted review lifecycle binds separate keys and keeps all content out o
     sealReviewContent:async options=>{content=clone(options.content);assert.equal(Buffer.from(options.contentKey).toString('base64url'),keys.content_key);assert.equal(Buffer.from(options.reviewId).toString('base64url'),keys.review_id);assert.equal(Buffer.from(options.orgId).toString('base64url'),orgId);const envelope={v:1,nonce:String(++nonce),ciphertext:'opaque-content'};envelopes.push(envelope);return envelope;},
     openDraftContent:async options=>{opened.push(options);return clone(content);},
     recipientPublicKey:async({privateKey:raw})=>{assert.deepEqual(Buffer.from(raw),Buffer.from(privateKey));return publicKey;},
-    signDescriptor:async({descriptorBytes})=>{const descriptor=JSON.parse(new TextDecoder().decode(descriptorBytes));assert.equal(descriptor.v,2);assert.deepEqual(descriptor.encrypted_content,envelopes.at(-1));assert.equal(descriptor.recipient_public_key,Buffer.from(publicKey).toString('base64url'));assert.ok(!('title' in descriptor));return new Uint8Array(64);},
+     signDescriptor:async({descriptorBytes})=>{const descriptor=JSON.parse(new TextDecoder().decode(descriptorBytes));assert.equal(descriptor.v,3);assert.deepEqual(Object.keys(descriptor).sort(),['v','deployment_id','review_id','org_id','reviewer_membership_id','reviewer_certificate','encrypted_content','recipient_public_key','issuer_key_id','issuer_public_key'].sort());assert.equal(descriptor.reviewer_membership_id,'member');assert.deepEqual(descriptor.encrypted_content,envelopes.at(-1));assert.equal(descriptor.recipient_public_key,Buffer.from(publicKey).toString('base64url'));return new Uint8Array(64);},
   }});
   context.configureLifecycle();
-  context.setSigned(async(_path,action,payload)=>{payloads.push({action,payload:clone(payload)});if(action==='review-create'){stored=clone(payload);throw Error('uncertain create');}if(action==='review-update')stored={...stored,...clone(payload)};return {...stored,id:stored.review_id,org_id:orgId,state:'draft'};});
+  context.setSigned(async(_path,action,payload)=>{payloads.push({action,payload:clone(payload)});if(action==='review-create'){stored=clone(payload);throw Error('uncertain create');}if(action==='review-update')stored={...stored,...clone(payload)};return serverReview();});
   await assert.rejects(context.lifecycle.createReview({orgId,title:marker,maxResponses:4}),/uncertain create/);
   const created=await context.lifecycle.createReview({orgId,title:'must not create another review',maxResponses:4});
   assert.equal(created.title,marker);

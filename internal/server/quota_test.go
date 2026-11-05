@@ -7,11 +7,15 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"github.com/cloudflare/circl/blindsign/blindrsa"
 	"github.com/mandipnotroot/anonce-platform/internal/protocol"
+	"maps"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
@@ -28,7 +32,11 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	path := "/api/member/reviews/" + id
 	// Seed immutable public material directly; descriptor publication is exercised
 	// by WholeFlow. This fixture isolates quota/close ordering with two accounts.
-	desc := []byte(`{"fixture":true}`)
+	creatorCert := result(t, request(h, "GET", "/api/member/orgs/"+org+"/certificate", nil, u), 200)
+	desc, err := json.Marshal(descriptor{V: 3, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Membership: creatorCert["membership_id"].(string), Certificate: creatorCert["certificate"].(string), Content: mustReviewContent(t, v), Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, e := s.member.Exec(ctx, "UPDATE member.reviews SET state='published',descriptor=$2 WHERE id=$1", id, desc); e != nil {
 		t.Fatal(e)
 	}
@@ -42,6 +50,24 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	}
 	if _, e = s.member.Exec(ctx, "INSERT INTO member.memberships VALUES($1,$2,$3,'respondent','approved',$4)", member, org, other.id, cert); e != nil {
 		t.Fatal(e)
+	}
+	for _, actor := range []*testUser{u, other} {
+		get := result(t, request(h, "GET", path, nil, actor), 200)
+		list := result(t, request(h, "GET", "/api/member/orgs/"+org+"/reviews", nil, actor), 200)
+		items := list["items"].([]any)
+		if len(items) != 1 {
+			t.Fatalf("review list length %d", len(items))
+		}
+		for _, view := range []map[string]any{get, items[0].(map[string]any)} {
+			want := []string{"id", "org_id", "is_creator", "encrypted_content", "state", "issuer_public_key", "issuer_key_id"}
+			if actor == u {
+				want = append(want, "revision", "max_responses", "opens_at", "closes_at", "issued_count", "accepted_count")
+			}
+			slices.Sort(want)
+			if got := slices.Sorted(maps.Keys(view)); !slices.Equal(got, want) || view["is_creator"] != (actor == u) {
+				t.Fatalf("unexpected member review view: %v", view)
+			}
+		}
 	}
 	pub, e := x509.ParsePKIXPublicKey(mustDecode(v["issuer_public_key"].(string)))
 	if e != nil {
@@ -57,6 +83,20 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	}
 	blinded, _, e := client.Blind(rand.Reader, prepared)
 	if e != nil {
+		t.Fatal(e)
+	}
+	// Operational windows remain enforced without publishing them in descriptors.
+	for _, window := range []struct{ opens, closes *int64 }{
+		{opens: new(time.Now().Unix() + 3600)},
+		{closes: new(time.Now().Unix() - 3600)},
+	} {
+		if _, e := s.member.Exec(ctx, "UPDATE member.reviews SET opens_at=$2,closes_at=$3 WHERE id=$1", id, window.opens, window.closes); e != nil {
+			t.Fatal(e)
+		}
+		p := map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}
+		result(t, request(h, "POST", path+"/issuances", signed(t, s, h, other, "issue", p, false), other), 410)
+	}
+	if _, e := s.member.Exec(ctx, "UPDATE member.reviews SET opens_at=NULL,closes_at=NULL WHERE id=$1", id); e != nil {
 		t.Fatal(e)
 	}
 	type job struct {

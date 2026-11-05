@@ -241,7 +241,7 @@ export async function signDescriptor({ descriptorBytes, membershipSeed }) {
 }
 
 const verifiedDescriptors = new WeakMap();
-const descriptorKeys = ['v', 'deployment_id', 'review_id', 'org_id', 'reviewer_account_id', 'reviewer_membership_id', 'reviewer_certificate', 'encrypted_content', 'recipient_public_key', 'issuer_key_id', 'issuer_public_key', 'max_responses', 'opens_at', 'closes_at'];
+const descriptorKeys = ['v', 'deployment_id', 'review_id', 'org_id', 'reviewer_membership_id', 'reviewer_certificate', 'encrypted_content', 'recipient_public_key', 'issuer_key_id', 'issuer_public_key'];
 function exactKeys(object, keys) {
   check(object && typeof object === 'object' && !Array.isArray(object) && Object.keys(object).length === keys.length && keys.every(k => Object.hasOwn(object, k)), 'INVALID_SCHEMA');
 }
@@ -353,13 +353,10 @@ export async function verifyDescriptor({ descriptorBytes, signature, expectedRev
     check(bytes.length <= 65536, 'DESCRIPTOR_TOO_LARGE');
     const d = parseJSON(bytes);
     exactKeys(d, descriptorKeys);
-    check(d.v === 2 && equal(decode(d.deployment_id, 32), deployment()), 'INVALID_DESCRIPTOR');
+    check(d.v === 3 && equal(decode(d.deployment_id, 32), deployment()), 'INVALID_DESCRIPTOR');
     check(equal(decode(d.review_id, 16), requireBytes(expectedReviewId, 16)), 'REVIEW_MISMATCH');
-    decode(d.org_id, 16); decode(d.reviewer_account_id, 16); decode(d.reviewer_membership_id, 16); decode(d.recipient_public_key, 32);
+    decode(d.org_id, 16); decode(d.reviewer_membership_id, 16); decode(d.recipient_public_key, 32);
     validateContentEnvelope(d.encrypted_content);
-    check(Number.isSafeInteger(d.max_responses) && d.max_responses >= 1 && d.max_responses <= 1000000, 'INVALID_QUOTA');
-    for (const t of [d.opens_at, d.closes_at]) if (t !== null) { check(typeof t === 'string'); u64be(t); }
-    if (d.opens_at !== null && d.closes_at !== null) check(BigInt(d.opens_at) < BigInt(d.closes_at), 'INVALID_WINDOW');
     await issuerKey(d);
     const cert = new X509Certificate(decode(d.reviewer_certificate));
     check(cert.publicKey.algorithm.name === 'Ed25519' && cert.signatureAlgorithm.name === 'Ed25519', 'INVALID_CERTIFICATE');

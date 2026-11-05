@@ -32,6 +32,41 @@ tests, vet, dependency installation, build, module tests, and interop. It define
 no PostgreSQL service/test URLs or live HTTPS E2E step. Workflow configuration
 does not establish a successful run or database coverage.
 
+## Metadata minimization checks — 2026-11-05
+
+Descriptor v3 removes account IDs, quota values, and schedules from public
+descriptors. Member responses use a session-derived creator flag and return
+settings, revisions, and activity counters only to creators. Server quota and
+window enforcement remain plaintext and unchanged; this is disclosure reduction,
+not E2EE for operational metadata. Earlier descriptor versions are unsupported.
+
+Checks used fresh source-only allowlisted snapshots with the isolation and limits
+described below, Node.js 26.12.1, and Go 1.27.3. No live database or deployment
+was accessed.
+
+| Command | Exit/result |
+| --- | --- |
+| `node scripts/build.mjs` | 0; generated crypto bundle and license notice hash-checked and copied to ignored local outputs |
+| `node --test --test-concurrency=1 web/*.test.js` | 0; 80 passed, no failures/skips |
+| `node scripts/crypto-interop.mjs` | 0; seven groups |
+| `CGO_ENABLED=0 go test -p=1 ./...` | 0; database tests remained opt-in |
+| `CGO_ENABLED=1 go test -race -p=1 ./internal/server ./internal/protocol` | 0; non-database race checks |
+| `go vet ./...` | 0 |
+| `node --check scripts/e2e.mjs` | 0; syntax only |
+
+Evidence: `/tmp/opencode/anonce-metadata-final.log` and
+`/tmp/opencode/anonce-metadata-browser-final.log`. The first browser run failed
+because a mock review omitted server-generated issuer fields and a dashboard
+harness lacked its root node. Only those test fixtures changed before the
+passing browser rerun; the other results remain applicable. Tests assert exact
+descriptor/member field allowlists, creator-only metadata visibility, and retained
+warning removal. Source inspection confirms locked quota/window checks remain.
+Database authorization, get/list privacy, quota/concurrency, and schedule tests
+were added or retained but not run against PostgreSQL. Live HTTPS E2E and visual
+browser checks remain unrun. OpenAPI YAML parsing was skipped because no parser
+was available; no dependencies were installed. Nothing was committed or deployed
+as part of these checks.
+
 ## Encrypted review content checks — 2026-11-05
 
 Final checks used Node.js 26.12.1 and Go 1.27.3 in an isolated namespace/chroot
@@ -115,7 +150,8 @@ another machine retains them.
 | Authentication | Registration key proofs; password/recovery; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, duplicate/unknown fields, body limits, CSRF |
 | Vault/credentials | Revision/epoch CAS races; nonce/AAD tampering; recovery scope; session/challenge revocation; old/new proofs; unchanged vault after rewrap; logout prevents pending writes restoring capabilities |
 | Membership | Normalized email uniqueness/invalid addresses; owner/admin/member/pending/revoked boundaries; direct addition/retry; owner-only admin appointment; escalation/cross-account/org denial; certificate proof/renewal is not database authorization |
-| Review content | Atomic encrypted draft/key creation; title/description/full question confidentiality in API/storage/operation caches; independent content/answer keys; authenticated deployment/org/review context; strict schemas and UTF-8 bounds; fresh nonces; descriptor v2 saved-envelope comparison; creator vault restoration |
+| Review content | Atomic encrypted draft/key creation; title/description/full question confidentiality in API/storage/operation caches; independent content/answer keys; authenticated deployment/org/review context; strict schemas and UTF-8 bounds; fresh nonces; descriptor v3 saved-envelope comparison; creator vault restoration |
+| Review metadata | Exact descriptor-v3 allowlist; reject prior versions and removed account/quota/schedule fields; session-derived creator flag; exact creator/noncreator member response allowlists; no other-member activity/configuration disclosure; retain server-side quota and window enforcement |
 | Invitations | Fragment-only canonical secret links; missing/wrong/duplicate keys fail closed; login/register/recovery/refresh preserve full fragment; keyless members see locked metadata; link holders cannot decrypt answers; captured HTTP and decoded signed payloads contain no plaintext content or raw key |
 | Publication/issuance | Encrypted draft/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count |
 | Anonymous acceptance | Cookie/Authorization rejection and proxy stripping; no identifying fields/logs/joins; concurrent spends, closure races, lost replies/exact retries; spend/ciphertext/receipt/counter commit or roll back together; lookup returns original verifiable receipt |
@@ -128,8 +164,8 @@ another machine retains them.
 Anonymous browser requests must omit credentials/referrer, reject redirects, and
 retry identical ciphertext. Check the 256 KiB ciphertext boundary using serialized
 UTF-8 length plus the 16-byte tag, including multibyte input and server rejection.
-Check descriptor signature/profile/deployment/org/membership-key and reviewer
-account association without implying independent certificate binding. Historical
+Check descriptor signature/profile/deployment/org/membership-key and internal
+creator authorization without publishing account IDs. Historical
 certificate decoding retains signature/profile checks but cannot prove trusted
 signing time or historical approval/non-revocation.
 

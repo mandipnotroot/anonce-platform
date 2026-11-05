@@ -50,7 +50,7 @@ authenticated issuance, not proof against traffic correlation.
 | Verification boundary | Checks and limits |
 | --- | --- |
 | Browser descriptor verification | Authenticates signature, certificate profile, deployment, organization, and certified membership key. |
-| Publication | Server validates `reviewer_account_id` against membership records; the account association is not independently certificate-bound. |
+| Publication | Server checks internal creator/membership association. Public descriptor v3 omits account IDs; its certificate binds organization and membership, not an account ID. |
 | Historical browser decoding | Checks certificate signatures/profile but ignores current validity, preserving decryption after expiry. |
 | Backend publication/issuance | Enforces current certificate validity and membership revocation. |
 | Historical trust | Browser verification cannot prove signing time, historical approval, or absence of revocation. There is no trusted timestamp guarantee. |
@@ -82,7 +82,13 @@ content key; browser history, extensions, copied links, and malicious served
 code can expose it. There is no link revocation or content-key rotation in this
 version. Review content is not padded: ciphertext lengths remain visible.
 Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions,
-and counts remain server-visible. Existing plaintext data or copied snapshots
+and counts remain server-visible. Quotas and schedules remain plaintext because
+the server enforces them; they are no longer public descriptor fields.
+Public descriptors omit creator account IDs and retain organization/membership
+IDs and certificates for trust verification. Member review responses expose an
+`is_creator` flag instead of account IDs. Only creators receive review settings,
+revisions, and activity counters. These are disclosure restrictions, not E2EE
+against the server. Existing plaintext data or copied snapshots
 are not retroactively protected; this unreleased format has no upgrade migration.
 
 Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`. The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them. Logs, telemetry and errors must not recreate an identifying submission trail.

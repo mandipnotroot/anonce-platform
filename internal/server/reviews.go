@@ -41,8 +41,18 @@ func scanReview(row pgx.Row) (*review, error) {
 	e := row.Scan(&v.ID, &v.Org, &v.Account, &v.Membership, &v.Issuer, &v.State, &v.Content, &v.Revision, &v.Max, &v.Opens, &v.Closes, &v.Issued, &v.Private, &v.Public, &v.Descriptor, &v.Signature, &v.Accepted)
 	return v, e
 }
-func (v *review) view() map[string]any {
-	return map[string]any{"id": v.ID, "org_id": v.Org, "creator_account_id": v.Account, "reviewer_account_id": v.Account, "reviewer_membership_id": v.Membership, "encrypted_content": v.Content, "max_responses": v.Max, "opens_at": nullableFormat(v.Opens), "closes_at": nullableFormat(v.Closes), "state": v.State, "revision": format(v.Revision), "issuer_public_key": protocol.B64(v.Public), "issuer_key_id": v.Issuer, "descriptor": protocol.B64(v.Descriptor), "descriptor_signature": protocol.B64(v.Signature), "issued_count": format(v.Issued), "accepted_count": format(v.Accepted)}
+func (v *review) view(account string) map[string]any {
+	creator := v.Account == account
+	result := map[string]any{"id": v.ID, "org_id": v.Org, "is_creator": creator, "encrypted_content": v.Content, "state": v.State, "issuer_public_key": protocol.B64(v.Public), "issuer_key_id": v.Issuer}
+	if creator {
+		result["revision"] = format(v.Revision)
+		result["max_responses"] = v.Max
+		result["opens_at"] = nullableFormat(v.Opens)
+		result["closes_at"] = nullableFormat(v.Closes)
+		result["issued_count"] = format(v.Issued)
+		result["accepted_count"] = format(v.Accepted)
+	}
+	return result
 }
 func (s *Server) reviewRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/member/orgs/{org}/reviews", s.listReviews)
@@ -80,7 +90,7 @@ func (s *Server) getReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	write(w, 200, v.view())
+	write(w, 200, v.view(a.Account))
 }
 func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 	a, e := s.session(r)
@@ -110,7 +120,7 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 			next = items[49]["id"]
 			break
 		}
-		items = append(items, v.view())
+		items = append(items, v.view(a.Account))
 	}
 	write(w, 200, map[string]any{"items": items, "next": next})
 }
@@ -175,7 +185,7 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		e = saveObject(r, tx, x.Session.Account, p.Vault)
 	}
 	if e == nil {
-		e = cache(r, tx, x, p.Request, v.view())
+		e = cache(r, tx, x, p.Request, v.view(x.Session.Account))
 	}
 	if e == nil {
 		e = tx.Commit(r.Context())
@@ -184,7 +194,7 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	write(w, 201, v.view())
+	write(w, 201, v.view(x.Session.Account))
 }
 func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 	var p struct {
@@ -234,7 +244,7 @@ func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Content, v.Max, v.Opens, v.Closes, v.Revision = p.Content, p.Max, opens, closes, rev+1
 	if e == nil {
-		e = cache(r, tx, x, p.Request, v.view())
+		e = cache(r, tx, x, p.Request, v.view(x.Session.Account))
 	}
 	if e == nil {
 		e = tx.Commit(r.Context())
@@ -243,7 +253,7 @@ func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	write(w, 200, v.view())
+	write(w, 200, v.view(x.Session.Account))
 }
 
 type revisionRequest struct {
@@ -323,28 +333,24 @@ type descriptor struct {
 	Deployment  string           `json:"deployment_id"`
 	Review      string           `json:"review_id"`
 	Org         string           `json:"org_id"`
-	Account     string           `json:"reviewer_account_id"`
 	Membership  string           `json:"reviewer_membership_id"`
 	Certificate string           `json:"reviewer_certificate"`
 	Content     encryptedContent `json:"encrypted_content"`
 	Recipient   string           `json:"recipient_public_key"`
 	Issuer      string           `json:"issuer_key_id"`
 	Public      string           `json:"issuer_public_key"`
-	Max         int64            `json:"max_responses"`
-	Opens       *string          `json:"opens_at"`
-	Closes      *string          `json:"closes_at"`
 }
 
 func decodeDescriptor(b []byte) (descriptor, error) {
 	var d descriptor
-	if len(b) > 65536 || protocol.StrictJSON(b, &d) != nil || d.V != 2 || !d.Content.valid() {
+	if len(b) > 65536 || protocol.StrictJSON(b, &d) != nil || d.V != 3 || !d.Content.valid() {
 		return d, bad("invalid_descriptor")
 	}
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(b, &fields) != nil || len(fields) != 14 {
+	if json.Unmarshal(b, &fields) != nil || len(fields) != 10 {
 		return d, bad("invalid_descriptor")
 	}
-	for _, name := range []string{"v", "deployment_id", "review_id", "org_id", "reviewer_account_id", "reviewer_membership_id", "reviewer_certificate", "encrypted_content", "recipient_public_key", "issuer_key_id", "issuer_public_key", "max_responses", "opens_at", "closes_at"} {
+	for _, name := range []string{"v", "deployment_id", "review_id", "org_id", "reviewer_membership_id", "reviewer_certificate", "encrypted_content", "recipient_public_key", "issuer_key_id", "issuer_public_key"} {
 		if _, ok := fields[name]; !ok {
 			return d, bad("invalid_descriptor")
 		}
@@ -411,7 +417,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 	_, recipientErr := protocol.Decode(d.Recipient, 32)
 	sig, se := protocol.Decode(p.Signature, 64)
-	if d.V != 2 || d.Deployment != protocol.B64(s.deployment) || d.Review != v.ID || d.Org != v.Org || d.Account != v.Account || d.Membership != v.Membership || d.Certificate != cert || d.Content != v.Content || !d.Content.valid() || d.Public != protocol.B64(v.Public) || d.Issuer != v.Issuer || d.Max != v.Max || !sameNullable(d.Opens, v.Opens) || !sameNullable(d.Closes, v.Closes) || recipientErr != nil || se != nil || !s.validCertificate(cert, x.Session.Membership, v.Org, v.Membership) || !checkSig(x.Session.Membership, p.Signature, protocol.E("review-descriptor", b)) {
+	if d.V != 3 || d.Deployment != protocol.B64(s.deployment) || d.Review != v.ID || d.Org != v.Org || d.Membership != v.Membership || d.Certificate != cert || d.Content != v.Content || !d.Content.valid() || d.Public != protocol.B64(v.Public) || d.Issuer != v.Issuer || recipientErr != nil || se != nil || !s.validCertificate(cert, x.Session.Membership, v.Org, v.Membership) || !checkSig(x.Session.Membership, p.Signature, protocol.E("review-descriptor", b)) {
 		fail(w, bad("descriptor_mismatch"))
 		return
 	}
@@ -424,7 +430,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 	v.State, v.Revision, v.Descriptor, v.Signature = "published", rev+1, b, sig
 	if e == nil {
-		e = cache(r, tx, x, p.Request, v.view())
+		e = cache(r, tx, x, p.Request, v.view(x.Session.Account))
 	}
 	if e == nil {
 		e = tx.Commit(r.Context())
@@ -433,7 +439,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	write(w, 200, v.view())
+	write(w, 200, v.view(x.Session.Account))
 }
 func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	var p struct {

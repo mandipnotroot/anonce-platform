@@ -40,7 +40,7 @@ const recipient = await c.generateRecipientKey();
 const contentKey = await c.generateContentKey();
 const content = { v: 1, title: 'Review', description: '', questions: [{ id: 'q1', type: 'text', label: 'Feedback', required: true, choices: [] }] };
 const encrypted_content = await c.sealReviewContent({ reviewId, orgId: accountId, contentKey, content });
-const descriptorJSON = { v: 2, deployment_id: b64(deploymentId), review_id: b64(reviewId), org_id: b64(accountId), reviewer_account_id: b64(accountId), reviewer_membership_id: b64(accountId), reviewer_certificate: b64(new Uint8Array(certificate.rawData)), encrypted_content, recipient_public_key: b64(recipient.publicKey), issuer_key_id: b64(sha256(spki)), issuer_public_key: b64(spki), max_responses: 2, opens_at: null, closes_at: null };
+const descriptorJSON = { v: 3, deployment_id: b64(deploymentId), review_id: b64(reviewId), org_id: b64(accountId), reviewer_membership_id: b64(accountId), reviewer_certificate: b64(new Uint8Array(certificate.rawData)), encrypted_content, recipient_public_key: b64(recipient.publicKey), issuer_key_id: b64(sha256(spki)), issuer_public_key: b64(spki) };
 const descriptorBytes = c.utf8(JSON.stringify(descriptorJSON));
 const descriptorSignature = await c.signDescriptor({ descriptorBytes, membershipSeed: membership.seed });
 const descriptor = await c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: reviewId });
@@ -191,15 +191,16 @@ test('challenge is bound to action account payload epoch expiry and origin', asy
 });
 
 test('descriptor certificate verification, strict schema, signature and review binding', async () => {
+  assert.deepEqual(Object.keys(descriptor).sort(), ['v', 'deployment_id', 'review_id', 'org_id', 'reviewer_membership_id', 'reviewer_certificate', 'encrypted_content', 'recipient_public_key', 'issuer_key_id', 'issuer_public_key'].sort());
   await assert.rejects(c.verifyDescriptor({ descriptorBytes, signature: descriptorSignature, expectedReviewId: bytes(16, 7) }), CryptoError);
   const wrong = descriptorSignature.slice(); wrong[0] ^= 1;
   await assert.rejects(c.verifyDescriptor({ descriptorBytes, signature: wrong, expectedReviewId: reviewId }), CryptoError);
-  for (const data of [{ ...descriptorJSON, v: 1 }, { ...descriptorJSON, title: 'leak' }, { ...descriptorJSON, max_responses: '2' }, { ...descriptorJSON, suite: 'alternate' }, { ...descriptorJSON, reviewer_membership_id: b64(bytes(16, 4)) }]) {
+  for (const data of [{ ...descriptorJSON, v: 1 }, { ...descriptorJSON, v: 2 }, { ...descriptorJSON, title: 'leak' }, ...['reviewer_account_id', 'max_responses', 'opens_at', 'closes_at'].map(key => ({ ...descriptorJSON, [key]: null })), { ...descriptorJSON, suite: 'alternate' }, { ...descriptorJSON, reviewer_membership_id: b64(bytes(16, 4)) }]) {
     const bytes = c.utf8(JSON.stringify(data));
     const signature = await c.signDescriptor({ descriptorBytes: bytes, membershipSeed: membership.seed });
     await assert.rejects(c.verifyDescriptor({ descriptorBytes: bytes, signature, expectedReviewId: reviewId }), CryptoError);
   }
-  const duplicate = c.utf8(JSON.stringify(descriptorJSON).replace('"v":2', '"v":2,"v":2'));
+  const duplicate = c.utf8(JSON.stringify(descriptorJSON).replace('"v":3', '"v":3,"v":3'));
   await assert.rejects(c.verifyDescriptor({ descriptorBytes: duplicate, signature: descriptorSignature, expectedReviewId: reviewId }), e => e.code === 'DUPLICATE_JSON_FIELD');
 });
 

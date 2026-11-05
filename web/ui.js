@@ -488,15 +488,15 @@ function emptyCard(t, d, act = "") {
   return `<section class="card empty"><strong>${esc(t)}</strong>${esc(d)}<div class="empty-action">${act}</div></section>`;
 }
 function renderHome() {
+  const creatorReviews = reviews.filter(isReviewOwner);
   frame(
-    `${head("Overview", "Review activity and manage responses.", button("New review", "review/new"))}${renderPendingResponses()}<div class="stat-grid"><div class="card stat"><div class="stat-label">${reviewNext ? "Reviews shown" : "Reviews"}</div><div class="stat-value">${reviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count")}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count")}</div></div></div><div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">Your reviews</h2><a class="top-link" href="#/orgs">Manage organization</a></div>${
+    `${head("Overview", "Review activity and manage responses.", button("New review", "review/new"))}${renderPendingResponses()}<div class="stat-grid"><div class="card stat"><div class="stat-label">${reviewNext ? "Your reviews shown" : "Your reviews"}</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div><div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">Your reviews</h2><a class="top-link" href="#/orgs">Manage organization</a></div>${
       reviews.length
         ? `<div class="review-list">${reviews
             .map((r) => {
               const mine = isReviewOwner(r);
-              const accepted = countText(r.accepted_count);
-              const issued = countText(r.issued_count);
-              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)} · <span aria-label="Accepted responses">${accepted} accepted</span> · <span aria-label="Issued authorizations">${issued} issued</span></small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" && r.contentState !== "locked" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
+              const metrics = mine && r.contentState !== "locked" ? ` · <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> · <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>` : "";
+              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${metrics}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" && r.contentState !== "locked" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
             })
             .join(
               "",
@@ -549,10 +549,10 @@ function countText(value) {
     ? String(value)
     : "Unavailable";
 }
-function aggregateCount(key) {
+function aggregateCount(key, rows = reviews) {
   if (reviewNext) return "Unavailable";
   let total = 0n;
-  for (const row of reviews) {
+  for (const row of rows) {
     const value = row[key];
     if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value)) {
       total += BigInt(value);
@@ -565,10 +565,7 @@ function aggregateCount(key) {
   return String(total);
 }
 function isReviewOwner(r) {
-  const accountId = session?.account_id || session?.accountId;
-  return Boolean(
-    accountId && r.creator_account_id && accountId === r.creator_account_id,
-  );
+  return r.is_creator === true;
 }
 function renderPendingResponses() {
   if (pendingResponses === null) return "";
@@ -854,7 +851,7 @@ async function renderReview(id, tab) {
     frame(emptyCard("Encrypted review", "Review content is available only to its creator."), "Review");
     return;
   }
-  const reviewOrgId = review.org_id || review.orgId || review.descriptor?.org_id;
+  const reviewOrgId = review.org_id || review.orgId;
   currentOrg = orgs.find((organization) => organization.id === reviewOrgId) || null;
   const canManage = isReviewOwner(review);
   const canReviewResponses = canManage || currentOrg?.role === "reviewer";
@@ -1100,7 +1097,7 @@ async function renderRespond(invitation, routedId) {
   }
   const questions = r.questions || [];
   frame(
-    `<section class="card response-card"><p class="eyebrow">ANONYMOUS FEEDBACK</p><h1>${esc(r.title || "Share your thoughts")}</h1><p class="subtitle">${esc(r.description || "Your thoughtful answer can help make things better.")}</p><div class="alert">Anyone with this link can read the review title and questions. The link does not grant response authorization or let its holder decrypt answers. Keep link private. Browsers and link-sharing tools may retain fragments; this site cannot prevent that.</div><div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
+    `<section class="card response-card"><p class="eyebrow">ANONYMOUS FEEDBACK</p><h1>${esc(r.title || "Share your thoughts")}</h1><p class="subtitle">${esc(r.description || "Your thoughtful answer can help make things better.")}</p><div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
     "Respond",
   );
   document.querySelectorAll("#respond input[type=checkbox]").forEach((input) =>

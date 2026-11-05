@@ -107,11 +107,14 @@ try {
   await reviewer.evaluate(async({reviewId,invitation})=>{
     const a=await import('/app.js'),parsed=a.parseResponseInvitation(new URL(invitation).hash);
     const r=await a.getReview({reviewId,contentKey:parsed.contentKey});
-    if(r.contentState!=='open'||r.title!=='E2E anonymous feedback'||r.description!=='Disposable integration review'||r.content.questions.length!==3||r.descriptor.v!==2||!r.descriptor.encrypted_content)throw Error('Encrypted descriptor view mismatch');
-    if(['title','description','questions'].some(key=>Object.hasOwn(r.descriptor,key)))throw Error('Descriptor contains plaintext content');
+     if(r.contentState!=='open'||r.title!=='E2E anonymous feedback'||r.description!=='Disposable integration review'||r.content.questions.length!==3||r.descriptor.v!==3||!r.descriptor.encrypted_content)throw Error('Encrypted descriptor view mismatch');
+     if(['title','description','questions','reviewer_account_id','max_responses','opens_at','closes_at'].some(key=>Object.hasOwn(r.descriptor,key)))throw Error('Descriptor contains private content or configuration');
   },{reviewId,invitation});
-  await respondent.evaluate(async({reviewId,invitation})=>{
-    const a=await import('/app.js');
+   await respondent.evaluate(async({reviewId,invitation,orgId})=>{
+     const a=await import('/app.js');
+     const listed=(await a.listReviews({orgId})).items.find(r=>r.id===reviewId);
+     if(!listed||listed.is_creator!==false||listed.contentState!=='locked')throw Error('Noncreator list must stay locked');
+     if(['creator_account_id','reviewer_account_id','reviewer_membership_id','descriptor','descriptor_signature','revision','max_responses','opens_at','closes_at','issued_count','accepted_count','maxResponses','opensAt','closesAt'].some(key=>Object.hasOwn(listed,key)))throw Error('Noncreator list exposed private metadata');
     for(const fragment of [`#/respond/${reviewId}`,new URL(invitation).hash.replace('v=1','v=2')]) {
       let rejected=false;try{a.parseResponseInvitation(fragment);}catch{rejected=true;}
       if(!rejected)throw Error('Malformed invitation accepted');
@@ -121,7 +124,7 @@ try {
     const {contentKey}=a.parseResponseInvitation(new URL(invitation).hash);contentKey[0]^=1;
     rejected=false;try{await a.getReview({reviewId,contentKey});}catch{rejected=true;}
     if(!rejected)throw Error('Wrong content key accepted');
-  },{reviewId,invitation});
+   },{reviewId,invitation,orgId});
   // Preserve the fragment-held secret through the real sign-in continuation.
   await respondent.evaluate(async()=>{await (await import('/app.js')).logout();});
   await respondent.goto(invitation);

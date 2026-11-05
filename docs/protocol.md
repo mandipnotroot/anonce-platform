@@ -102,22 +102,37 @@ their question and 1–100 bytes; choice labels are 1–1000 bytes. These bounds
 measure UTF-8 bytes, and the aggregate plaintext bound also applies.
 The server can validate envelope framing, not question semantics.
 
-### Descriptor v2
+### Descriptor v3
 
 Descriptor is base64url exact JSON bytes, at most 65536 decoded bytes, containing exactly:
 
-`{v:2,deployment_id,review_id,org_id,reviewer_account_id,reviewer_membership_id,reviewer_certificate,encrypted_content,recipient_public_key,issuer_key_id,issuer_public_key,max_responses,opens_at,closes_at}`.
+`{v:3,deployment_id,review_id,org_id,reviewer_membership_id,reviewer_certificate,encrypted_content,recipient_public_key,issuer_key_id,issuer_public_key}`.
 
-- `encrypted_content`: the saved content envelope. Descriptor v1 is not supported.
-- `max_responses`: positive JSON integer, per member.
+- `encrypted_content`: the saved content envelope. Descriptors v1 and v2 are not supported.
+- Quotas, schedules, and account IDs are not published in the descriptor.
 - Creator signature: membership Ed25519 over `E('review-descriptor',descriptor_bytes)`.
 - Descriptor hash: SHA256 of exact descriptor bytes. Published metadata is immutable.
 
 Verify the outer descriptor before opening its content. Browser answer
 encryption/decryption requires successfully authenticated, validated content;
 plaintext is not appended to the signed descriptor. Publication compares the
-stored encrypted envelope and operational metadata under revision CAS. Keys
+stored encrypted envelope, membership, and issuer metadata under revision CAS. Keys
 already exist in the vault; publication does not write another vault object.
+
+The server retains `max_responses` and opening/closing times in plaintext to
+enforce per-member authorization quotas and acceptance windows atomically.
+These settings are not E2EE. Removing their public descriptor copies reduces
+disclosure without changing server enforcement. No encrypted duplicate is used
+to imply confidentiality from the server.
+
+Member review responses contain `id`, `org_id`, `is_creator`, `encrypted_content`,
+`state`, `issuer_public_key`, and `issuer_key_id`. Only the creator also receives
+`revision`, `max_responses`, `opens_at`, `closes_at`, `issued_count`, and
+`accepted_count`. Creator association stays internal; responses do not expose
+creator account IDs, duplicate reviewer account IDs, or membership IDs.
+Published descriptors and signatures are fetched from the public endpoint,
+not repeated in member responses. `is_creator` is computed from the authenticated
+session, not supplied by the browser.
 
 ### Invitation links
 
@@ -140,7 +155,7 @@ its creator vault object, not copies, historical snapshots, or operation caches.
 | Verification | Scope and limit |
 | --- | --- |
 | Browser | Descriptor signature, certificate signatures/profile, deployment, organization, and certified membership key |
-| Account association | `reviewer_account_id` is server DB-validated at publication, not independently certificate-bound |
+| Creator association | Server authorizes publication using its internal creator/membership records; public descriptor contains no account ID |
 | Historical decoding | Ignores current certificate validity while retaining signature/profile checks, preserving decryption after expiry |
 | Backend publication/issuance | Enforces current validity and membership revocation |
 | Unproven history | Browser checks cannot establish signing time, historical approval, or non-revocation; no trusted timestamp is provided |
