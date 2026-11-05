@@ -21,7 +21,7 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	s, e := server.New(ctx, server.Config{DatabaseURL: os.Getenv("DATABASE_URL"), AnonymousURL: os.Getenv("ANON_DATABASE_URL"), Origin: os.Getenv("ANONCE_ORIGIN"), KeyFile: os.Getenv("ANONCE_KEY_FILE"), WebDir: os.Getenv("ANONCE_WEB_DIR"), SourceURL: os.Getenv("ANONCE_SOURCE_URL")})
+	s, e := server.New(ctx, server.Config{DatabaseURL: os.Getenv("DATABASE_URL"), AnonymousURL: os.Getenv("ANON_DATABASE_URL"), Origin: os.Getenv("ANONCE_ORIGIN"), KeyFile: os.Getenv("ANONCE_KEY_FILE"), WebDir: os.Getenv("ANONCE_WEB_DIR"), SourceURL: os.Getenv("ANONCE_SOURCE_URL"), ReceiptTrustFile: os.Getenv("ANONCE_RECEIPT_TRUST_FILE")})
 	if e != nil {
 		return e
 	}

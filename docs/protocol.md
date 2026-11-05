@@ -51,7 +51,37 @@ Ciphertext has a hard cap of 256 KiB (262144 bytes), including the 16-byte authe
 
 Submission: `{review_id,issuer_key_id,prepared_message,signature,enc,ciphertext}`; `enc` is 32 bytes. Verify the prepared authorization and extract serial. `token_hash = SHA256(E('token',review_id,issuer_key_id,serial))`. `submission_hash = SHA256(E('submission',review_id,issuer_key_id,prepared_message,signature,enc,ciphertext))`.
 
-Receipt: `{v:1,receipt_id,review_id,issuer_key_id,token_hash,submission_hash,accepted_at,receipt_key_id,signature}`. Ed25519 signature transcript: `E('receipt',deployment,receipt_id,review_id,issuer_key_id,token_hash,submission_hash,U64(accepted_at),receipt_key_id)`. Exact spend retries return the original receipt; changed submissions for a spent token conflict. Acceptance and receipt persistence are one transaction.
+The token and full submission hashes remain internal replay/idempotency values;
+neither appears in exported receipts. Define
+`response_hash = SHA256(E('accepted-response-v2',deployment,review_id,descriptor_hash,issuer_key_id,enc,ciphertext))`,
+where `descriptor_hash` is SHA-256 of the exact verified descriptor bytes.
+
+Receipt contains exactly
+`{v:2,deployment_id,receipt_id,review_id,descriptor_hash,issuer_key_id,response_hash,accepted_at,receipt_key_id,signature}`.
+Ed25519 signature transcript:
+`E('receipt-v2',deployment,receipt_id,review_id,descriptor_hash,issuer_key_id,response_hash,U64(accepted_at),receipt_key_id)`.
+Exact spend retries return the original receipt; changed submissions for a spent
+token conflict. Acceptance and receipt persistence are one transaction. Receipt
+v1 is not supported; this unreleased project provides no upgrade migration.
+
+The portable public trust document contains exactly
+`{v:1,deployment_id,receipt_key_id,receipt_keys:[{receipt_key_id,receipt_public_key}]}`.
+Each key ID is SHA-256 of its raw 32-byte Ed25519 public key. Require unique IDs
+and an entry for the current `receipt_key_id`. Historical keys must be explicitly
+trusted by the operator; receipt fields cannot introduce verification keys.
+Public configuration v2 publishes this keyring alongside the other deployment
+configuration. Obtain and retain trust information through a trusted channel;
+an arbitrary key bundled with a receipt does not establish authenticity.
+
+Signature-only portable verification authenticates the server's acceptance
+statement, not a match to an independently held submission. Submission and
+reviewer flows additionally require the expected deployment, review, exact
+descriptor hash, issuer, and independently computed response hash. Reviewers
+verify the receipt and item ID before decryption and use only the signed
+acceptance time. A failed receipt check makes that record invalid without
+blocking other records. Receipt timestamps are server assertions, not trusted
+timestamps. Receipts do not prove answer correctness, continued storage,
+completeness of results, or anonymity.
 
 Increment `accepted_count` only in the transaction that persists the submission and receipt. Issuance, validation rejection, rollback, exact retries and conflicting replays must not increment it. This counts committed encrypted records, not proven-valid plaintext: the server cannot decrypt answers. Reviewers must isolate unreadable or invalid responses, display their status, and report them in exports without blocking valid records.
 

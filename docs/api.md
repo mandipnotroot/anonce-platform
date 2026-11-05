@@ -13,7 +13,7 @@ Default mutation proof is membership signing key. Registration/login/credential 
 
 | Method/path | Payload or result; action/proof |
 |---|---|
-| GET `/public/config` | Deployment, configured origin, protocol/KDF settings and public trust/receipt keys; no secrets. |
+| GET `/public/config` | Configuration `v:2`; deployment, configured origin, protocol/KDF settings, CA certificate, current `receipt_key_id` and `receipt_keys:[{receipt_key_id,receipt_public_key}]`; no secrets. |
 | POST `/member/auth/params` | Plain `{email}` → `{account_id,credential_epoch,password_kdf,recovery_salt}`. |
 | POST `/member/challenges` | Plain `{account_id,action,payload_hash}` → `{challenge_id,account_id,action,payload_hash,nonce,credential_epoch,expires_at}`. |
 | POST `/member/register` | `{request_id,account_id,email,password_kdf,password_auth_public_key,recovery_salt,recovery_auth_public_key,password_wrap,recovery_wrap,membership_public_key,vault_objects}`; `register`, proposed password + recovery + membership proofs. |
@@ -75,7 +75,7 @@ admins cannot reactivate an admin. Duplicate registration returns `409 email_exi
 | GET `/member/reviews/{id}/issuances/{request}` | Original cached issuance, only issuing member; no new quota consumption. |
 | POST `/anon/submissions` | Plain submission from protocol.md → original/new receipt. No session or membership link. |
 | POST `/anon/receipts/lookup` | Plain `{review_id,issuer_key_id,serial}` → receipt if spent; otherwise 404. |
-| GET `/member/reviews/{id}/submissions` | Creator only; paginated ciphertexts and receipts, no respondent identity. |
+| GET `/member/reviews/{id}/submissions` | Creator only; items `{id,enc,ciphertext,receipt}`, with receipt v2 from protocol.md; no respondent identity or authorization material. |
 
 Each distinct issuance request reserves a unique per-member slot under member/review row locking and saves pending ciphertext and cached blind signature atomically. Exact retry does not consume another slot. `max_responses` is never a global review capacity; issued and accepted counters are separate. Existing authorization remains usable after membership revocation. On anonymous acceptance check exact prior spend before closed-state rejection, so response loss is safely recoverable. Different ciphertext for the same spent serial conflicts.
 

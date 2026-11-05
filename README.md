@@ -6,9 +6,10 @@ monolith serves HTML, CSS and vanilla browser ES modules, with locally bundled
 cryptographic dependencies and same-origin HTTPS.
 
 **Development / pre-release. Not approved for sensitive production data.**
-Broad tests, disposable HTTPS browser E2E, backup/restore and the final nonroot
-application image smoke checks passed on 2026-11-05; see
-[verification evidence](docs/verification.md). Independent focused source reviews
+Earlier baseline checks on 2026-11-05 included broad tests, disposable HTTPS
+browser E2E, backup/restore, and a nonroot application image smoke test; see
+[verification evidence](docs/verification.md) for the scope and current change
+evidence. Earlier runs do not validate later receipt-v2 changes. Focused source reviews
 are not an audit. No production-readiness claim is made. This is unreleased
 source; no version has been released.
 
@@ -19,6 +20,9 @@ recovery phrase; create or join organizations and approve members; draft and pub
 obtain blind response authorizations; submit encrypted answers anonymously;
 verify receipts; decrypt/export received responses; change passwords or recover
 on another device. These are web flows, not user-facing CLI commands.
+
+See [saving and verifying receipts](docs/receipts.md) for local verification and
+its trust limits.
 
 Owners can appoint multiple organization admins. Owners and admins can add
 registered accounts by email or share invite links; admins manage non-admin

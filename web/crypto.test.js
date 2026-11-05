@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { CryptoError, toBase64url, fromBase64url } from './crypto.js';
 import * as c from './crypto.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
@@ -17,7 +18,16 @@ const receiptKeyId = sha256(receiptPublicKey);
 const caKeys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
 const historicalDates = { notBefore: new Date('2020-01-01T00:00:00Z'), notAfter: new Date('2021-01-01T00:00:00Z') };
 const ca = await X509CertificateGenerator.createSelfSigned({ ...historicalDates, name: 'CN=Test CA', keys: caKeys, signingAlgorithm: { name: 'Ed25519' }, extensions: [new BasicConstraintsExtension(true, 0, true), new KeyUsagesExtension(32, true)] }, crypto);
-const init = { deploymentId, origin: location.origin, caCertificate: new Uint8Array(ca.rawData), receiptPublicKey, receiptKeyId };
+const receiptKeys = [{ receipt_key_id: b64(receiptKeyId), receipt_public_key: b64(receiptPublicKey) }];
+const trust = { v: 1, deployment_id: b64(deploymentId), receipt_key_id: b64(receiptKeyId), receipt_keys: receiptKeys };
+const init = { deploymentId, origin: location.origin, caCertificate: new Uint8Array(ca.rawData), receiptKeys, receiptKeyId };
+// A separate module instance has never been initialized and needs no location.
+const portable = await import('./crypto.js?standalone-receipts');
+const standaloneReceipt = signedReceipt();
+const savedLocation = globalThis.location;
+delete globalThis.location;
+try { assert.deepEqual(await portable.verifyReceiptSignature({ receipt: standaloneReceipt, trust }), standaloneReceipt); }
+finally { globalThis.location = savedLocation; }
 await c.initCrypto(init);
 const membership = await c.generateMembershipKey();
 const memberPublicKey = await crypto.subtle.importKey('raw', membership.publicKey, 'Ed25519', true, ['verify']);
@@ -185,12 +195,92 @@ test('RFC9474 randomized blind authorization roundtrip and malformed context/sig
   await assert.rejects(c.finalizeAuthorization({ descriptor, ...state, blindSignature: bytes(384) }), CryptoError);
 });
 
-test('Ed25519 receipts bind submission and reject modifications', async () => {
-  const receipt = { v: 1, receipt_id: b64(bytes(16, 5)), review_id: b64(reviewId), issuer_key_id: descriptor.issuer_key_id, token_hash: b64(bytes(32, 8)), submission_hash: b64(bytes(32, 9)), accepted_at: '1900000000', receipt_key_id: b64(receiptKeyId) };
-  const transcript = c.encodeContext('receipt', [deploymentId, fromBase64url(receipt.receipt_id), reviewId, fromBase64url(receipt.issuer_key_id), fromBase64url(receipt.token_hash), fromBase64url(receipt.submission_hash), c.u64be(receipt.accepted_at), receiptKeyId]);
-  receipt.signature = b64(ed25519.sign(transcript, receiptSeed));
-  const args = { receipt, expectedSubmissionHash: bytes(32, 9) };
-  assert.deepEqual(await c.verifyReceipt(args), receipt);
-  await assert.rejects(c.verifyReceipt({ ...args, expectedSubmissionHash: bytes(32, 8) }), CryptoError);
-  await assert.rejects(c.verifyReceipt({ ...args, receipt: { ...receipt, accepted_at: '1900000001' } }), CryptoError);
+function signedReceipt(overrides = {}, seed = receiptSeed) {
+  const receipt = { v: 2, deployment_id: b64(deploymentId), receipt_id: b64(bytes(16, 5)), review_id: b64(reviewId), descriptor_hash: b64(bytes(32, 7)), issuer_key_id: b64(bytes(32, 8)), response_hash: b64(bytes(32, 9)), accepted_at: '1', receipt_key_id: b64(sha256(ed25519.getPublicKey(seed))), ...overrides };
+  const fields = ['deployment_id', 'receipt_id', 'review_id', 'descriptor_hash', 'issuer_key_id', 'response_hash'].map(k => fromBase64url(receipt[k]));
+  receipt.signature = b64(ed25519.sign(c.encodeContext('receipt-v2', [...fields, c.u64be(receipt.accepted_at), fromBase64url(receipt.receipt_key_id)]), seed));
+  return receipt;
+}
+function receiptArgs(receipt = signedReceipt(), receiptTrust = trust) {
+  return { receipt, trust: receiptTrust, expectedDeploymentId: fromBase64url(receipt.deployment_id), expectedReviewId: fromBase64url(receipt.review_id), expectedDescriptorHash: fromBase64url(receipt.descriptor_hash), expectedIssuerKeyId: fromBase64url(receipt.issuer_key_id), expectedResponseHash: fromBase64url(receipt.response_hash) };
+}
+
+test('receipts require every independent context and detach verified data and trust', async () => {
+  const args = receiptArgs();
+  const verified = await c.verifyReceipt(args);
+  assert.deepEqual(verified, args.receipt);
+  assert.notEqual(verified, args.receipt);
+  for (const key of Object.keys(args).filter(k => k.startsWith('expected'))) {
+    for (const value of [undefined, bytes(args[key].length, 99), bytes(1)]) {
+      await assert.rejects(c.verifyReceipt({ ...args, [key]: value }), CryptoError);
+    }
+  }
+  const detached = c.getReceiptTrust();
+  assert.deepEqual(detached, trust);
+  detached.receipt_keys[0].receipt_public_key = '';
+  assert.deepEqual(c.getReceiptTrust(), trust);
+});
+
+test('receipt exact schema, canonical encodings, timestamps and all signed fields reject mutations', async () => {
+  const receipt = signedReceipt();
+  for (const key of Object.keys(receipt)) {
+    const changed = { ...receipt, [key]: key === 'v' ? 1 : key === 'accepted_at' ? '2' : b64(bytes(fromBase64url(receipt[key]).length, 99)) };
+    await assert.rejects(c.verifyReceiptSignature({ receipt: changed, trust }), CryptoError);
+    const missing = { ...receipt }; delete missing[key];
+    await assert.rejects(c.verifyReceiptSignature({ receipt: missing, trust }), CryptoError);
+  }
+  for (const accepted_at of ['01', '-1', '18446744073709551616', '', 1, '1.0']) {
+    await assert.rejects(c.verifyReceiptSignature({ receipt: { ...receipt, accepted_at }, trust }), CryptoError);
+  }
+  for (const change of [{ extra: true }, { signature: 'AB' }, { receipt_id: b64(bytes(15)) }, { deployment_id: receipt.deployment_id + '=' }]) {
+    await assert.rejects(c.verifyReceiptSignature({ receipt: { ...receipt, ...change }, trust }), CryptoError);
+  }
+  assert.deepEqual(await c.verifyReceiptSignature({ receipt: signedReceipt({ accepted_at: '18446744073709551615' }), trust }), signedReceipt({ accepted_at: '18446744073709551615' }));
+});
+
+test('historical trusted receipt keys work; malformed or untrusted key sets fail closed', async () => {
+  const seed = bytes(32, 77), key = ed25519.getPublicKey(seed);
+  const entry = { receipt_key_id: b64(sha256(key)), receipt_public_key: b64(key) };
+  const receipt = signedReceipt({}, seed);
+  const historicalTrust = { ...trust, receipt_keys: [...receiptKeys, entry] };
+  await c.verifyReceipt(receiptArgs(receipt, historicalTrust));
+  await assert.rejects(c.verifyReceiptSignature({ receipt, trust }), CryptoError);
+  for (const bad of [
+    { ...trust, v: 2 }, { ...trust, extra: true }, { ...trust, receipt_keys: [] },
+    { ...trust, receipt_keys: [entry] }, { ...trust, receipt_keys: [...receiptKeys, ...receiptKeys] },
+    { ...trust, receipt_keys: [{ ...receiptKeys[0], extra: true }] },
+    { ...trust, receipt_keys: [{ ...receiptKeys[0], receipt_public_key: b64(bytes(32)) }] },
+    { ...trust, deployment_id: b64(bytes(32, 77)) },
+  ]) await assert.rejects(c.verifyReceiptSignature({ receipt: signedReceipt(), trust: bad }), CryptoError);
+});
+
+test('accepted response hash binds valid replacement HPKE envelopes and every context', async () => {
+  const first = await c.encryptResponse({ descriptorBytes, descriptor, answers: { q1: 'first' } });
+  const replacement = await c.encryptResponse({ descriptorBytes, descriptor, answers: { q1: 'replacement' } });
+  assert.equal((await c.decryptResponse({ descriptorBytes, descriptor, recipientPrivateKey: recipient.privateKey, ...replacement })).answers.q1, 'replacement');
+  const context = { deploymentId, reviewId, descriptorHash: sha256(descriptorBytes), issuerKeyId: fromBase64url(descriptor.issuer_key_id), ...first };
+  const hash = await c.responseHash(context);
+  const receipt = signedReceipt({ descriptor_hash: b64(context.descriptorHash), issuer_key_id: descriptor.issuer_key_id, response_hash: b64(hash) });
+  await c.verifyReceipt(receiptArgs(receipt));
+  await assert.rejects(c.verifyReceipt({ ...receiptArgs(receipt), expectedResponseHash: await c.responseHash({ ...context, ...replacement }) }), e => e.code === 'RESPONSE_HASH_MISMATCH');
+  for (const field of Object.keys(context)) {
+    const changed = context[field].slice(); changed[0] ^= 1;
+    assert.notDeepEqual(await c.responseHash({ ...context, [field]: changed }), hash);
+  }
+  for (const ciphertext of [bytes(15), bytes(262145)]) await assert.rejects(c.responseHash({ ...context, ciphertext }), CryptoError);
+});
+
+test('shared deterministic receipt-v2 vector matches response and receipt transcripts', async () => {
+  const vector = JSON.parse(await readFile(new URL('../testdata/receipt-v2.json', import.meta.url), 'utf8'));
+  const context = vector.context, envelope = vector.envelope;
+  const fields = ['deployment_id', 'review_id', 'descriptor_hash', 'issuer_key_id'].map(k => fromBase64url(context[k]));
+  const transcript = c.encodeContext('accepted-response-v2', [...fields, fromBase64url(envelope.enc), fromBase64url(envelope.ciphertext)]);
+  assert.equal(Buffer.from(transcript).toString('hex'), vector.response_transcript_hex);
+  const hash = await c.responseHash({ deploymentId: fields[0], reviewId: fields[1], descriptorHash: fields[2], issuerKeyId: fields[3], enc: fromBase64url(envelope.enc), ciphertext: fromBase64url(envelope.ciphertext) });
+  assert.equal(Buffer.from(hash).toString('hex'), vector.response_hash_hex);
+  const receipt = vector.receipt;
+  const receiptTranscript = c.encodeContext('receipt-v2', [fields[0], fromBase64url(receipt.receipt_id), fields[1], fields[2], fields[3], hash, c.u64be(receipt.accepted_at), fromBase64url(receipt.receipt_key_id)]);
+  assert.equal(Buffer.from(receiptTranscript).toString('hex'), vector.receipt_transcript_hex);
+  assert.equal(Buffer.from(ed25519.sign(receiptTranscript, Buffer.from(vector.seed_hex, 'hex'))).toString('hex'), vector.signature_hex);
+  assert.deepEqual(await portable.verifyReceipt(receiptArgs(receipt, vector.trust)), receipt);
 });

@@ -9,6 +9,10 @@ No version has been released.
 ## Unreleased
 
 ### Added
+- Browser-local receipt verification with explicit public trust configuration,
+  receipt-file import, and downloadable current/historical verification keys.
+- Shared Go/browser receipt-v2 test vectors and negative cases for context,
+  ciphertext replacement, trust configuration, and server-key continuity.
 - Optional `ANONCE_DB_VOLUME` selection for fresh-database deployments without
   deleting the previous database or changing Caddy's TLS volumes.
 - Direct organization membership by registered email alongside invite links,
@@ -27,6 +31,11 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Replace the raw submission receipt display with verified acceptance, time,
+  download controls, and optional JSON details.
+- Use receipt v2 to bind the encrypted response to its deployment, review,
+  descriptor, and issuer without exporting token or full submission hashes.
+  Public configuration v2 publishes an operator-approved receipt keyring.
 - Move the current workspace name into the header without an uppercase label.
   Keep desktop navigation at the top while scrolling and mobile navigation at
   the bottom, with safe-area spacing and content clearance.
@@ -57,6 +66,9 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Verify signed receipt context before returning cached acceptance or decrypting
+  reviewer results; use only verified receipt timestamps.
+- Reject unsafe server master-key files and bound reads of key material.
 - Improve status badge text, icon sizing, and boundary visibility in both themes;
   remove doubled review-card spacing and distinguish icon-button interaction states.
 - Confirm organization, invitation, membership, review, password, recovery, and

@@ -3,7 +3,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
@@ -110,9 +109,21 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	sh := protocol.Hash(protocol.E("submission", rid, kid, prepared, sig, enc, ct))
 	receiptID := protocol.Random(16)
 	now := uint64(time.Now().Unix())
-	signature := ed25519.Sign(s.receipt, protocol.E("receipt", s.deployment, receiptID, rid, kid, th, sh, protocol.U64(now), s.receiptID))
-	receipt := map[string]any{"v": 1, "receipt_id": protocol.B64(receiptID), "review_id": p.Review, "issuer_key_id": p.Issuer, "token_hash": protocol.B64(th), "submission_hash": protocol.B64(sh), "accepted_at": strconv.FormatUint(now, 10), "receipt_key_id": protocol.B64(s.receiptID), "signature": protocol.B64(signature)}
-	b, _ := json.Marshal(receipt)
+	rh, e := protocol.ResponseHash(s.deployment, rid, dh, kid, enc, ct)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	receipt, e := protocol.SignReceipt(protocol.Receipt{V: 2, DeploymentID: protocol.B64(s.deployment), ReceiptID: protocol.B64(receiptID), ReviewID: p.Review, DescriptorHash: protocol.B64(dh), IssuerKeyID: p.Issuer, ResponseHash: protocol.B64(rh), AcceptedAt: strconv.FormatUint(now, 10), ReceiptKeyID: protocol.B64(s.receiptID)}, s.receipt)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	b, e := json.Marshal(receipt)
+	if e != nil {
+		fail(w, e)
+		return
+	}
 	var result json.RawMessage
 	e = s.anonymous.QueryRow(r.Context(), "SELECT anon.accept_submission($1,$2,$3,$4,$5,$6,$7,$8,$9)", p.Review, p.Issuer, th, sh, prepared, sig, enc, ct, b).Scan(&result)
 	if e != nil {

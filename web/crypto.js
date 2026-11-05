@@ -105,10 +105,11 @@ const guard = async fn => {
   }
 };
 
-export async function initCrypto({ deploymentId, origin, caCertificate, receiptPublicKey, receiptKeyId }) {
+export async function initCrypto({ deploymentId, origin, caCertificate, receiptKeys, receiptKeyId }) {
   config = undefined;
   return guard(async () => {
-    requireBytes(deploymentId, 32); requireBytes(receiptPublicKey, 32); requireBytes(receiptKeyId, 32);
+    requireBytes(deploymentId, 32); requireBytes(receiptKeyId, 32);
+    const receiptTrust = validateReceiptTrust({ v: 1, deployment_id: toBase64url(deploymentId), receipt_key_id: toBase64url(receiptKeyId), receipt_keys: receiptKeys });
     check(typeof location !== 'undefined' && origin === location.origin, 'ORIGIN_MISMATCH');
     const ca = new X509Certificate(requireBytes(caCertificate));
     check(ca.publicKey.algorithm.name === 'Ed25519' && ca.signatureAlgorithm.name === 'Ed25519', 'INVALID_CA');
@@ -116,8 +117,7 @@ export async function initCrypto({ deploymentId, origin, caCertificate, receiptP
     // Trust anchor/profile/signature validation, not a claim about publication
     // time or current membership. Expired certificates must remain decryptable.
     check(await ca.verify({ signatureOnly: true }, crypto), 'INVALID_CA');
-    check(equal(sha256(receiptPublicKey), receiptKeyId), 'INVALID_RECEIPT_KEY');
-    config = { deploymentId: deploymentId.slice(), origin, ca, receiptPublicKey: receiptPublicKey.slice(), receiptKeyId: receiptKeyId.slice() };
+    config = { deploymentId: deploymentId.slice(), origin, ca, receiptTrust };
   });
 }
 
@@ -401,15 +401,65 @@ export async function decryptResponse({ descriptorBytes, descriptor, recipientPr
 export async function submissionHash({ review_id, issuer_key_id, prepared_message, signature, enc, ciphertext }) {
   return sha256(encodeContext('submission', [decode(review_id, 16), decode(issuer_key_id, 32), decode(prepared_message), decode(signature, 384), decode(enc, 32), decode(ciphertext)]));
 }
-export async function verifyReceipt({ receipt, expectedSubmissionHash }) {
+export async function responseHash({ deploymentId, reviewId, descriptorHash, issuerKeyId, enc, ciphertext }) {
   return guard(() => {
-    exactKeys(receipt, ['v', 'receipt_id', 'review_id', 'issuer_key_id', 'token_hash', 'submission_hash', 'accepted_at', 'receipt_key_id', 'signature']);
-    check(receipt.v === 1 && typeof receipt.accepted_at === 'string', 'INVALID_RECEIPT');
-    check(equal(decode(receipt.submission_hash, 32), requireBytes(expectedSubmissionHash, 32)), 'SUBMISSION_HASH_MISMATCH');
-    check(equal(decode(receipt.receipt_key_id, 32), config.receiptKeyId), 'RECEIPT_KEY_MISMATCH');
-    const message = encodeContext('receipt', [deployment(), decode(receipt.receipt_id, 16), decode(receipt.review_id, 16), decode(receipt.issuer_key_id, 32), decode(receipt.token_hash, 32), decode(receipt.submission_hash, 32), u64be(receipt.accepted_at), decode(receipt.receipt_key_id, 32)]);
-    check(ed25519.verify(decode(receipt.signature, 64), message, config.receiptPublicKey, { zip215: false }), 'INVALID_RECEIPT_SIGNATURE');
+    requireBytes(ciphertext);
+    check(ciphertext.length >= 16 && ciphertext.length <= 262144, 'RESPONSE_TOO_LARGE');
+    return sha256(encodeContext('accepted-response-v2', [requireBytes(deploymentId, 32), requireBytes(reviewId, 16), requireBytes(descriptorHash, 32), requireBytes(issuerKeyId, 32), requireBytes(enc, 32), ciphertext]));
+  });
+}
+
+function validateReceiptTrust(trust) {
+  exactKeys(trust, ['v', 'deployment_id', 'receipt_key_id', 'receipt_keys']);
+  check(trust.v === 1, 'INVALID_RECEIPT_TRUST');
+  decode(trust.deployment_id, 32); decode(trust.receipt_key_id, 32);
+  check(Array.isArray(trust.receipt_keys) && trust.receipt_keys.length > 0, 'INVALID_RECEIPT_TRUST');
+  const ids = new Set();
+  for (const entry of trust.receipt_keys) {
+    exactKeys(entry, ['receipt_key_id', 'receipt_public_key']);
+    const id = decode(entry.receipt_key_id, 32), key = decode(entry.receipt_public_key, 32);
+    check(equal(sha256(key), id), 'INVALID_RECEIPT_KEY');
+    check(!ids.has(entry.receipt_key_id), 'DUPLICATE_RECEIPT_KEY');
+    ids.add(entry.receipt_key_id);
+  }
+  check(ids.has(trust.receipt_key_id), 'RECEIPT_KEY_MISMATCH');
+  return structuredClone(trust);
+}
+
+export function getReceiptTrust() {
+  check(config, 'NOT_INITIALIZED');
+  return structuredClone(config.receiptTrust);
+}
+
+// Signature verification proves acceptance under supplied trust, not a match to
+// the original submission. Use verifyReceipt with independently held context.
+export async function verifyReceiptSignature({ receipt, trust }) {
+  return guard(() => {
+    trust = validateReceiptTrust(trust);
+    exactKeys(receipt, ['v', 'deployment_id', 'receipt_id', 'review_id', 'descriptor_hash', 'issuer_key_id', 'response_hash', 'accepted_at', 'receipt_key_id', 'signature']);
+    check(receipt.v === 2 && typeof receipt.accepted_at === 'string', 'INVALID_RECEIPT');
+    const message = encodeContext('receipt-v2', [decode(receipt.deployment_id, 32), decode(receipt.receipt_id, 16), decode(receipt.review_id, 16), decode(receipt.descriptor_hash, 32), decode(receipt.issuer_key_id, 32), decode(receipt.response_hash, 32), u64be(receipt.accepted_at), decode(receipt.receipt_key_id, 32)]);
+    check(receipt.deployment_id === trust.deployment_id, 'DEPLOYMENT_MISMATCH');
+    const entry = trust.receipt_keys.find(key => key.receipt_key_id === receipt.receipt_key_id);
+    check(entry, 'RECEIPT_KEY_MISMATCH');
+    check(ed25519.verify(decode(receipt.signature, 64), message, decode(entry.receipt_public_key, 32), { zip215: false }), 'INVALID_RECEIPT_SIGNATURE');
     return structuredClone(receipt);
+  });
+}
+
+export async function verifyReceipt({ receipt, trust, expectedDeploymentId, expectedReviewId, expectedDescriptorHash, expectedIssuerKeyId, expectedResponseHash }) {
+  return guard(async () => {
+    const contexts = [
+      ['deployment_id', expectedDeploymentId, 32, 'DEPLOYMENT_MISMATCH'],
+      ['review_id', expectedReviewId, 16, 'REVIEW_MISMATCH'],
+      ['descriptor_hash', expectedDescriptorHash, 32, 'DESCRIPTOR_HASH_MISMATCH'],
+      ['issuer_key_id', expectedIssuerKeyId, 32, 'ISSUER_KEY_MISMATCH'],
+      ['response_hash', expectedResponseHash, 32, 'RESPONSE_HASH_MISMATCH'],
+    ];
+    for (const [, value, length] of contexts) requireBytes(value, length);
+    for (const [field, value, length, code] of contexts) check(equal(decode(receipt[field], length), value), code);
+    check(equal(decode(trust.deployment_id, 32), expectedDeploymentId), 'DEPLOYMENT_MISMATCH');
+    return verifyReceiptSignature({ receipt, trust });
   });
 }
 

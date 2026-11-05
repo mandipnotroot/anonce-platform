@@ -1,0 +1,44 @@
+{
+  "v": 2,
+  "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "receipt_key_id_hex": "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c",
+  "response_transcript_hex": "414e4f4e434501001461636365707465642d726573706f6e73652d7632000600000020202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f00000010000102030405060708090a0b0c0d0e0f00000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f00000020606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f00000020808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f00000030a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+  "response_hash_hex": "e33d6053c29d6230efd2998ba214f877b22da12303110bf25b6bc3cd98df15c1",
+  "receipt_transcript_hex": "414e4f4e434501000a726563656970742d7632000800000020202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f00000010d0d1d2d3d4d5d6d7d8d9dadbdcdddedf00000010000102030405060708090a0b0c0d0e0f00000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f00000020606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f00000020e33d6053c29d6230efd2998ba214f877b22da12303110bf25b6bc3cd98df15c100000008ffffffffffffffff0000002056475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c",
+  "signature_hex": "45a6bf07fd548866f887d1e31ef90675f11ef4e2ff7703a983a0c784d5b468efc9d05fa2a6d104f86b1ac12682c32fb91d800988b6be583814f83f283106500b",
+  "context": {
+    "deployment_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "review_id": "AAECAwQFBgcICQoLDA0ODw",
+    "descriptor_hash": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+    "issuer_key_id": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+    "response_hash": "4z1gU8KdYjDv0pmLohT4d7ItoSMDEQvyW2vDzZjfFcE"
+  },
+  "envelope": {
+    "enc": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8",
+    "ciphertext": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr_AwcLDxMXGx8jJysvMzc7P"
+  },
+  "receipt": {
+    "v": 2,
+    "deployment_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "receipt_id": "0NHS09TV1tfY2drb3N3e3w",
+    "review_id": "AAECAwQFBgcICQoLDA0ODw",
+    "descriptor_hash": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+    "issuer_key_id": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+    "response_hash": "4z1gU8KdYjDv0pmLohT4d7ItoSMDEQvyW2vDzZjfFcE",
+    "accepted_at": "18446744073709551615",
+    "receipt_key_id": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+    "signature": "Raa_B_1UiGb4h9HjHvkGdfEe9OL_dwOpg6DHhNW0aO_J0F-iptEE-GsawSaCwy-5HYAJiLa-WDgU-D8oMQZQCw"
+  },
+  "trust": {
+    "v": 1,
+    "deployment_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "receipt_key_id": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+    "receipt_keys": [
+      {
+        "receipt_key_id": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+        "receipt_public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+      }
+    ]
+  }
+}

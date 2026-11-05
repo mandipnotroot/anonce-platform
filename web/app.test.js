@@ -11,14 +11,14 @@ async function service(overrides={}) {
     .replace(/^import .*;$/gm,'').replace(/\bexport /g,'');
   const wire=value=>JSON.parse(JSON.stringify(value,(_,v)=>v instanceof Uint8Array?Buffer.from(v).toString('base64url'):v));
   class MockAPIError extends Error {constructor(code,message){super(message);this.code=code;}}
-  const context=vm.createContext({Uint8Array,TextDecoder,Blob,URL,APIError:MockAPIError,
+  const context=vm.createContext({Uint8Array,TextDecoder,TextEncoder,Blob,URL,APIError:MockAPIError,
     jsonBytes:value=>new TextEncoder().encode(JSON.stringify(value)),toWire:wire,
     C:{fromBase64url:value=>new Uint8Array(Buffer.from(value,'base64url')),toBase64url:value=>Buffer.from(value).toString('base64url'),...overrides.C},
     request:overrides.request||(()=>{throw Error('Unexpected request');}),
     loadSealed:overrides.loadSealed,saveSealed:overrides.saveSealed|| (async()=>{}),
   });
   vm.runInContext(source+`;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses};
+    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust};
     globalThis.setSigned=value=>{signed=value;};`,context);
   return context;
 }
@@ -88,14 +88,15 @@ test('remote recovery restores exact issuance bytes after JSONB key reordering',
 });
 
 async function responseService({networkFailure=false,keyFailure=false,descriptorFailure=false}={}) {
-  return service({C:{verifyDescriptor:async()=>{if(descriptorFailure)throw Error('descriptor');return {questions:[{id:'q',type:'text',choices:[]}]};},
+   return service({C:{verifyDescriptor:async()=>{if(descriptorFailure)throw Error('descriptor');return {deployment_id:'YQ',review_id:'Yw',issuer_key_id:'Yg',questions:[{id:'q',type:'text',choices:[]}]};},
+    hashBytes:async()=>new Uint8Array(32),responseHash:async()=>new Uint8Array(32),getReceiptTrust:()=>({}),verifyReceipt:async({receipt})=>receipt,
     openVaultObject:async()=>{if(keyFailure)throw Error('key');return new TextEncoder().encode(JSON.stringify({kind:'recipient',reviewId:'Yw',privateKey:'YQ'}));},
     decryptResponse:async({ciphertext})=>{if(ciphertext[0]===2)throw Error('raw secret provider error');if(ciphertext[0]===3)return {answers:null};return {answers:{q:'good answer'}};}},
     request:async path=>{
       if(path.startsWith('/api/public/'))return {descriptor:'e30',descriptor_signature:''};
       if(path==='/api/member/vault')return {objects:[{}]};
       if(networkFailure)throw Error('network');
-      return {items:[1,2,3].map(n=>({id:String(n),accepted_at:'today',enc:'YQ',ciphertext:Buffer.from([n]).toString('base64url')})),next:null};
+       return {items:[1,2,3].map(n=>({id:String(n),accepted_at:'untrusted',receipt:{receipt_id:String(n),accepted_at:'today'},enc:'YQ',ciphertext:Buffer.from([n]).toString('base64url')})),next:null};
     }});
 }
 
@@ -137,4 +138,46 @@ test('review pagination transmits an encoded cursor',async()=>{
   globalThis.fetch=async(path)=>{requested=path;return {ok:true,status:200,json:async()=>({items:[],next:null})};};
   assert.deepEqual(await app.listReviews({orgId:'organization',after:'cursor/+?'}),{items:[],next:null});
   assert.equal(requested,'/api/member/orgs/organization/reviews?after=cursor%2F%2B%3F');
+});
+
+const portableReceipt={v:2,deployment_id:'YQ',receipt_id:'Yg',review_id:'Yw',descriptor_hash:'ZA',issuer_key_id:'ZQ',response_hash:'Zg',accepted_at:'123',receipt_key_id:'Zw',signature:'aA'};
+const portableTrust={v:1,deployment_id:'YQ',receipt_key_id:'Zw',receipt_keys:[{receipt_key_id:'Zw',receipt_public_key:'aQ'}]};
+test('standalone verification uses explicit trust without initialization or requests',async()=>{
+  let calls=0;
+  const context=await service({C:{verifyReceiptSignature:async({receipt,trust})=>{calls++;assert.deepEqual(JSON.parse(JSON.stringify(trust)),portableTrust);return receipt;}}});
+  const result=await context.service.verifySavedReceipt({receiptText:JSON.stringify(portableReceipt),trustText:JSON.stringify(portableTrust)});
+  assert.equal(result.receipt.receipt_id,'Yg');assert.equal(calls,1);
+});
+test('standalone verification rejects duplicate, unknown, malformed, trailing and oversized JSON',async()=>{
+  const context=await service();
+  for(const receiptText of ['{','null','[]',JSON.stringify({...portableReceipt,token:'secret'}),JSON.stringify(portableReceipt)+' false',JSON.stringify(portableReceipt).replace('"v":2','"v":2,"\\u0076":2'),' '.repeat(65537),'"'+'日'.repeat(22000)+'"']) {
+    await assert.rejects(context.service.verifySavedReceipt({receiptText,trustText:JSON.stringify(portableTrust)}));
+  }
+  await assert.rejects(context.service.verifySavedReceipt({receiptText:JSON.stringify(portableReceipt),trustText:JSON.stringify({...portableTrust,url:'https://evil.invalid'})}));
+});
+test('cached and lookup receipts reverify descriptor, envelope and every expected context',async()=>{
+  for(const method of ['submitResponse','lookupReceipt'])for(const cached of [false,true]) {
+    let checks=0,descriptors=0;
+    const pending={pendingId:'Yg',reviewId:'Yw',descriptor:'e30',descriptorSignature:'YQ',revision:1,encrypted:{enc:'YQ',ciphertext:'Yg'},submission:{review_id:'Yw',issuer_key_id:'ZQ',enc:'YQ',ciphertext:'Yg'},authorization:{serial:'secret'},...(cached?{receipt:portableReceipt}:{})};
+    const context=await service({loadSealed:async()=>pending,request:async()=>portableReceipt,C:{
+      verifyDescriptor:async({expectedReviewId})=>{descriptors++;assert.equal(Buffer.from(expectedReviewId).toString('base64url'),'Yw');return {deployment_id:'YQ',review_id:'Yw',issuer_key_id:'ZQ'};},
+      hashBytes:async value=>{assert.equal(Buffer.from(value).toString(),'{}');return new Uint8Array(32).fill(1);},
+      responseHash:async options=>{assert.equal(Buffer.from(options.ciphertext).toString('base64url'),'Yg');return new Uint8Array(32).fill(2);},getReceiptTrust:()=>portableTrust,
+      verifyReceipt:async options=>{checks++;for(const field of ['expectedDeploymentId','expectedReviewId','expectedDescriptorHash','expectedIssuerKeyId','expectedResponseHash'])assert.ok(options[field] instanceof Uint8Array);throw Error('receipt mismatch');}}});
+    await assert.rejects(context.service[method]({pendingId:'Yg'}),/receipt mismatch/);
+    assert.equal(checks,1);assert.ok(descriptors>=1);
+    pending.submission.ciphertext='tampered';
+    await assert.rejects(context.service[method]({pendingId:'Yg'}),e=>e.code==='INVALID_RECEIPT');
+  }
+});
+test('reviewer rejects receipt and identifier mismatches before decrypting',async()=>{
+  for(const badSignature of [false,true]) {
+    let decrypts=0;
+    const context=await service({C:{verifyDescriptor:async()=>({deployment_id:'YQ',review_id:'Yw',issuer_key_id:'ZQ'}),hashBytes:async()=>new Uint8Array(32),responseHash:async()=>new Uint8Array(32),getReceiptTrust:()=>portableTrust,
+      verifyReceipt:async()=>{if(badSignature)throw Error('signature');return {...portableReceipt,receipt_id:'different'};},
+      openVaultObject:async()=>new TextEncoder().encode(JSON.stringify({kind:'recipient',reviewId:'Yw',privateKey:'YQ'})),decryptResponse:async()=>{decrypts++;}},
+      request:async path=>path.startsWith('/api/public/')?{descriptor:'e30',descriptor_signature:'YQ'}:path==='/api/member/vault'?{objects:[{}]}:{items:[{id:'Yg',accepted_at:'forged',enc:'YQ',ciphertext:'Yg',receipt:portableReceipt}]}});
+    const result=await context.service.listResponses({reviewId:'Yw'});
+    assert.equal(decrypts,0);assert.equal(result.items[0].acceptedAt,null);assert.equal(result.items[0].status,'invalid');assert.equal(result.items[0].answers.length,0);
+  }
 });

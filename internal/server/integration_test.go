@@ -282,7 +282,32 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 	var receipt string
+	var storedReceipt protocol.Receipt
+	var descriptorHash []byte
+	if e := s.anonymous.QueryRow(ctx, "SELECT descriptor_hash FROM anon.reviews WHERE id=$1", id).Scan(&descriptorHash); e != nil {
+		t.Fatal(e)
+	}
+	responseHash, e := protocol.ResponseHash(s.deployment, rid, descriptorHash, kid, enc, ciphertext)
+	if e != nil {
+		t.Fatal(e)
+	}
+	receiptPublicKey, e := s.receiptTrust.CurrentPublicKey()
+	if e != nil {
+		t.Fatal(e)
+	}
+	expectedReceipt := protocol.ReceiptContext{DeploymentID: protocol.B64(s.deployment), ReviewID: id, DescriptorHash: protocol.B64(descriptorHash), IssuerKeyID: d.Issuer, ResponseHash: protocol.B64(responseHash)}
 	for _, w := range responses {
+		parsed, err := protocol.ParseReceipt(w.Body.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := protocol.VerifyReceipt(parsed, receiptPublicKey, expectedReceipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt != "" && storedReceipt != parsed {
+			t.Fatal("signed receipt changed under concurrent retry")
+		}
+		storedReceipt = parsed
 		v := result(t, w, 200)
 		if receipt != "" && receipt != v["receipt_id"] {
 			t.Fatal("receipt changed")
@@ -302,7 +327,12 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	result(t, request(h, "POST", "/api/anon/submissions", sub, nil), 409)
 	assertAccepted("conflicting replay", 1)
 	lookup := map[string]string{"review_id": id, "issuer_key_id": d.Issuer, "serial": protocol.B64(serial)}
-	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, nil), 200)
+	lookupResponse := request(h, "POST", "/api/anon/receipts/lookup", lookup, nil)
+	lookupReceipt, e := protocol.ParseReceipt(lookupResponse.Body.Bytes())
+	if e != nil || lookupReceipt != storedReceipt {
+		t.Fatalf("lookup receipt changed: %v", e)
+	}
+	result(t, lookupResponse, 200)
 	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, u), 400)
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
 		t.Fatal(e)
@@ -310,6 +340,18 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	rows := result(t, request(h, "GET", path+"/submissions", nil, u), 200)
 	if len(rows["items"].([]any)) != 1 {
 		t.Fatal("missing response")
+	}
+	item := rows["items"].([]any)[0].(map[string]any)
+	if len(item) != 4 || item["enc"] != protocol.B64(enc) || item["ciphertext"] != protocol.B64(ciphertext) {
+		t.Fatal("reviewer output changed or exposed authorization fields")
+	}
+	listedJSON, e := json.Marshal(item["receipt"])
+	if e != nil {
+		t.Fatal(e)
+	}
+	listedReceipt, e := protocol.ParseReceipt(listedJSON)
+	if e != nil || listedReceipt != storedReceipt {
+		t.Fatalf("reviewer receipt changed: %v", e)
 	}
 	// Recovery sessions cannot create organizations but can read the encrypted vault.
 	loginUser(t, s, h, u, "login-recovery")

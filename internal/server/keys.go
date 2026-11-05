@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/hkdf"
@@ -13,9 +14,61 @@ import (
 	"errors"
 	"github.com/mandipnotroot/anonce-platform/internal/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
+	"io"
 	"math/big"
+	"os"
+	"syscall"
 	"time"
 )
+
+const maxReceiptTrustSize = 1024 * 1024
+
+func (s *Server) initReceiptTrust() error {
+	pub := s.receipt.Public().(ed25519.PublicKey)
+	trust := protocol.ReceiptTrust{V: 1, DeploymentID: protocol.B64(s.deployment), ReceiptKeyID: protocol.B64(s.receiptID), ReceiptKeys: []protocol.ReceiptTrustKey{{ReceiptKeyID: protocol.B64(s.receiptID), ReceiptPublicKey: protocol.B64(pub)}}}
+	if s.cfg.ReceiptTrustFile != "" {
+		fd, err := syscall.Open(s.cfg.ReceiptTrustFile, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			return err
+		}
+		f := os.NewFile(uintptr(fd), s.cfg.ReceiptTrustFile)
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || st.Size() > maxReceiptTrustSize {
+			return errors.New("receipt trust file must be a bounded regular file without group or world write access")
+		}
+		owner, ok := st.Sys().(*syscall.Stat_t)
+		if !ok || (owner.Uid != 0 && owner.Uid != uint32(os.Geteuid())) {
+			return errors.New("receipt trust file must be owned by root or the service user")
+		}
+		b, err := io.ReadAll(io.LimitReader(f, maxReceiptTrustSize+1))
+		if err != nil {
+			return err
+		}
+		if len(b) > maxReceiptTrustSize {
+			return errors.New("receipt trust file too large")
+		}
+		trust, err = protocol.ParseReceiptTrust(b)
+		if err != nil {
+			return err
+		}
+	}
+	if err := trust.Validate(); err != nil {
+		return err
+	}
+	current, err := trust.CurrentPublicKey()
+	if err != nil {
+		return err
+	}
+	if trust.DeploymentID != protocol.B64(s.deployment) || trust.ReceiptKeyID != protocol.B64(s.receiptID) || !bytes.Equal(current, pub) {
+		return errors.New("receipt trust does not match initialized deployment and signing key")
+	}
+	s.receiptTrust = trust
+	return nil
+}
 
 func (s *Server) crypt(label string, b []byte, open bool) ([]byte, error) {
 	k, e := hkdf.Key(sha256.New, s.master, s.deployment, "anonce/server/"+label, 32)

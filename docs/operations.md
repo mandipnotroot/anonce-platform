@@ -88,6 +88,11 @@ to container UID 65532. Compose bind secrets do not reliably implement `uid` or
 `mode`. For rootless/user-namespace Docker, map ownership to the corresponding
 host UID and verify readability before startup; do not use world-readable modes.
 Preserve any existing key: never regenerate it during upgrades.
+Startup opens the key without following a final-component symlink and requires
+a regular file owned by the effective runtime UID, with no group or other
+permission bits. The loader bounds input to 4096 bytes and requires a canonical
+base64url-encoded 32-byte key after trimming surrounding whitespace. Keep parent
+directories trusted; the loader does not reject symlinks in parent components.
 The proxy image removes its unnecessary low-port file capability and sets
 /data and /config ownership to UID/GID 1000 at build time,
 so fresh named volumes inherit writable ownership without a root runtime.
@@ -143,3 +148,38 @@ docker compose exec -T db pg_restore -U anonce_admin -d anonce --exit-on-error <
 
 Restore into a fresh initialized database, not over live data. Verify grants,
 integrity, migration versions, and application behavior before reopening access.
+
+### Key continuity and rotation limits
+
+Restore the database and its matching server master key together. Preserve the
+deployment ID, membership CA public key, and receipt public key identity across
+restart and restore; verify that existing encrypted issuer keys still open.
+Table counts alone do not establish signing-key continuity or recoverability.
+
+Replacing the master-key file is not a rotation procedure: existing server and
+issuer private keys are encrypted under keys derived from that master key and
+deployment ID. A future master-key rotation must re-encrypt every affected key
+transactionally, retain public identities, and include a tested recovery plan.
+No automatic master-key rotation or production backup validation is provided.
+
+### Receipt verification keys
+
+Without additional configuration, public configuration publishes only the
+current receipt public key. To retain verification of receipts signed by an
+explicitly approved historical key, set `ANONCE_RECEIPT_TRUST_FILE` to a bounded
+operator-controlled public trust document using the schema in
+[protocol.md](protocol.md). The document must include the deployment's current
+key and matching deployment ID. The loader accepts at most 1 MiB, requires a
+regular file owned by root or the effective service UID, rejects final-component
+symlinks, and rejects group/world write permission. Browser import is separately
+limited to 64 KiB; keep distributed trust documents within that limit.
+Historical keys come from this file, not from
+database rows or imported receipts. This is verification-key configuration,
+not a signing-key rotation command.
+
+For Compose, mount the public trust document read-only through a local override
+and set the variable to its container path. Do not mount a private-key directory.
+Keep the file and its parent directories protected from untrusted writes.
+Distribute trust documents through an independently trusted channel; retain
+trusted copies with receipts. Removing a historical key makes its receipts
+unverifiable with that keyring; do not remove keys casually.

@@ -411,7 +411,38 @@ textarea {
   border-left-color:#337750
 }
 .receipt-notice {
-  margin-top: 18px
+  margin-top: 18px;
+  padding: var(--space-4);
+  border-radius: var(--radius-card)
+}
+.receipt-notice h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.25rem
+}
+.receipt-status {
+  font-weight: 700;
+  color: var(--green, #337750)
+}
+.receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-4) 0
+}
+.receipt-actions [data-receipt-download] {
+  order: -1
+}
+.receipt-details {
+  margin-top: var(--space-3)
+}
+.receipt-details summary {
+  cursor: pointer;
+  width: fit-content;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  text-decoration: underline;
+  text-underline-offset: .2em
 }
 .receipt-data {
   max-width: 100%;
@@ -422,11 +453,22 @@ textarea {
   white-space: pre-wrap;
   word-break: break-word
 }
-.receipt-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px
+.verifier-card > p:first-child { max-width: 72ch; line-height: 1.6 }
+.verify-trust {
+  min-width: 0;
+  margin: var(--space-5) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control)
 }
+.verify-trust legend { padding: 0 var(--space-2); font-weight: 650 }
+.verify-trust > label:not(.field) { display: block; margin: var(--space-3) 0; line-height: 1.5 }
+.verify-trust input[type="radio"] { margin-inline-end: var(--space-2) }
+.verify-trust .field { margin-top: var(--space-4) }
+.verify-trust textarea:disabled { opacity: .7 }
+.verifier-success { margin-top: var(--space-4); border-left-color: var(--status-positive-line) }
+.verifier-success strong { color: var(--status-positive-ink, var(--ink)) }
+#verify-result { overflow-wrap: anywhere }
 .inline,.toolbar {
   display: flex;
   align-items: center;

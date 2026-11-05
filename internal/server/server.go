@@ -22,12 +22,13 @@ import (
 	"time"
 )
 
-type Config struct{ DatabaseURL, AnonymousURL, Origin, KeyFile, WebDir, SourceURL string }
+type Config struct{ DatabaseURL, AnonymousURL, Origin, KeyFile, WebDir, SourceURL, ReceiptTrustFile string }
 type Server struct {
 	member, anonymous                    *pgxpool.Pool
 	cfg                                  Config
 	master, deployment, caDER, receiptID []byte
 	ca, receipt                          ed25519.PrivateKey
+	receiptTrust                         protocol.ReceiptTrust
 	mu                                   sync.Mutex
 	requests                             int
 	window                               time.Time
@@ -41,11 +42,7 @@ func New(ctx context.Context, c Config) (*Server, error) {
 	if c.SourceURL == "" || c.AnonymousURL == "" || c.DatabaseURL == c.AnonymousURL {
 		return nil, errors.New("source URL and distinct database URLs required")
 	}
-	b, e := os.ReadFile(c.KeyFile)
-	if e != nil {
-		return nil, e
-	}
-	master, e := protocol.Decode(strings.TrimSpace(string(b)), 32)
+	master, e := readMasterKey(c.KeyFile)
 	if e != nil {
 		return nil, e
 	}
@@ -81,6 +78,9 @@ func New(ctx context.Context, c Config) (*Server, error) {
 		return fail(errors.New("anonymous role can access member schema"))
 	}
 	if e = s.initKeys(ctx); e != nil {
+		return fail(e)
+	}
+	if e = s.initReceiptTrust(); e != nil {
 		return fail(e)
 	}
 	return s, nil
@@ -159,7 +159,7 @@ func (s *Server) Handler() http.Handler {
 		write(w, 200, map[string]string{"status": "ready"})
 	})
 	m.HandleFunc("GET /api/public/config", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]any{"v": 1, "deployment_id": protocol.B64(s.deployment), "origin": s.cfg.Origin, "ca_certificate": protocol.B64(s.caDER), "receipt_public_key": protocol.B64(s.receipt.Public().(ed25519.PublicKey)), "receipt_key_id": protocol.B64(s.receiptID), "source_url": s.cfg.SourceURL})
+		write(w, 200, map[string]any{"v": 2, "deployment_id": protocol.B64(s.deployment), "origin": s.cfg.Origin, "ca_certificate": protocol.B64(s.caDER), "receipt_keys": s.receiptTrust.ReceiptKeys, "receipt_key_id": protocol.B64(s.receiptID), "source_url": s.cfg.SourceURL})
 	})
 	m.HandleFunc("GET /api/public/reviews/{id}", s.publicReview)
 	m.HandleFunc("POST /api/anon/submissions", s.submit)

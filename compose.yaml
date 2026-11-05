@@ -46,6 +46,7 @@ services:
       ANONCE_ORIGIN: https://${ANONCE_DOMAIN:?set public domain}
       ANONCE_ADDR: :8080
       ANONCE_KEY_FILE: /run/secrets/server_key
+      ANONCE_RECEIPT_TRUST_FILE: ${ANONCE_RECEIPT_TRUST_FILE:-}
       ANONCE_WEB_DIR: /app/web
       ANONCE_SOURCE_URL: ${ANONCE_SOURCE_URL:?set complete corresponding source URL}
     secrets: [server_key]

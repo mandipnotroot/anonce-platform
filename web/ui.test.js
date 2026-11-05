@@ -134,12 +134,13 @@ test("workspace navigation keeps complete accessible names and responsive app na
   assert.match(styles, /env\(safe-area-inset-bottom\)/);
 });
 
-test("accepted signed receipts render complete escaped JSON for initial and retry acceptance", () => {
+test("accepted receipt shows verified success and time, with JSON behind disclosure", () => {
   const receiptSource = source.slice(source.indexOf("function receiptHTML("), source.indexOf("function icon("));
   const receipt = {
     version: 1,
     signature: "sig<&>",
     issuer: { keyId: "key-1", proof: "complete-proof" },
+    accepted_at: "1794000000",
   };
   const escaped = JSON.stringify(receipt, null, 2)
     .replaceAll("&", "&amp;")
@@ -147,10 +148,17 @@ test("accepted signed receipts render complete escaped JSON for initial and retr
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
   const escapeSource = source.slice(source.indexOf("const esc ="), source.indexOf("const path ="));
-  const { rendered } = vm.runInNewContext(`${escapeSource}\n${receiptSource}\n({ rendered: receiptHTML(receipt) })`, { receipt });
-  assert.ok(rendered.includes(`<pre class="receipt-data">${escaped}</pre>`));
+  const timeSource = source.slice(source.indexOf("function formatReceiptTime("), source.indexOf("async function verifyReceiptLocally("));
+  const { rendered } = vm.runInNewContext(`${escapeSource}\n${receiptSource}\n${timeSource}\n({ rendered: receiptHTML(receipt) })`, { receipt, BigInt, Date });
+  assert.ok(rendered.includes(`<details class="receipt-details"><summary>Technical details (JSON)</summary><pre class="receipt-data">${escaped}</pre></details>`));
+  assert.match(rendered, /Response accepted/);
+  assert.match(rendered, /Receipt signature verified/);
+  assert.match(rendered, /<time>/);
+  assert.match(rendered, /confirms acceptance, not what your response said/);
+  assert.match(rendered, /aria-labelledby="receipt-heading"/);
   assert.match(rendered, /data-receipt-copy/);
   assert.match(rendered, /data-receipt-download/);
+  assert.ok(rendered.indexOf("data-receipt-download") < rendered.indexOf("data-receipt-copy"));
   assert.doesNotMatch(rendered, /\[object Object\]/);
   assert.match(source, /box\.innerHTML = receiptHTML\(x\.receipt\);[\s\S]*?bindReceiptTools\(box, x\.receipt\)/);
   assert.match(source, /box\.innerHTML = receiptHTML\(result\.receipt\);[\s\S]*?bindReceiptTools\(box, result\.receipt\)/);
@@ -182,13 +190,73 @@ test("receipt tools copy and download complete formatted JSON", async () => {
   assert.deepEqual(notices, [{ message: "Receipt download started.", type: "success" }]);
 });
 
-test("receipt JSON wraps within narrow layouts", () => {
+test("receipt details and controls support narrow layouts and keyboard access", () => {
   assert.match(styles, /\.receipt-data\s*\{[^}]*overflow-wrap:\s*anywhere/);
   assert.match(styles, /\.receipt-data\s*\{[^}]*max-width:\s*100%/);
   assert.match(styles, /\.hidden\s*\{\s*display:\s*none/);
   assert.match(styles, /\.receipt-notice\s*\{\s*margin-top:\s*18px/);
-  assert.match(styles, /\.receipt-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*10px/);
+  assert.match(styles, /\.receipt-actions\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/);
+  assert.match(styles, /\.receipt-details summary\s*\{[^}]*min-height:\s*44px/);
   assert.match(source, /receipt-notice[\s\S]*?receipt-actions/);
+  assert.match(source, /return to this signed-in browser later and check its status/);
+  assert.match(source, /pending-state" role="status"/);
+});
+
+test("receipt verifier uses local API only and enforces UTF-8 byte bounds", async () => {
+  const calls = [];
+  const api = { async verifySavedReceipt(input) { calls.push(input); return { receipt: { v: 2 } }; } };
+  const helper = source.slice(source.indexOf("async function verifyReceiptLocally("), source.indexOf("async function loadVerifierFile("));
+  const context = { api, TextEncoder };
+  const run = vm.runInNewContext(`(async () => { ${helper}; return verifyReceiptLocally; })()`, context);
+  const verify = await run;
+  assert.equal((await verify("receipt", "trust")).receipt.v, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ receiptText: "receipt", trustText: "trust" }]);
+  await assert.rejects(verify("é".repeat(32769), "trust"), /64 KiB/);
+  assert.equal(calls.length, 1);
+  assert.match(source, /route\[0\] === "verify-receipt"\) \{\s*session = null;\s*return renderReceiptVerifier\(\);/);
+  assert.ok(source.indexOf('if (route[0] === "verify-receipt")') < source.indexOf("session = await api.getSession()"));
+  assert.match(source, /verifyReceiptLocally\(inputText, selectedTrust\)/);
+  assert.match(source, /verifySavedReceipt/);
+  assert.match(source, /href="#\/verify-receipt"/);
+  assert.match(source, /does not prove response correctness, permanent storage, anonymity, or trusted time/);
+  assert.match(source, /This does not match the receipt to your original submission/);
+  assert.doesNotMatch(source.slice(source.indexOf("function renderReceiptVerifier"), source.indexOf("function formatReceiptTime")), /fetch\s*\(|api\.(?!getReceiptTrust|verifySavedReceipt)/);
+});
+
+test("receipt times never render invalid dates for out-of-range values", () => {
+  const helper = source.slice(source.indexOf("function formatReceiptTime("), source.indexOf("async function verifyReceiptLocally("));
+  const format = vm.runInNewContext(`${helper}; formatReceiptTime`, { BigInt, Date });
+  assert.equal(format("18446744073709551615"), "Unix time 18446744073709551615 (outside display range)");
+  assert.equal(format("not-a-time"), "Acceptance time unavailable");
+  assert.doesNotMatch(format("18446744073709551615"), /Invalid Date/);
+});
+
+test("stale receipt file reads cannot replace edits or surface old read errors", async () => {
+  const helper = source.slice(source.indexOf("async function loadVerifierFile("), source.indexOf("function emptyCard("));
+  const run = vm.runInNewContext(`(async () => { ${helper}; return loadVerifierFile; })()`, { });
+  const load = await run;
+  let generation = 0;
+  const messages = [];
+  const target = { value: "old" };
+  const result = { set textContent(value) { messages.push(value); } };
+  const clear = () => ++generation;
+  const current = token => token === generation;
+  let resolveRead;
+  const pendingRead = load({ size: 3, text: () => new Promise(resolve => { resolveRead = resolve; }) }, target, result, clear, current);
+  target.value = "new user edit";
+  generation++;
+  resolveRead("stale file text");
+  await pendingRead;
+  assert.equal(target.value, "new user edit");
+  assert.deepEqual(messages, []);
+  let rejectRead;
+  const pendingError = load({ size: 3, text: () => new Promise((_resolve, reject) => { rejectRead = reject; }) }, target, result, clear, current);
+  generation++;
+  rejectRead(new Error("private file error"));
+  await pendingError;
+  assert.deepEqual(messages, []);
+  await load({ size: 65537, text() { throw new Error("must not read oversized file"); } }, target, result, clear, current);
+  assert.match(messages.at(-1), /exceeds 64 KiB/);
 });
 
 test("shared spacing tokens drive cards, forms, fields, and responsive layouts", () => {

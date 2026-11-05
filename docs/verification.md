@@ -5,6 +5,54 @@ The checklist below describes required coverage, not blanket proof of every case
 Executed evidence is recorded separately below. Neither tests nor independent
 focused source reviews constitute an audit or production-readiness approval.
 
+## Receipt-v2 change checks — 2026-11-05
+
+These checks concern the current receipt-v2 changes; older baseline runs below
+do not validate this revision. Target execution uses disposable source snapshots
+inside a network-isolated namespace/chroot: source/toolchains are read-only,
+the environment is explicitly allowlisted, and writes are confined to a 512 MiB
+scratch filesystem. A transient cgroup limits memory to 2 GiB with no swap,
+CPU to one core, and tasks to 128. Commands have a 180-second wall limit.
+No deployment secrets, database connections, or live services are exposed.
+
+- Node 26.12.1: `node --test --test-concurrency=1 web/*.test.js`, exit 0;
+  55 passed, zero failures or skips. Includes receipt vectors, mutations,
+  historical trust, ciphertext replacement, cached/lookup acceptance checks,
+  reviewer verification order, input limits, and stale file reads.
+- `node scripts/build.mjs`, exit 0, in a scratch-only disposable source copy;
+  generated bundles were not promoted to the working tree or deployed.
+- Go 1.27.3 with `CGO_ENABLED=0`, matching the production build:
+  `node scripts/crypto-interop.mjs`, exit 0. Six groups passed: published
+  RFC 9474 vector, framing/U64, HKDF, ChaCha20-Poly1305, blind RSA, and HPKE.
+- `CGO_ENABLED=0 go test -p=1 ./...`, exit 0: protocol and server packages passed;
+  three packages had no test files. Initial compilation found two test-code
+  type/name issues; the successful rerun includes their fixes. Database-backed
+  tests remain opt-in and were not exercised by this command.
+- `CGO_ENABLED=1 go test -race -p=1 ./internal/protocol ./internal/server`,
+  exit 0: both packages passed in fresh isolated scratch. An earlier attempt
+  exhausted scratch after normal and race compilation shared a cache; the
+  successful standalone run kept the same resource limits.
+
+PostgreSQL integration, concurrent acceptance, rollback, and restart-continuity
+tests require disposable database URLs. They have not been exercised for this
+change: no approved offline PostgreSQL binaries are available. Seven top-level
+database tests use the opt-in helper; individual skip events were not captured
+by the default Go output. The foreign-owner key fixture is conditional on chown
+capability and is not independently evidenced here. Full browser rendering/E2E
+checks were not run for this change; browser-module tests are not E2E evidence.
+Production key
+permissions, encrypted off-host backup recovery, and signing-key rotation remain
+unverified. A focused static review of the protocol/browser changes reported no
+issues; it is not a complete security audit.
+
+Local bounded logs are under
+`/tmp/opencode/anonce-security-verification/logs/`: `run-rnnyo9ht.log` records
+Node/build results and the initial compilation failures; `run-z93wemgr.log`
+records passing interoperability and the remaining test compilation issue;
+`run-r_j8_map.log` records the passing full Go rerun; `run-xyr8gajw.log` records
+the passing standalone race check. These are local run evidence, not deployed
+artifacts or a reproducible production-environment claim.
+
 ## Backend: real PostgreSQL
 
 - Registration proposed-key proofs; password and recovery login; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, unknown/duplicate fields, body limits and CSRF.
@@ -20,6 +68,11 @@ focused source reviews constitute an audit or production-readiness approval.
 - Established Argon2id v19 parameters, exact 12-English-word BIP-39 checksum/entropy, Ed25519 derived authentication seeds and separate membership seed. Wrong password/phrase, modified metadata, nonce, revision and AAD must fail closed.
 - RFC 9474 randomized SHA384-PSS browser blind → Go issuer → browser unblind/verify interoperability, malformed messages, wrong review/key/hash/serial, signature lengths and prepared prefix; never replace the prescribed suite.
 - RFC 9180 X25519/HKDF-SHA256/ChaCha20-Poly1305 interop, wrong key/info/AAD/tag rejection, descriptor signature and certificate verification. Ensure no AES substitutions in wrapping or vault objects.
+- Receipt v2: compare Go/browser transcripts, response hash, key ID, and Ed25519
+  signature against `testdata/receipt-v2.json`; reject changed context, envelope,
+  signature, noncanonical encoding/timestamp, and unknown or duplicate fields.
+  Exercise maximum-U64 server-asserted timestamps without invalid date displays.
+  Accept explicitly trusted historical keys and reject removed or substituted keys.
 
 ## Browser flows
 
@@ -30,6 +83,13 @@ Use actual exports in `web/crypto.js` and tests/vectors in `web/crypto.test.js`,
 Test descriptor signature/profile/deployment/org/membership-key checks and server publication validation of reviewer account association; do not claim the account is independently certificate-bound. Expired certificates must still support historical decoding with signature/profile checks, while publication/issuance enforce current validity and revocation. No browser test can establish trusted signing time or historical approval/non-revocation.
 
 Test same-device unlock's nonextractable IndexedDB HKDF CryptoKey, in-memory ChaCha cache key and encrypted V/private state; logout must delete capability/cache and prevent pending writes restoring them. State explicitly that copied capabilities/profile backups, malicious served code and XSS are not defeated by password gating. Password/phrase changes preserve data, not repair old snapshots. Exercise the 256 KiB ciphertext boundary using serialized UTF-8 length plus 16-byte tag before issuance, including multibyte input and server rejection above the cap. Confirm `X-CSRF-Token`, `full`/`recovery` scopes and certificate `membership_id` responses.
+
+For receipt verification, test submitted, looked-up, and cached acceptance against
+the saved envelope and verified descriptor. Require receipt verification before
+reviewer decryption, ignore unsigned outer timestamps, and isolate invalid records.
+Check the public verifier without sign-in or upload, with explicit trust, 64 KiB
+UTF-8/file limits, stale asynchronous input guards, and escaped receipt values.
+Signature-only saved-file checks must not claim original-submission matching.
 
 ## Operations and independent review
 

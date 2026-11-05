@@ -4,6 +4,38 @@ import { request, setCSRF, jsonBytes, toWire, APIError } from './api.js';
 import { saveSealed, loadSealed, allEncrypted, getDeviceRecord, putDeviceRecord, deleteDeviceRecord } from './storage.js';
 
 let state, config, generation=0;
+export function getReceiptTrust() { return C.getReceiptTrust(); }
+// Scan JSON structure before parsing so duplicate keys cannot disappear during parsing.
+function receiptJSON(text) {
+  const invalid=()=>{throw new APIError('INVALID_RECEIPT','Invalid receipt or trust JSON.');};
+  if(typeof text!=='string'||text.length>65536||new TextEncoder().encode(text).length>65536)invalid();
+  let i=0;
+  const space=()=>{while(/[\x20\t\r\n]/.test(text[i]||'!'))i++;};
+  const string=()=>{const start=i++;while(i<text.length){const c=text[i++];if(c==='"'){try{return JSON.parse(text.slice(start,i));}catch{invalid();}}if(c==='\\')i++;}invalid();};
+  function value(depth=0) {
+    if(depth>32)invalid();space();
+    if(text[i]==='"'){string();return;}
+    if(text[i]==='{'||text[i]==='[') {
+      const object=text[i++]==='{',end=object?'}':']',keys=new Set();space();
+      if(text[i]===end){i++;return;}
+      for(;;){space();if(object){if(text[i]!=='"')invalid();const key=string();if(keys.has(key))invalid();keys.add(key);space();if(text[i++]!==':')invalid();}value(depth+1);space();if(text[i]===end){i++;return;}if(text[i++]!==',')invalid();}
+    }
+    const token=/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(i));
+    if(!token)invalid();i+=token[0].length;
+  }
+  value();space();if(i!==text.length)invalid();return JSON.parse(text);
+}
+export async function verifySavedReceipt({receiptText,trustText}) {
+  const receipt=receiptJSON(receiptText),trust=receiptJSON(trustText);
+  const schema=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+  const strings=(value,keys)=>keys.every(key=>typeof value[key]==='string');
+  const fields=['deployment_id','receipt_id','review_id','descriptor_hash','issuer_key_id','response_hash','accepted_at','receipt_key_id','signature'];
+  if(!schema(receipt,['v',...fields])||receipt.v!==2||!strings(receipt,fields)||
+    !schema(trust,['v','deployment_id','receipt_key_id','receipt_keys'])||trust.v!==1||!strings(trust,['deployment_id','receipt_key_id'])||
+    !Array.isArray(trust.receipt_keys)||!trust.receipt_keys.length||!trust.receipt_keys.every(key=>schema(key,['receipt_key_id','receipt_public_key'])&&strings(key,['receipt_key_id','receipt_public_key'])))
+    throw new APIError('INVALID_RECEIPT','Invalid receipt or trust JSON.');
+  return {receipt:await C.verifyReceiptSignature({receipt,trust})};
+}
 export function getSourceURL() {
   try {
     const url=new URL(config?.source_url);
@@ -41,7 +73,7 @@ async function initialize() {
   if (!config) {
     config = await request('/api/public/config', { anonymous:true });
     await C.initCrypto({ deploymentId:bytes(config.deployment_id), origin:location.origin,
-      caCertificate:bytes(config.ca_certificate), receiptPublicKey:bytes(config.receipt_public_key), receiptKeyId:bytes(config.receipt_key_id) });
+      caCertificate:bytes(config.ca_certificate), receiptKeys:config.receipt_keys, receiptKeyId:bytes(config.receipt_key_id) });
   }
   return config;
 }
@@ -305,18 +337,28 @@ async function finishPending(p) {
   return p;
 }
 async function checkedReceipt(p,receipt) {
-  const expectedSubmissionHash=await C.submissionHash(p.submission);
-  await C.verifyReceipt({receipt,expectedSubmissionHash});
+  const descriptorBytes=bytes(p.descriptor),descriptor=await C.verifyDescriptor({descriptorBytes,signature:bytes(p.descriptorSignature),expectedReviewId:bytes(p.reviewId)});
+  if(!p.submission||p.submission.review_id!==p.reviewId||p.submission.issuer_key_id!==descriptor.issuer_key_id||
+    p.submission.enc!==p.encrypted.enc||p.submission.ciphertext!==p.encrypted.ciphertext)
+    throw new APIError('INVALID_RECEIPT','The receipt does not match the pending response.');
+  receipt=await verifyEnvelopeReceipt({descriptorBytes,descriptor},p.submission,receipt);
   p.receipt=receipt;p.revision++;await pendingSave(p);return {status:'accepted',receipt};
+}
+async function verifyEnvelopeReceipt(p,envelope,receipt) {
+  const deploymentId=bytes(p.descriptor.deployment_id),reviewId=bytes(p.descriptor.review_id),issuerKeyId=bytes(p.descriptor.issuer_key_id);
+  const descriptorHash=await C.hashBytes(p.descriptorBytes);
+  const responseHash=await C.responseHash({deploymentId,reviewId,descriptorHash,issuerKeyId,enc:bytes(envelope.enc),ciphertext:bytes(envelope.ciphertext)});
+  return C.verifyReceipt({receipt,trust:C.getReceiptTrust(),expectedDeploymentId:deploymentId,expectedReviewId:reviewId,expectedDescriptorHash:descriptorHash,expectedIssuerKeyId:issuerKeyId,expectedResponseHash:responseHash});
 }
 export async function submitResponse({pendingId}) {
   let p=await local(pendingId);if(!p) throw new APIError('PENDING_NOT_FOUND','Sign in on the original browser to restore this pending response.');
-  if(p.receipt)return {status:'accepted',receipt:p.receipt};
+  if(p.receipt)return checkedReceipt(p,p.receipt);
   try {p=await finishPending(p);return await checkedReceipt(p,await request('/api/anon/submissions',{method:'POST',body:p.submission,anonymous:true}));}
   catch(e) {if(e.code==='NETWORK_ERROR')return {status:'pending',pendingId};throw e;}
 }
 export async function lookupReceipt({pendingId}) {
   const p=await local(pendingId);if(!p?.submission)return {status:'pending',pendingId};
+  if(p.receipt)return checkedReceipt(p,p.receipt);
   try {return await checkedReceipt(p,await request('/api/anon/receipts/lookup',{method:'POST',anonymous:true,body:{review_id:p.reviewId,issuer_key_id:p.submission.issuer_key_id,serial:p.authorization.serial}}));}
   catch(e) {if(['NOT_FOUND','not_found','NETWORK_ERROR'].includes(e.code))return {status:'pending',pendingId};throw e;}
 }
@@ -329,15 +371,19 @@ export async function listResponses({reviewId,after}) {
   if(!privateKey)throw new APIError('KEY_UNAVAILABLE','The encrypted reviewer key is unavailable.');
   const result=await request(`/api/member/reviews/${reviewId}/submissions${after?'?after='+encodeURIComponent(after):''}`),items=[];
   for(const item of result.items) {
+    let acceptedAt=null;
     try {
+    const receipt=await verifyEnvelopeReceipt(p,item,item.receipt);
+    if(item.id!==receipt.receipt_id)throw new Error('Receipt identifier mismatch');
+    acceptedAt=receipt.accepted_at;
     const decoded=await C.decryptResponse({...p,recipientPrivateKey:privateKey,enc:bytes(item.enc),ciphertext:bytes(item.ciphertext)});
     const answerMap=decoded.answers;
-    items.push({id:item.id,acceptedAt:item.accepted_at,status:'valid',answers:Object.entries(answerMap).map(([questionId,value])=>{
+    items.push({id:item.id,acceptedAt,status:'valid',answers:Object.entries(answerMap).map(([questionId,value])=>{
       const q=p.descriptor.questions.find(q=>q.id===questionId), label=v=>q?.choices.find(c=>c.id===v)?.label||v;
       return {questionId,value:Array.isArray(value)?value.map(label):label(value)};
     })});
     } catch {
-      items.push({id:item.id,acceptedAt:item.accepted_at,status:'invalid',error:'RESPONSE_UNREADABLE',answers:[]});
+      items.push({id:item.id,acceptedAt,status:'invalid',error:'RESPONSE_UNREADABLE',answers:[]});
     }
   }
   return {items,next:result.next??null};
