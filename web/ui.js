@@ -63,6 +63,28 @@ async function copyText(value, label = "Text") {
     toast(`Could not copy ${label.toLowerCase()}. Select and copy it manually.`, "error");
   }
 }
+function receiptHTML(receipt) {
+  const text = JSON.stringify(receipt, null, 2);
+  return `<div class="notice receipt-notice"><strong>Response accepted.</strong><p>Save this signed receipt for your records.</p><pre class="receipt-data">${esc(text)}</pre><div class="receipt-actions"><button type="button" class="button secondary" data-receipt-copy>Copy receipt</button><button type="button" class="button secondary" data-receipt-download>Download receipt</button></div></div>`;
+}
+function bindReceiptTools(box, receipt) {
+  const text = JSON.stringify(receipt, null, 2);
+  box.querySelector("[data-receipt-copy]").onclick = () => copyText(text, "Receipt");
+  box.querySelector("[data-receipt-download]").onclick = () => {
+    const blob = new Blob([`${text}\n`], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "anonce-receipt.json";
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+  };
+}
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
 }
@@ -862,7 +884,9 @@ async function renderRespond(id) {
           if (x.status !== "accepted")
             x = await api.submitResponse({ pendingId });
           if (x.status === "accepted") {
-            box.innerHTML = `<div class="notice">Response accepted. Receipt: <strong>${esc(x.receipt)}</strong></div>`;
+            box.innerHTML = receiptHTML(x.receipt);
+            renderButtonIcons(box);
+            bindReceiptTools(box, x.receipt);
           } else
             state.textContent =
               "Still processing. You can check again shortly.";
@@ -875,7 +899,9 @@ async function renderRespond(id) {
       };
     } else {
       document.querySelector("#respond").classList.add("hidden");
-      box.innerHTML = `<div class="notice"><strong>Response accepted.</strong> Save this receipt for your records.<p>${esc(result.receipt)}</p></div>`;
+      box.innerHTML = receiptHTML(result.receipt);
+      renderButtonIcons(box);
+      bindReceiptTools(box, result.receipt);
     }
   });
 }

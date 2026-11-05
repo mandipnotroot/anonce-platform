@@ -37,6 +37,10 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Hide completed response forms and separate receipt content and actions with
+  consistent spacing, keeping long receipt values within narrow screens.
+- Display complete signed response receipts as readable JSON instead of
+  `[object Object]`, with copy and download controls after acceptance or retry.
 - Show request and form failures in shared toast notifications instead of duplicate
   inline errors or browser alerts, with safe error-specific guidance and readable
   fallbacks for malformed server errors.

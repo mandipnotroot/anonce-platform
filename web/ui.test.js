@@ -127,3 +127,57 @@ test("workspace navigation keeps complete accessible names and compact mobile la
   assert.match(styles, /@media \(max-width:640px\)[\s\S]*?grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(styles, /\.nav a\.active \{ box-shadow: inset 0 -2px 0 var\(--blue\) \}/);
 });
+
+test("accepted signed receipts render complete escaped JSON for initial and retry acceptance", () => {
+  const receiptSource = source.slice(source.indexOf("function receiptHTML("), source.indexOf("function icon("));
+  const receipt = {
+    version: 1,
+    signature: "sig<&>",
+    issuer: { keyId: "key-1", proof: "complete-proof" },
+  };
+  const escaped = JSON.stringify(receipt, null, 2)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+  const escapeSource = source.slice(source.indexOf("const esc ="), source.indexOf("const path ="));
+  const { rendered } = vm.runInNewContext(`${escapeSource}\n${receiptSource}\n({ rendered: receiptHTML(receipt) })`, { receipt });
+  assert.ok(rendered.includes(`<pre class="receipt-data">${escaped}</pre>`));
+  assert.match(rendered, /data-receipt-copy/);
+  assert.match(rendered, /data-receipt-download/);
+  assert.doesNotMatch(rendered, /\[object Object\]/);
+  assert.match(source, /box\.innerHTML = receiptHTML\(x\.receipt\);[\s\S]*?bindReceiptTools\(box, x\.receipt\)/);
+  assert.match(source, /box\.innerHTML = receiptHTML\(result\.receipt\);[\s\S]*?bindReceiptTools\(box, result\.receipt\)/);
+});
+
+test("receipt tools copy and download complete formatted JSON", async () => {
+  const receipt = { signature: "full-signature", nested: { proof: "complete-proof" } };
+  const copied = [];
+  let blob;
+  const callbacks = {};
+  const box = { querySelector(selector) { return { set onclick(callback) { callbacks[selector] = callback; } }; } };
+  const sourceTools = source.slice(source.indexOf("function bindReceiptTools("), source.indexOf("function icon("));
+  const context = {
+    JSON,
+    Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; blob = this; } },
+    URL: { createObjectURL() { return "blob:receipt"; }, revokeObjectURL() {} },
+    document: { body: { appendChild() {} }, createElement() { return { click() {}, remove() {} }; } },
+    copyText: async (text, label) => copied.push({ text, label }),
+  };
+  vm.runInNewContext(`${sourceTools}\nbindReceiptTools(box, receipt);`, { ...context, box, receipt });
+  await callbacks["[data-receipt-copy]"]();
+  callbacks["[data-receipt-download]"]();
+  const expected = JSON.stringify(receipt, null, 2);
+  assert.deepEqual(copied, [{ text: expected, label: "Receipt" }]);
+  assert.equal(blob.parts[0], `${expected}\n`);
+  assert.equal(blob.type, "application/json;charset=utf-8");
+});
+
+test("receipt JSON wraps within narrow layouts", () => {
+  assert.match(styles, /\.receipt-data\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(styles, /\.receipt-data\s*\{[^}]*max-width:\s*100%/);
+  assert.match(styles, /\.hidden\s*\{\s*display:\s*none/);
+  assert.match(styles, /\.receipt-notice\s*\{\s*margin-top:\s*18px/);
+  assert.match(styles, /\.receipt-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*10px/);
+  assert.match(source, /receipt-notice[\s\S]*?receipt-actions/);
+});

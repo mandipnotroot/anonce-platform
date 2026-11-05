@@ -182,6 +182,9 @@ a {
   padding: 24px;
   margin-bottom: 16px
 }
+.hidden {
+  display: none
+}
 .form-card {
   padding: 30px
 }
@@ -360,6 +363,23 @@ textarea {
 .alert { margin-bottom: 14px }
 .notice {
   border-left-color:#337750
+}
+.receipt-notice {
+  margin-top: 18px
+}
+.receipt-data {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word
+}
+.receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px
 }
 .inline,.toolbar {
   display: flex;
