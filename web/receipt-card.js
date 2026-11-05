@@ -7,10 +7,15 @@ const rounded = (ctx, x, y, width, height, radius) => {
 };
 
 export async function renderReceiptPNG({ receipt }) {
-  if (!receipt || typeof receipt !== "object") throw new Error("Receipt unavailable.");
+  if (!receipt || typeof receipt !== "object")
+    throw new Error("Receipt unavailable.");
   const qr = await createReceiptQRCanvas({ receipt });
-  if (!(qr instanceof HTMLCanvasElement)) throw new Error("Receipt QR could not be created.");
-  if (qr.width > 992 || qr.height > 992) throw new Error("Receipt QR is too large for this card. Receipt PNG download is unavailable.");
+  if (!(qr instanceof HTMLCanvasElement))
+    throw new Error("Receipt QR could not be created.");
+  if (qr.width > 992 || qr.height > 992)
+    throw new Error(
+      "Receipt QR is too large for this card. Receipt PNG download is unavailable.",
+    );
 
   const canvas = document.createElement("canvas");
   canvas.width = 1200;
@@ -74,18 +79,36 @@ export async function renderReceiptPNG({ receipt }) {
   ctx.textAlign = "left";
   ctx.fillStyle = "#547069";
   ctx.font = "500 18px Arial, sans-serif";
-  ctx.fillText("Acceptance only. This does not prove response contents or storage.", 118, captionY + 58);
-  ctx.fillText("Verify at this site: Anonce / Verify receipt", 118, captionY + 92);
+  ctx.fillText(
+    "Acceptance only. This does not prove response contents or storage.",
+    118,
+    captionY + 58,
+  );
+  ctx.fillText(
+    "Verify at this site: Anonce / Verify receipt",
+    118,
+    captionY + 92,
+  );
 
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Receipt PNG could not be created.")), "image/png");
+    canvas.toBlob(
+      (blob) =>
+        blob
+          ? resolve(blob)
+          : reject(new Error("Receipt PNG could not be created.")),
+      "image/png",
+    );
   });
 }
 
 function formatTime(value) {
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "Acceptance time unavailable";
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value))
+    return "Acceptance time unavailable";
   const seconds = BigInt(value);
-  if (seconds > 8640000000000n) return `Unix time ${value} (outside display range)`;
+  if (seconds > 8640000000000n)
+    return `Unix time ${value} (outside display range)`;
   const date = new Date(Number(seconds) * 1000);
-  return Number.isNaN(date.getTime()) ? `Unix time ${value}` : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? `Unix time ${value}`
+    : date.toLocaleString();
 }

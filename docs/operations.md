@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Operations (pre-release)
 
 **Not approved for sensitive production data.** Historical smoke, restore and
 Node 24 HTTPS browser checks do not validate the current revision or a public
 deployment. See [verification evidence](verification.md) for results and open gates.
 
-| Prerequisite | Contract |
-| --- | --- |
-| Runtime | Docker Compose v2; PostgreSQL `18.6-alpine3.24`; Go 1.27.3 and Node.js 26.12.1 image build toolchains |
-| Public ingress | DNS for one domain; inbound TCP 80/443; optionally allow UDP 443 for HTTP/3 |
-| Published ports | Compose publishes TCP 80/443 and UDP 443 through Caddy only |
-| User flows | Browser-only, same-origin HTTPS |
+| Prerequisite    | Contract                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| Runtime         | Docker Compose v2; PostgreSQL `18.6-alpine3.24`; Go 1.27.3 and Node.js 26.12.1 image build toolchains |
+| Public ingress  | DNS for one domain; inbound TCP 80/443; optionally allow UDP 443 for HTTP/3                           |
+| Published ports | Compose publishes TCP 80/443 and UDP 443 through Caddy only                                           |
+| User flows      | Browser-only, same-origin HTTPS                                                                       |
 
 ## Deployment contracts
 
@@ -43,18 +44,18 @@ the vanilla app/API/UI files. Docker copies both `scripts/` and `web/` for this 
 Copy `.env.example` to `.env`; fill every blank with strong distinct credentials,
 correct role URLs (URL-encode passwords), public domain, and reviewed init path.
 
-| Variable | Required / default | Purpose |
-| --- | --- | --- |
-| `ANONCE_DOMAIN` | Required; example `feedback.example.org` | Public host; Compose derives `ANONCE_ORIGIN=https://<host>` |
-| `ANONCE_SOURCE_URL` | Required | Exact complete corresponding deployed source |
-| `POSTGRES_PASSWORD` | Required; blank example | Database administrator password |
-| `ANONCE_MEMBER_DB_PASSWORD`, `ANONCE_ANON_DB_PASSWORD` | Required; blank example | Distinct initialization role passwords |
-| `DATABASE_URL`, `ANON_DATABASE_URL` | Required; blank example | Matching member/migration and restricted anonymous URLs; percent-encode passwords |
-| `ANONCE_DB_INIT_DIR` | Default `./db/init` | Reviewed nonempty initialization scripts |
-| `ANONCE_DB_VOLUME` | Optional; `<Compose project>_pgdata` | Persistent database volume; a new unused name initializes empty data |
-| `ANONCE_SERVER_KEY_FILE` | Required; example `./secrets/server_key` | Host master-key file |
-| `ANONCE_RECEIPT_TRUST_FILE` | Optional; empty | Container path to separately mounted public trust document |
-| `ANONCE_ADDR`, `ANONCE_WEB_DIR`, `ANONCE_KEY_FILE` | Compose fixes `:8080`, `/app/web`, `/run/secrets/server_key` | Internal runtime settings, not `.env` overrides in this Compose file |
+| Variable                                               | Required / default                                           | Purpose                                                                           |
+| ------------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `ANONCE_DOMAIN`                                        | Required; example `feedback.example.org`                     | Public host; Compose derives `ANONCE_ORIGIN=https://<host>`                       |
+| `ANONCE_SOURCE_URL`                                    | Required                                                     | Exact complete corresponding deployed source                                      |
+| `POSTGRES_PASSWORD`                                    | Required; blank example                                      | Database administrator password                                                   |
+| `ANONCE_MEMBER_DB_PASSWORD`, `ANONCE_ANON_DB_PASSWORD` | Required; blank example                                      | Distinct initialization role passwords                                            |
+| `DATABASE_URL`, `ANON_DATABASE_URL`                    | Required; blank example                                      | Matching member/migration and restricted anonymous URLs; percent-encode passwords |
+| `ANONCE_DB_INIT_DIR`                                   | Default `./db/init`                                          | Reviewed nonempty initialization scripts                                          |
+| `ANONCE_DB_VOLUME`                                     | Optional; `<Compose project>_pgdata`                         | Persistent database volume; a new unused name initializes empty data              |
+| `ANONCE_SERVER_KEY_FILE`                               | Required; example `./secrets/server_key`                     | Host master-key file                                                              |
+| `ANONCE_RECEIPT_TRUST_FILE`                            | Optional; empty                                              | Container path to separately mounted public trust document                        |
+| `ANONCE_ADDR`, `ANONCE_WEB_DIR`, `ANONCE_KEY_FILE`     | Compose fixes `:8080`, `/app/web`, `/run/secrets/server_key` | Internal runtime settings, not `.env` overrides in this Compose file              |
 
 Generate the server key locally using an operator CLI:
 
@@ -148,15 +149,15 @@ against malicious served code or traffic correlation.
 Use the same project and override flags as startup. Never print resolved secret
 configuration or attach keys, dumps, or credentials to reports.
 
-| Symptom | Safe check / action |
-| --- | --- |
-| Compose rejects configuration | Run `docker compose config --quiet`; compare required variable names with `.env.example`, not a shared resolved-config dump |
-| Database initialization rejected | Confirm the configured init directory contains reviewed nonempty scripts; initialization only runs on an empty volume |
-| Changed role password has no effect | Existing volumes do not rerun initialization; do not delete data to fix credentials |
-| App fails to read key | Check runtime UID mapping, regular-file ownership and mode `0400`; never fix with world-readable permissions |
-| Local HTTPS untrusted/unreachable | Check hosts mapping, firewall, published ports and verified local CA trust; do not disable public TLS validation |
-| Proxy cannot write existing volumes | Check `/data` and `/config` ownership offline; rebuilding does not change existing root-owned volumes |
-| Services not ready | Run `docker compose ps`; check database health, matching role URLs, configured origin and key access without exposing secret values |
+| Symptom                             | Safe check / action                                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Compose rejects configuration       | Run `docker compose config --quiet`; compare required variable names with `.env.example`, not a shared resolved-config dump         |
+| Database initialization rejected    | Confirm the configured init directory contains reviewed nonempty scripts; initialization only runs on an empty volume               |
+| Changed role password has no effect | Existing volumes do not rerun initialization; do not delete data to fix credentials                                                 |
+| App fails to read key               | Check runtime UID mapping, regular-file ownership and mode `0400`; never fix with world-readable permissions                        |
+| Local HTTPS untrusted/unreachable   | Check hosts mapping, firewall, published ports and verified local CA trust; do not disable public TLS validation                    |
+| Proxy cannot write existing volumes | Check `/data` and `/config` ownership offline; rebuilding does not change existing root-owned volumes                               |
+| Services not ready                  | Run `docker compose ps`; check database health, matching role URLs, configured origin and key access without exposing secret values |
 
 ## Backup and restore
 

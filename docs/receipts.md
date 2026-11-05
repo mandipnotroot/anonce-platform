@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Save and verify a receipt
 
 ## After submitting a response
@@ -38,12 +39,12 @@ sharing it; its contents are public, but substituting them changes whom you trus
 
 ## Interpret the result
 
-| Result or check | What it establishes |
-| --- | --- |
-| **Receipt signature verified** | A key in the selected trust configuration signed the deployment's acceptance statement. Historical keys work only while retained in that trusted configuration. |
-| Receipt file alone | Signature authenticity, not a match to an independently held original submission. |
-| Live submission and reviewer checks | Also bind the encrypted response hash and review context. |
-| Signed acceptance time | A server assertion, not an independently trusted timestamp. Other displayed timestamps are not necessarily signed. |
+| Result or check                     | What it establishes                                                                                                                                             |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Receipt signature verified**      | A key in the selected trust configuration signed the deployment's acceptance statement. Historical keys work only while retained in that trusted configuration. |
+| Receipt file alone                  | Signature authenticity, not a match to an independently held original submission.                                                                               |
+| Live submission and reviewer checks | Also bind the encrypted response hash and review context.                                                                                                       |
+| Signed acceptance time              | A server assertion, not an independently trusted timestamp. Other displayed timestamps are not necessarily signed.                                              |
 
 No receipt proves correct answers, permanent storage, complete results, or anonymity. Verification trusts the browser and served code; it does not protect against hostile JavaScript, operators, or network/timing correlation. Database tampering can delete or replay records, roll back history, or remove spend state and reuse stored authorizations through the signing service. A valid receipt does not establish complete database integrity.
 

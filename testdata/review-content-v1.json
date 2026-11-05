@@ -11,7 +11,13 @@
     "title": "Private review",
     "description": "Only invitation holders can read this.",
     "questions": [
-      { "id": "q1", "type": "text", "label": "Private question", "required": true, "choices": [] }
+      {
+        "id": "q1",
+        "type": "text",
+        "label": "Private question",
+        "required": true,
+        "choices": []
+      }
     ]
   },
   "aad_hex": "414e4f4e434501000e7265766965772d636f6e74656e74000400000020010101010101010101010101010101010101010101010101010101010101010100000010010101010101010101010101010101010000001002020202020202020202020202020202000000080000000000000001",

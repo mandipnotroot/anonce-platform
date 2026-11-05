@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Repository guidance
 
 This guidance applies to all contributors and automated coding tools working in
@@ -6,6 +7,7 @@ this repository. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the
 contribution process. Nested guidance may add requirements for its directory.
 
 ## Mandatory references
+
 - Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
   Use `type(scope): description`; mark breaking changes with `!` or a
   `BREAKING CHANGE:` footer. Use `feat` for features and `fix` for bug fixes.
@@ -19,6 +21,7 @@ contribution process. Nested guidance may add requirements for its directory.
   module exists, agree on a supported version; never assume the newest features.
 
 ## Contribution workflow
+
 - Use your own contributor identity and Git configuration. Never attribute a
   contribution to another person or require a maintainer's author identity.
 - Original sources must carry `SPDX-License-Identifier: AGPL-3.0-only` in an
@@ -35,6 +38,7 @@ contribution process. Nested guidance may add requirements for its directory.
   or upgrade migrations. Keep schema initialization and versioning as needed.
 
 ## Architecture
+
 - Build a Go standard-library-first modular monolith with explicit boundaries.
   Justify external dependencies; established cryptographic libraries are required
   where the standard library lacks the prescribed primitive.
@@ -52,6 +56,7 @@ contribution process. Nested guidance may add requirements for its directory.
   available, use it; no particular editor, agent, or paid tool is required.
 
 ## Security and privacy invariants
+
 - Never implement cryptographic primitives. Use established implementations of
   Argon2id, ChaCha20-Poly1305, Ed25519, X25519, RFC 9474 RSA blind signatures,
   SHA-256, HKDF-SHA-256, and X.509 with Ed25519.
@@ -76,6 +81,7 @@ contribution process. Nested guidance may add requirements for its directory.
   concurrent requests and retries; fail closed on invalid cryptographic input.
 
 ## Verification and evidence
+
 - Run focused checks appropriate to changed behavior, including negative cases
   and security/concurrency boundaries. Record exact commands, exit statuses,
   results, and skipped checks with reasons.

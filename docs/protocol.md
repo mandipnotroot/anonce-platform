@@ -1,20 +1,21 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Protocol contracts
 
 Normative formats; implementation and verification status are separate. HTTP fields and endpoints are defined in [openapi.yaml](openapi.yaml); system trust boundaries are in [architecture.md](architecture.md).
 
 ## Encoding
 
-| Value | Encoding |
-| --- | --- |
-| Binary JSON fields | Canonical unpadded base64url |
-| Random object/account/review IDs | 16 bytes |
-| Deployment IDs, hashes, challenge nonces, token serials | 32 bytes |
-| Revisions, credential epochs, timestamps | Decimal JSON strings; unsigned U64BE in transcripts. Timestamps use Unix seconds. |
-| Raw Ed25519/X25519 public keys | 32 bytes |
-| Ed25519 signatures | 64 bytes |
-| Certificates / RSA public keys | DER X.509 / DER SubjectPublicKeyInfo |
-| ChaCha20-Poly1305 nonces / tags | 12 bytes / 16 bytes |
+| Value                                                   | Encoding                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Binary JSON fields                                      | Canonical unpadded base64url                                                      |
+| Random object/account/review IDs                        | 16 bytes                                                                          |
+| Deployment IDs, hashes, challenge nonces, token serials | 32 bytes                                                                          |
+| Revisions, credential epochs, timestamps                | Decimal JSON strings; unsigned U64BE in transcripts. Timestamps use Unix seconds. |
+| Raw Ed25519/X25519 public keys                          | 32 bytes                                                                          |
+| Ed25519 signatures                                      | 64 bytes                                                                          |
+| Certificates / RSA public keys                          | DER X.509 / DER SubjectPublicKeyInfo                                              |
+| ChaCha20-Poly1305 nonces / tags                         | 12 bytes / 16 bytes                                                               |
 
 Reject invalid lengths, noncanonical encodings, duplicate or unknown JSON fields, and trailing JSON values. Trailing JSON whitespace is allowed.
 
@@ -26,13 +27,13 @@ Authenticated mutation envelope: `{payload: base64url(exact JSON bytes), proof: 
 
 `E('challenge',deployment_id,UTF8(origin),account_id,challenge_id,UTF8(action),U64(credential_epoch),payload_hash,nonce,U64(expires_at))`.
 
-| Challenge rule | Behavior |
-| --- | --- |
-| Origin | Browser's known configured origin, not an untrusted response value |
-| Lifetime | Five minutes; one-use |
-| Session binding | Required except for `register`, `login-password`, and `login-recovery` |
-| Registration | Epoch 0; verifies proposed public keys |
-| Mutation proof | Membership by default; credential actions also require API-specified proofs |
+| Challenge rule  | Behavior                                                                    |
+| --------------- | --------------------------------------------------------------------------- |
+| Origin          | Browser's known configured origin, not an untrusted response value          |
+| Lifetime        | Five minutes; one-use                                                       |
+| Session binding | Required except for `register`, `login-password`, and `login-recovery`      |
+| Registration    | Epoch 0; verifies proposed public keys                                      |
+| Mutation proof  | Membership by default; credential actions also require API-specified proofs |
 
 - Password KDF parameters: `{v:19,salt,memory_kib:65536,iterations:3,parallelism:1,length:32}`, salt 16 bytes.
 - `P = Argon2id(password,salt,v=19,m=65536 KiB,t=3,p=1,len=32)`.
@@ -48,21 +49,21 @@ Authenticated mutation envelope: `{payload: base64url(exact JSON bytes), proof: 
 
 Generate random 32-byte master key `V`; wrap it independently for password and recovery. **All wrapping and vault-object encryption uses ChaCha20-Poly1305, never AES**, with fresh random 12-byte nonces. Ciphertext includes the authentication tag.
 
-| Wrapper field or derivation | Value |
-| --- | --- |
-| JSON | `{v:1,id,nonce,ciphertext}`, id 16 bytes |
-| AAD | `E('vault-wrap',deployment,account,UTF8(kind),wrapper_id,metadata_hash)` |
-| Kind | `password` or `recovery` |
-| Password metadata hash | `SHA256(E('password-params',salt,U64(19),U64(65536),U64(3),U64(1),U64(32)))` |
-| Recovery metadata hash | `SHA256(E('recovery-params',recovery_salt))` |
+| Wrapper field or derivation | Value                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| JSON                        | `{v:1,id,nonce,ciphertext}`, id 16 bytes                                     |
+| AAD                         | `E('vault-wrap',deployment,account,UTF8(kind),wrapper_id,metadata_hash)`     |
+| Kind                        | `password` or `recovery`                                                     |
+| Password metadata hash      | `SHA256(E('password-params',salt,U64(19),U64(65536),U64(3),U64(1),U64(32)))` |
+| Recovery metadata hash      | `SHA256(E('recovery-params',recovery_salt))`                                 |
 
-| Vault object field or operation | Value |
-| --- | --- |
-| JSON | `{v:1,id,revision,nonce,ciphertext}` |
-| Key | `HKDF(V,SHA256(E('vault-kdf',deployment,account,object_id)),E('vault-object'),32)` |
-| AAD | `E('vault-object',deployment,account,object_id,U64(revision))` |
-| CAS | `expected_revision="0"` creates revision `"1"`; updates increment by one |
-| Contents | Membership seed, review content and recipient keys, pending issuance state, tokens, and exact pending submissions; plaintext never reaches the server |
+| Vault object field or operation | Value                                                                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON                            | `{v:1,id,revision,nonce,ciphertext}`                                                                                                                  |
+| Key                             | `HKDF(V,SHA256(E('vault-kdf',deployment,account,object_id)),E('vault-object'),32)`                                                                    |
+| AAD                             | `E('vault-object',deployment,account,object_id,U64(revision))`                                                                                        |
+| CAS                             | `expected_revision="0"` creates revision `"1"`; updates increment by one                                                                              |
+| Contents                        | Membership seed, review content and recipient keys, pending issuance state, tokens, and exact pending submissions; plaintext never reaches the server |
 
 - Same-device automatic unlock persists a nonextractable HKDF CryptoKey in IndexedDB and derives an in-memory ChaCha cache key for encrypted V/private state.
 - This trusted-origin capability is not password-gated defense against malicious served code, XSS, or profile backups.
@@ -152,22 +153,22 @@ closed rather than producing empty questions. There is no content-key rotation
 or reviewer key-distribution mechanism in this contract. Deleting a draft removes
 its creator vault object, not copies, historical snapshots, or operation caches.
 
-| Verification | Scope and limit |
-| --- | --- |
-| Browser | Descriptor signature, certificate signatures/profile, deployment, organization, and certified membership key |
-| Creator association | Server authorizes publication using its internal creator/membership records; public descriptor contains no account ID |
-| Historical decoding | Ignores current certificate validity while retaining signature/profile checks, preserving decryption after expiry |
-| Backend publication/issuance | Enforces current validity and membership revocation |
-| Unproven history | Browser checks cannot establish signing time, historical approval, or non-revocation; no trusted timestamp is provided |
+| Verification                 | Scope and limit                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Browser                      | Descriptor signature, certificate signatures/profile, deployment, organization, and certified membership key           |
+| Creator association          | Server authorizes publication using its internal creator/membership records; public descriptor contains no account ID  |
+| Historical decoding          | Ignores current certificate validity while retaining signature/profile checks, preserving decryption after expiry      |
+| Backend publication/issuance | Enforces current validity and membership revocation                                                                    |
+| Unproven history             | Browser checks cannot establish signing time, historical approval, or non-revocation; no trusted timestamp is provided |
 
-| Blind authorization parameter | Value |
-| --- | --- |
-| Dedicated review RSA key | 3072 bits, exponent 65537 |
-| RFC 9474 variant | **RSABSSA-SHA384-PSS-Randomized** |
-| Hash / MGF / salt | SHA-384 / MGF1-SHA384 / 48 bytes; necessary exception to application SHA-256 |
-| Authorization message | `E('authorization',deployment,review_id,descriptor_hash,issuer_key_id,serial)` |
-| Serial / RFC preparation prefix | Random 32 bytes each |
-| RSA signatures / blinded messages | 384 bytes |
+| Blind authorization parameter     | Value                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| Dedicated review RSA key          | 3072 bits, exponent 65537                                                      |
+| RFC 9474 variant                  | **RSABSSA-SHA384-PSS-Randomized**                                              |
+| Hash / MGF / salt                 | SHA-384 / MGF1-SHA384 / 48 bytes; necessary exception to application SHA-256   |
+| Authorization message             | `E('authorization',deployment,review_id,descriptor_hash,issuer_key_id,serial)` |
+| Serial / RFC preparation prefix   | Random 32 bytes each                                                           |
+| RSA signatures / blinded messages | 384 bytes                                                                      |
 
 Use established libraries, not homegrown primitives.
 
@@ -183,11 +184,11 @@ Browser encrypts pending `{request_id,serial,descriptor_hash,prepared_message,bl
 
 RFC 9180 HPKE base mode: X25519/HKDF-SHA256/ChaCha20-Poly1305, suite `0x0020/0x0001/0x0003`. Info is `E('response-hpke',deployment,review_id,descriptor_hash)`; AAD is `E('response-aad',deployment,review_id,descriptor_hash)`. Plaintext JSON: `{v:1,review_id,descriptor_hash,answers:{question_id:string|array}}`. Validate answers against the authenticated decrypted descriptor content in the browser; server cannot inspect plaintext.
 
-| Size boundary | Bytes | Meaning |
-| --- | ---: | --- |
-| Authenticated pending-object plaintext | 524288 | Fixed space-padded JSON before vault encryption |
-| Authenticated pending-object ciphertext | 524304 | Padded plaintext plus authentication tag |
-| Anonymous response ciphertext maximum | 262144 | HPKE ciphertext including tag, excluding base64url expansion |
+| Size boundary                           |  Bytes | Meaning                                                      |
+| --------------------------------------- | -----: | ------------------------------------------------------------ |
+| Authenticated pending-object plaintext  | 524288 | Fixed space-padded JSON before vault encryption              |
+| Authenticated pending-object ciphertext | 524304 | Padded plaintext plus authentication tag                     |
+| Anonymous response ciphertext maximum   | 262144 | HPKE ciphertext including tag, excluding base64url expansion |
 
 These are different objects and limits. Before issuance, the browser preflights the exact response plaintext UTF-8 length plus the 16-byte tag; the server rejects oversized response ciphertext.
 

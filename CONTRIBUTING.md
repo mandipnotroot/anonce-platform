@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Contributing to Anonce
 
 Development happens at https://github.com/mandipnotroot/anonce-platform.
@@ -32,6 +33,7 @@ before merging.
 ## Standards
 
 Required standards:
+
 - [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
 - [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
 - [JetBrains modern Go guidelines](https://github.com/JetBrains/go-modern-guidelines),

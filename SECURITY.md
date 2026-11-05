@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Security policy
 
 Anonce is under development, with no released or supported production version.

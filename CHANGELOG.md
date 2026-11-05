@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Changelog
 
 Notable changes are curated here following
@@ -9,6 +10,7 @@ No version has been released.
 ## Unreleased
 
 ### Added
+
 - Browser-side encryption of review titles, descriptions, and complete questions,
   including drafts, with separate invitation-link content keys and answer keys.
   Secret links permit question reading, not membership or answer decryption.
@@ -35,6 +37,7 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+
 - Minimize review metadata disclosure: descriptor v3 omits account IDs, quotas,
   and schedules. Member responses use a creator flag and restrict review settings
   and activity counters to creators. Server-side quota/schedule enforcement remains
@@ -86,6 +89,7 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+
 - Decode receipt PNGs without blob image URLs blocked by the site's security
   policy, and load public signing keys when opening the verifier directly.
 - Verify signed receipt context before returning cached acceptance or decrypting
@@ -119,6 +123,7 @@ No version has been released.
 - Quote the Compose tmpfs mount so its security options remain a single entry.
 
 ### Security
+
 - Pad authenticated issuance pending objects to a fixed plaintext size to prevent
   direct response-length linkage for new objects. Previously retained objects,
   timing correlation and other documented trust limitations remain out of scope.

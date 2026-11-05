@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Anonce
 
 Private, anonymous feedback for verified members. A Go/PostgreSQL modular

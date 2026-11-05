@@ -26,11 +26,16 @@ const routeHash = () => location.hash.replace(/^#/, "");
 const path = () =>
   routeHash().replace(/^\/?/, "").split(/[?]/, 1)[0].split("/").filter(Boolean);
 function responseInvitation() {
-  try { return api.parseResponseInvitation(location.hash); }
-  catch { return { invalid: true, missingKey: !location.hash.includes("?") }; }
+  try {
+    return api.parseResponseInvitation(location.hash);
+  } catch {
+    return { invalid: true, missingKey: !location.hash.includes("?") };
+  }
 }
 function authHref(mode) {
-  return returnRoute ? `#/${mode}?next=${encodeURIComponent(returnRoute)}` : `#/${mode}`;
+  return returnRoute
+    ? `#/${mode}?next=${encodeURIComponent(returnRoute)}`
+    : `#/${mode}`;
 }
 const go = (p) => {
   const next = "/" + String(p).replace(/^\/+/, "");
@@ -40,7 +45,12 @@ const go = (p) => {
   }
   location.hash = next;
 };
-const say = (e) => typeof e === "string" ? e : typeof e?.message === "string" ? e.message : "Something went wrong. Please try again.";
+const say = (e) =>
+  typeof e === "string"
+    ? e
+    : typeof e?.message === "string"
+      ? e.message
+      : "Something went wrong. Please try again.";
 function toast(message, type = "error") {
   let region = document.querySelector("#toast-region");
   if (!region) {
@@ -71,11 +81,15 @@ function toast(message, type = "error") {
 }
 async function copyText(value, label = "Text") {
   try {
-    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    if (!navigator.clipboard?.writeText)
+      throw new Error("Clipboard unavailable");
     await navigator.clipboard.writeText(value);
     toast(`${label} copied.`, "success");
   } catch {
-    toast(`Could not copy ${label.toLowerCase()}. Select and copy it manually.`, "error");
+    toast(
+      `Could not copy ${label.toLowerCase()}. Select and copy it manually.`,
+      "error",
+    );
   }
 }
 function receiptHTML(receipt) {
@@ -85,7 +99,8 @@ function receiptHTML(receipt) {
 }
 function bindReceiptTools(box, receipt) {
   const text = JSON.stringify(receipt, null, 2);
-  box.querySelector("[data-receipt-copy]").onclick = () => copyText(text, "Receipt");
+  box.querySelector("[data-receipt-copy]").onclick = () =>
+    copyText(text, "Receipt");
   const download = box.querySelector("[data-receipt-download]");
   download.onclick = async () => {
     if (download.disabled || !download.isConnected) return;
@@ -104,7 +119,8 @@ function bindReceiptTools(box, receipt) {
       link.remove();
       toast("Receipt PNG download started.", "success");
     } catch (error) {
-      if (download.isConnected) toast(`Could not create receipt PNG. ${say(error)}`);
+      if (download.isConnected)
+        toast(`Could not create receipt PNG. ${say(error)}`);
     } finally {
       if (url) URL.revokeObjectURL(url);
       if (download.isConnected) {
@@ -117,15 +133,32 @@ function bindReceiptTools(box, receipt) {
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
 }
-const buttonIcons = [[/copy/i, "copy"], [/download|export/i, "download"], [/create|new|add/i, "plus"], [/remove|revoke/i, "trash-2"], [/sign in|accept|continue|send|save|approve|update/i, "check"], [/manage|open|respond|status|retry|back/i, "arrow-right"], [/rotate/i, "rotate-cw"], [/share/i, "share-2"], [/publish/i, "check"], [/close/i, "x"]];
+const buttonIcons = [
+  [/copy/i, "copy"],
+  [/download|export/i, "download"],
+  [/create|new|add/i, "plus"],
+  [/remove|revoke/i, "trash-2"],
+  [/sign in|accept|continue|send|save|approve|update/i, "check"],
+  [/manage|open|respond|status|retry|back/i, "arrow-right"],
+  [/rotate/i, "rotate-cw"],
+  [/share/i, "share-2"],
+  [/publish/i, "check"],
+  [/close/i, "x"],
+];
 function renderButtonIcons(scope = root) {
   scope.querySelectorAll(".button").forEach((control) => {
     const existing = control.querySelector(".icon");
     if (existing) {
-      control.dataset.icon ||= existing.getAttribute("src")?.split("/").at(-1).replace(/\.svg$/, "");
+      control.dataset.icon ||= existing
+        .getAttribute("src")
+        ?.split("/")
+        .at(-1)
+        .replace(/\.svg$/, "");
       return;
     }
-    const name = buttonIcons.find(([pattern]) => pattern.test(control.textContent))?.[1] || "arrow-right";
+    const name =
+      buttonIcons.find(([pattern]) => pattern.test(control.textContent))?.[1] ||
+      "arrow-right";
     control.dataset.icon = name;
     control.insertAdjacentHTML("afterbegin", icon(name));
   });
@@ -140,7 +173,10 @@ function frame(body, title = "Workspace") {
   const sourceURL = esc(api.getSourceURL());
   const sourceLink = `<a class="source-link" href="${sourceURL}" target="_blank" rel="noopener noreferrer">${icon("arrow-up-right")} Source code</a>`;
   const active = path()[0];
-  const workspaceLabel = session && currentOrg ? `<div class="workspace-label" aria-label="Current workspace: ${esc(currentOrg.name || "Organization")}"><span class="workspace-icon">${icon("building-2")}</span><strong>${esc(currentOrg.name || "Organization")}</strong></div>` : "";
+  const workspaceLabel =
+    session && currentOrg
+      ? `<div class="workspace-label" aria-label="Current workspace: ${esc(currentOrg.name || "Organization")}"><span class="workspace-icon">${icon("building-2")}</span><strong>${esc(currentOrg.name || "Organization")}</strong></div>`
+      : "";
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span>Anonce</a>${workspaceLabel}<nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/verify-receipt" aria-label="Verify receipt" ${active === "verify-receipt" ? 'aria-current="page"' : ""} class="${active === "verify-receipt" ? "active" : ""}"><span class="nav-item">${icon("check-circle-2")}<span>Verify receipt</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.email || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content"><div class="route-context">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div>${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p><a href="#/verify-receipt">Verify a receipt</a>${sourceLink}</footer></div>`;
   renderButtonIcons();
   root.querySelector(".skip-link").addEventListener("click", (event) => {
@@ -168,8 +204,22 @@ function headWithBadge(title, badge, detail, action = "") {
 }
 function statusBadge(value) {
   const status = String(value || "active").toLowerCase();
-  const known = { published: ["Open", "positive"], open: ["Open", "positive"], closed: ["Closed", "closed"], draft: ["Draft", "muted"], pending: ["Pending", "warning"], approved: ["Approved", "positive"], active: ["Active", "positive"], revoked: ["Revoked", "danger"], valid: ["Valid", "positive"], invalid: ["Unreadable", "danger"] };
-  const [label, tone] = known[status] || [status.replace(/[-_]/g, " "), "muted"];
+  const known = {
+    published: ["Open", "positive"],
+    open: ["Open", "positive"],
+    closed: ["Closed", "closed"],
+    draft: ["Draft", "muted"],
+    pending: ["Pending", "warning"],
+    approved: ["Approved", "positive"],
+    active: ["Active", "positive"],
+    revoked: ["Revoked", "danger"],
+    valid: ["Valid", "positive"],
+    invalid: ["Unreadable", "danger"],
+  };
+  const [label, tone] = known[status] || [
+    status.replace(/[-_]/g, " "),
+    "muted",
+  ];
   return `<span class="status-badge status-${tone}">${icon(tone === "positive" ? "check-circle-2" : tone === "warning" ? "clock-3" : tone === "danger" ? "ban" : "circle-dot")}<span>${esc(label)}</span></span>`;
 }
 function button(label, href, cls = "") {
@@ -186,14 +236,20 @@ function bindRecoveryPhraseTools(words, prefix = "recovery") {
     if (!copyButton.isConnected || phrase !== words) return;
     try {
       await navigator.clipboard.writeText(phraseText);
-      if (copyButton.isConnected && phrase === words) toast("Phrase copied.", "success");
+      if (copyButton.isConnected && phrase === words)
+        toast("Phrase copied.", "success");
     } catch {
-      if (copyButton.isConnected && phrase === words) toast("Could not copy recovery phrase. Select and copy the words above.");
+      if (copyButton.isConnected && phrase === words)
+        toast(
+          "Could not copy recovery phrase. Select and copy the words above.",
+        );
     }
   };
   downloadButton.onclick = () => {
     if (!downloadButton.isConnected || phrase !== words) return;
-    const blob = new Blob([`${phraseText}\n`], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([`${phraseText}\n`], {
+      type: "text/plain;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -236,7 +292,10 @@ function bind(form, fn) {
 async function load() {
   const route = path();
   const hashParams = new URLSearchParams(routeHash().split("?")[1] || "");
-  if (["login", "register", "recover"].includes(route[0]) && hashParams.has("next"))
+  if (
+    ["login", "register", "recover"].includes(route[0]) &&
+    hashParams.has("next")
+  )
     returnRoute = hashParams.get("next");
   if (route[0] === "verify-receipt") {
     session = null;
@@ -248,11 +307,14 @@ async function load() {
     session = null;
   }
   if (!session && (route[0] === "respond" || route[0] === "invite"))
-    returnRoute = route[0] === "respond" ? routeHash() : `/${route[0]}/${encodeURIComponent(route[1] || "")}`;
+    returnRoute =
+      route[0] === "respond"
+        ? routeHash()
+        : `/${route[0]}/${encodeURIComponent(route[1] || "")}`;
   else if (session && (route[0] === "respond" || route[0] === "invite"))
     returnRoute = null;
   if (!session) {
-      if (route[0] === "respond") return renderAuth("login", "respond");
+    if (route[0] === "respond") return renderAuth("login", "respond");
     if (route[0] === "invite") return renderAuth("login", "invite");
     renderAuth(
       route[0] === "register"
@@ -296,7 +358,10 @@ async function load() {
   if (p[0] === "orgs") return renderOrgs();
   if (p[0] === "review" && p[1]) return renderReview(p[1], p[2]);
   if (organizationError) {
-    frame(`${head("Organizations unavailable", "We couldn’t load your organizations. Try again shortly.")}`, "Overview");
+    frame(
+      `${head("Organizations unavailable", "We couldn’t load your organizations. Try again shortly.")}`,
+      "Overview",
+    );
     toast(organizationError);
     return;
   }
@@ -319,7 +384,10 @@ async function load() {
     }
     renderHome();
   } catch (e) {
-    frame(`${head("Reviews unavailable", "We couldn’t load reviews. Try again shortly.")}`, "Overview");
+    frame(
+      `${head("Reviews unavailable", "We couldn’t load reviews. Try again shortly.")}`,
+      "Overview",
+    );
     toast(say(e));
   }
 }
@@ -332,7 +400,8 @@ async function renderReceiptVerifier() {
     trustAvailable = false;
   }
   if (path()[0] !== "verify-receipt") return;
-  frame(`${head("Verify a receipt", "Public signing keys load once from this site. Image reading and signature checking happen locally.")}
+  frame(
+    `${head("Verify a receipt", "Public signing keys load once from this site. Image reading and signature checking happen locally.")}
     <section class="card form-card verifier-card">
       <div class="verifier-intro"><span class="verifier-step">A private, local check</span><p>Choose the receipt file you downloaded. You do not need to open or edit JSON.</p></div>
       <label class="field receipt-file-field"><span>Receipt card image</span><input id="verify-receipt-file" type="file" accept="image/png,.png" aria-describedby="receipt-limit receipt-file-status"><span id="receipt-file-status" class="help" aria-live="polite">Choose your Anonce receipt PNG.</span></label>
@@ -349,7 +418,9 @@ async function renderReceiptVerifier() {
       <button type="button" class="button verify-submit" id="verify-receipt">Verify receipt</button>
       <div id="verify-result" role="status" aria-live="polite"></div>
       <p class="help verifier-limit">A valid signature confirms only that listed acceptance details were signed. It does not prove response contents, storage, anonymity, or trusted time. This check still trusts code served by this site.</p>
-    </section>`, "Verify a receipt");
+    </section>`,
+    "Verify a receipt",
+  );
   const receiptText = document.querySelector("#verify-receipt-text");
   const receiptFile = document.querySelector("#verify-receipt-file");
   const trustText = document.querySelector("#verify-trust-text");
@@ -361,57 +432,101 @@ async function renderReceiptVerifier() {
   let imageLoadToken = null;
   const receiptFileStatus = document.querySelector("#receipt-file-status");
   const clearResult = () => {
-    if (imageLoadToken !== null) receiptFileStatus.textContent = "Image loading interrupted. Choose the PNG again.";
+    if (imageLoadToken !== null)
+      receiptFileStatus.textContent =
+        "Image loading interrupted. Choose the PNG again.";
     imageLoadToken = null;
     generation++;
     result.replaceChildren();
     verifyButton.disabled = false;
     return generation;
   };
-  const currentChoice = () => document.querySelector('input[name="trust-source"]:checked')?.value === "current";
-  receiptText.addEventListener("input", () => { clearResult(); receiptFileStatus.textContent = "Using pasted receipt JSON."; });
-  trustText.addEventListener("input", clearResult);
-  document.querySelectorAll('input[name="trust-source"]').forEach((radio) => radio.addEventListener("change", () => {
-    trustText.disabled = currentChoice();
+  const currentChoice = () =>
+    document.querySelector('input[name="trust-source"]:checked')?.value ===
+    "current";
+  receiptText.addEventListener("input", () => {
     clearResult();
-  }));
+    receiptFileStatus.textContent = "Using pasted receipt JSON.";
+  });
+  trustText.addEventListener("input", clearResult);
+  document.querySelectorAll('input[name="trust-source"]').forEach((radio) =>
+    radio.addEventListener("change", () => {
+      trustText.disabled = currentChoice();
+      clearResult();
+    }),
+  );
   receiptFile.addEventListener("change", () => {
     const selectedFile = receiptFile.files[0];
     receiptText.value = "";
     const token = clearResult();
-    receiptFileStatus.textContent = selectedFile ? "Reading receipt image…" : "Choose your Anonce receipt PNG.";
+    receiptFileStatus.textContent = selectedFile
+      ? "Reading receipt image…"
+      : "Choose your Anonce receipt PNG.";
     if (!selectedFile) return;
     if (selectedFile.size > 4 * 1024 * 1024) {
-      receiptFileStatus.textContent = "Image exceeds 4 MiB. Choose a smaller PNG.";
+      receiptFileStatus.textContent =
+        "Image exceeds 4 MiB. Choose a smaller PNG.";
       return;
     }
     imageLoadToken = token;
     verifyButton.disabled = true;
-    decodeReceiptPNG({ file: selectedFile }).then((decoded) => {
-      if (token !== generation || imageLoadToken !== token || !receiptFile.isConnected) return;
-      imageLoadToken = null;
-      receiptText.value = decoded;
-      receiptFileStatus.textContent = "Receipt image loaded. Ready to verify.";
-      verifyButton.disabled = false;
-    }).catch(() => {
-      if (token !== generation || imageLoadToken !== token || !receiptFile.isConnected) return;
-      imageLoadToken = null;
-      receiptFileStatus.textContent = "Could not read receipt image. Choose another PNG.";
-      result.textContent = "This image does not contain a readable receipt QR code.";
-      verifyButton.disabled = false;
-    });
+    decodeReceiptPNG({ file: selectedFile })
+      .then((decoded) => {
+        if (
+          token !== generation ||
+          imageLoadToken !== token ||
+          !receiptFile.isConnected
+        )
+          return;
+        imageLoadToken = null;
+        receiptText.value = decoded;
+        receiptFileStatus.textContent =
+          "Receipt image loaded. Ready to verify.";
+        verifyButton.disabled = false;
+      })
+      .catch(() => {
+        if (
+          token !== generation ||
+          imageLoadToken !== token ||
+          !receiptFile.isConnected
+        )
+          return;
+        imageLoadToken = null;
+        receiptFileStatus.textContent =
+          "Could not read receipt image. Choose another PNG.";
+        result.textContent =
+          "This image does not contain a readable receipt QR code.";
+        verifyButton.disabled = false;
+      });
   });
   trustFile.addEventListener("change", () => {
-    document.querySelector('input[name="trust-source"][value="import"]').checked = true;
+    document.querySelector(
+      'input[name="trust-source"][value="import"]',
+    ).checked = true;
     trustText.disabled = false;
-    loadVerifierFile(trustFile.files[0], trustText, result, clearResult, (token) => token === generation);
+    loadVerifierFile(
+      trustFile.files[0],
+      trustText,
+      result,
+      clearResult,
+      (token) => token === generation,
+    );
   });
   document.querySelector("#download-trust").onclick = () => {
     const data = currentTrust;
-    const url = URL.createObjectURL(new Blob([`${data}\n`], { type: "application/json;charset=utf-8" }));
-    const link = document.createElement("a"); link.href = url; link.download = "anonce-receipt-trust.json";
+    const url = URL.createObjectURL(
+      new Blob([`${data}\n`], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "anonce-receipt-trust.json";
     document.body.appendChild(link);
-    try { link.click(); } finally { link.remove(); URL.revokeObjectURL(url); }
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
     toast("Public trust configuration download started.", "success");
   };
   verifyButton.onclick = async () => {
@@ -419,12 +534,18 @@ async function renderReceiptVerifier() {
     const check = generation;
     const inputText = receiptText.value;
     const selectedTrust = currentChoice() ? currentTrust : trustText.value;
-    if (!inputText.trim() && receiptFileStatus.textContent.startsWith("Could not read receipt image.")) {
-      result.textContent = "This image does not contain a readable receipt QR code.";
+    if (
+      !inputText.trim() &&
+      receiptFileStatus.textContent.startsWith("Could not read receipt image.")
+    ) {
+      result.textContent =
+        "This image does not contain a readable receipt QR code.";
       return;
     }
     if (!inputText.trim() || !selectedTrust.trim()) {
-      result.textContent = !inputText.trim() ? "Choose a receipt PNG or paste receipt JSON first." : "Choose or paste a public trust configuration.";
+      result.textContent = !inputText.trim()
+        ? "Choose a receipt PNG or paste receipt JSON first."
+        : "Choose or paste a public trust configuration.";
       return;
     }
     verifyButton.disabled = true;
@@ -435,34 +556,53 @@ async function renderReceiptVerifier() {
       const accepted = formatReceiptTime(verified.receipt.accepted_at);
       result.innerHTML = `<section class="notice verifier-success"><strong>Receipt signature verified</strong><p>The signed receipt records acceptance at <time>${esc(accepted)}</time>.</p><p>This verifies the signature only. It does not match the receipt to your original response or prove what it contained.</p></section>`;
     } catch {
-      if (check === generation) result.innerHTML = '<section class="notice verifier-failure"><strong>Receipt could not be verified</strong><p>Check that you selected the complete receipt and trusted public configuration. A failed check does not confirm acceptance.</p></section>';
+      if (check === generation)
+        result.innerHTML =
+          '<section class="notice verifier-failure"><strong>Receipt could not be verified</strong><p>Check that you selected the complete receipt and trusted public configuration. A failed check does not confirm acceptance.</p></section>';
     } finally {
       if (check === generation) verifyButton.disabled = false;
     }
   };
 }
 function formatReceiptTime(value) {
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "Acceptance time unavailable";
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value))
+    return "Acceptance time unavailable";
   const seconds = BigInt(value);
-  if (seconds > 8640000000000n) return `Unix time ${value} (outside display range)`;
+  if (seconds > 8640000000000n)
+    return `Unix time ${value} (outside display range)`;
   const date = new Date(Number(seconds) * 1000);
-  return Number.isNaN(date.getTime()) ? `Unix time ${value}` : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? `Unix time ${value}`
+    : date.toLocaleString();
 }
 async function verifyReceiptLocally(receiptText, trustText) {
   const byteLength = (value) => new TextEncoder().encode(value).byteLength;
   if (byteLength(receiptText) > 65536 || byteLength(trustText) > 65536)
-    throw new Error("Receipt and trust configuration must each be 64 KiB or smaller.");
+    throw new Error(
+      "Receipt and trust configuration must each be 64 KiB or smaller.",
+    );
   return api.verifySavedReceipt({ receiptText, trustText });
 }
-async function loadVerifierFile(file, target, result, clearResult, isCurrent, status = null) {
+async function loadVerifierFile(
+  file,
+  target,
+  result,
+  clearResult,
+  isCurrent,
+  status = null,
+) {
   const token = clearResult();
   target.value = "";
-  if (status) status.textContent = file ? "Reading file…" : "Choose your Anonce receipt PNG.";
+  if (status)
+    status.textContent = file
+      ? "Reading file…"
+      : "Choose your Anonce receipt PNG.";
   if (!file) return;
   if (file.size > 65536) {
     if (isCurrent(token)) {
       result.textContent = "File exceeds 64 KiB. Choose a smaller JSON file.";
-      if (status) status.textContent = "File is too large. Choose a file up to 64 KiB.";
+      if (status)
+        status.textContent = "File is too large. Choose a file up to 64 KiB.";
     }
     return;
   }
@@ -470,8 +610,10 @@ async function loadVerifierFile(file, target, result, clearResult, isCurrent, st
     const text = await file.text();
     if (!isCurrent(token)) return;
     if (!text.trim()) {
-      result.textContent = "This file is empty. Choose another receipt or paste its JSON.";
-      if (status) status.textContent = "File is empty. Choose another or paste its JSON.";
+      result.textContent =
+        "This file is empty. Choose another receipt or paste its JSON.";
+      if (status)
+        status.textContent = "File is empty. Choose another or paste its JSON.";
       return;
     }
     clearResult();
@@ -479,8 +621,11 @@ async function loadVerifierFile(file, target, result, clearResult, isCurrent, st
     if (status) status.textContent = "Receipt loaded. Ready to verify.";
   } catch {
     if (isCurrent(token)) {
-      result.textContent = "Could not read file. Choose another file or paste its JSON.";
-      if (status) status.textContent = "Could not read file. Choose another or paste its JSON.";
+      result.textContent =
+        "Could not read file. Choose another file or paste its JSON.";
+      if (status)
+        status.textContent =
+          "Could not read file. Choose another or paste its JSON.";
     }
   }
 }
@@ -495,7 +640,10 @@ function renderHome() {
         ? `<div class="review-list">${reviews
             .map((r) => {
               const mine = isReviewOwner(r);
-              const metrics = mine && r.contentState !== "locked" ? ` · <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> · <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>` : "";
+              const metrics =
+                mine && r.contentState !== "locked"
+                  ? ` · <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> · <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>`
+                  : "";
               return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${metrics}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" && r.contentState !== "locked" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
             })
             .join(
@@ -543,8 +691,7 @@ async function loadMoreReviews(event) {
   }
 }
 function countText(value) {
-  if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value))
-    return value;
+  if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value)) return value;
   return Number.isSafeInteger(value) && value >= 0
     ? String(value)
     : "Unavailable";
@@ -660,7 +807,8 @@ function renderAuth(mode, intent = "") {
 }
 function renderOrgs() {
   const canManage = ["owner", "admin"].includes(currentOrg?.role);
-  const roleOptions = (includeAdmin) => `${includeAdmin ? '<option value="admin">Admin</option>' : ""}<option value="reviewer">Reviewer</option><option value="respondent">Respondent</option>`;
+  const roleOptions = (includeAdmin) =>
+    `${includeAdmin ? '<option value="admin">Admin</option>' : ""}<option value="reviewer">Reviewer</option><option value="respondent">Respondent</option>`;
   frame(
     `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card org-list">${orgs.length ? orgs.map((o) => `<div class="review-row org-row"><div class="avatar org-avatar">${icon("building-2")}</div><div class="review-info org-info"><strong>${esc(o.name)}</strong><div class="org-meta"><span class="org-role">${esc(o.role || "Member")}</span>${statusBadge(o.status || "active")}</div></div><button class="button secondary org-open" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg ? `<div class="section-row"><h2 class="section-title">${esc(currentOrg.name)} · members</h2>${canManage ? `<div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div>` : ""}</div>${canManage ? `<div class="member-help">Add existing accounts directly by email. For people without an account, create an invite link.</div><div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div>` : ""}<div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
     "Organizations",
@@ -681,10 +829,22 @@ function renderOrgs() {
       }),
   );
   if (currentOrg) {
-    document.querySelector("#add-toggle")?.addEventListener("click", () => document.querySelector("#add-area").classList.toggle("hidden"));
-    document.querySelector("#invite-toggle")?.addEventListener("click", () => document.querySelector("#invite-area").classList.toggle("hidden"));
+    document
+      .querySelector("#add-toggle")
+      ?.addEventListener("click", () =>
+        document.querySelector("#add-area").classList.toggle("hidden"),
+      );
+    document
+      .querySelector("#invite-toggle")
+      ?.addEventListener("click", () =>
+        document.querySelector("#invite-area").classList.toggle("hidden"),
+      );
     bind("#add-member", async (fd) => {
-      await api.addMember({ orgId: currentOrg.id, email: fd.get("email").trim(), role: fd.get("role") });
+      await api.addMember({
+        orgId: currentOrg.id,
+        email: fd.get("email").trim(),
+        role: fd.get("role"),
+      });
       toast("Member added.", "success");
       document.querySelector("#add-member").reset();
       loadMembers();
@@ -716,29 +876,42 @@ async function loadMembers() {
     const owner = currentOrg.role === "owner";
     const admin = currentOrg.role === "admin";
     box.innerHTML = rows.length
-      ? `<div class="table-wrap"><table class="simple-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th>${owner || admin ? "<th>Actions</th>" : ""}</tr></thead><tbody>${rows.map((m) => {
-          const memberId = m.id || m.memberId;
-          const memberRole = String(m.role || "member").toLowerCase();
-          const memberStatus = String(m.status || m.state || "active").toLowerCase();
-          const manageable = owner ? memberRole !== "owner" : admin && !["owner", "admin"].includes(memberRole);
-          const editableRole = owner && memberRole !== "owner" && memberStatus === "approved";
-          const canRevoke = manageable && memberStatus !== "revoked";
-          return `<tr><td><span class="member-email">${icon("mail")}<span>${esc(m.email || "Email unavailable")}</span></span></td><td>${editableRole ? `<label class="sr-only" for="role-${esc(memberId)}">Role for ${esc(m.email || "member")}</label><select id="role-${esc(memberId)}" data-role="${esc(memberId)}" aria-label="Role for ${esc(m.email || "member")}">${owner ? `<option value="admin" ${memberRole === "admin" ? "selected" : ""}>Admin</option>` : ""}<option value="reviewer" ${memberRole === "reviewer" ? "selected" : ""}>Reviewer</option><option value="respondent" ${memberRole === "respondent" ? "selected" : ""}>Respondent</option></select>` : esc(m.role || "Member")}</td><td>${statusBadge(memberStatus)}</td>${owner || admin ? `<td class="member-actions">${manageable && memberStatus === "pending" ? `<button class="icon-btn" data-approve="${esc(memberId)}" aria-label="Approve ${esc(m.email || "member")}" title="Approve">${icon("check")}</button>` : ""}${canRevoke ? `<button class="icon-btn danger-icon" data-revoke="${esc(memberId)}" aria-label="Revoke ${esc(m.email || "member")}" title="Revoke">${icon("trash-2")}</button>` : ""}</td>` : ""}</tr>`;
-        }).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="simple-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th>${owner || admin ? "<th>Actions</th>" : ""}</tr></thead><tbody>${rows
+          .map((m) => {
+            const memberId = m.id || m.memberId;
+            const memberRole = String(m.role || "member").toLowerCase();
+            const memberStatus = String(
+              m.status || m.state || "active",
+            ).toLowerCase();
+            const manageable = owner
+              ? memberRole !== "owner"
+              : admin && !["owner", "admin"].includes(memberRole);
+            const editableRole =
+              owner && memberRole !== "owner" && memberStatus === "approved";
+            const canRevoke = manageable && memberStatus !== "revoked";
+            return `<tr><td><span class="member-email">${icon("mail")}<span>${esc(m.email || "Email unavailable")}</span></span></td><td>${editableRole ? `<label class="sr-only" for="role-${esc(memberId)}">Role for ${esc(m.email || "member")}</label><select id="role-${esc(memberId)}" data-role="${esc(memberId)}" aria-label="Role for ${esc(m.email || "member")}">${owner ? `<option value="admin" ${memberRole === "admin" ? "selected" : ""}>Admin</option>` : ""}<option value="reviewer" ${memberRole === "reviewer" ? "selected" : ""}>Reviewer</option><option value="respondent" ${memberRole === "respondent" ? "selected" : ""}>Respondent</option></select>` : esc(m.role || "Member")}</td><td>${statusBadge(memberStatus)}</td>${owner || admin ? `<td class="member-actions">${manageable && memberStatus === "pending" ? `<button class="icon-btn" data-approve="${esc(memberId)}" aria-label="Approve ${esc(m.email || "member")}" title="Approve">${icon("check")}</button>` : ""}${canRevoke ? `<button class="icon-btn danger-icon" data-revoke="${esc(memberId)}" aria-label="Revoke ${esc(m.email || "member")}" title="Revoke">${icon("trash-2")}</button>` : ""}</td>` : ""}</tr>`;
+          })
+          .join("")}</tbody></table></div>`
       : emptyCard(
           "No members yet",
           "Invites and membership approvals will appear here.",
         );
-    box.querySelectorAll("[data-role]").forEach((select) => select.addEventListener("change", async () => {
-      try {
-        await api.changeMemberRole({ orgId: currentOrg.id, memberId: select.dataset.role, role: select.value });
-        toast("Member role updated.", "success");
-        loadMembers();
-      } catch (e) {
-        toast(say(e));
-        loadMembers();
-      }
-    }));
+    box.querySelectorAll("[data-role]").forEach((select) =>
+      select.addEventListener("change", async () => {
+        try {
+          await api.changeMemberRole({
+            orgId: currentOrg.id,
+            memberId: select.dataset.role,
+            role: select.value,
+          });
+          toast("Member role updated.", "success");
+          loadMembers();
+        } catch (e) {
+          toast(say(e));
+          loadMembers();
+        }
+      }),
+    );
     box.querySelectorAll("[data-approve]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -800,7 +973,7 @@ async function renderAccount() {
     renderButtonIcons(document.querySelector("#new-phrase"));
     bindRecoveryPhraseTools(phrase, "rotated-recovery");
     document.querySelector("#rotated-saved").onchange = (e) => {
-        if (e.target.checked && e.target.isConnected && phrase) {
+      if (e.target.checked && e.target.isConnected && phrase) {
         phrase = null;
         document.querySelector("#new-phrase").innerHTML =
           '<div class="notice">Recovery phrase updated.</div>';
@@ -840,7 +1013,7 @@ async function renderReview(id, tab) {
   }
   try {
     review = await api.getReview({ reviewId: id });
-    } catch (e) {
+  } catch (e) {
     frame(
       `${head("Encrypted review", "Review content is unavailable or cannot be decrypted.")}${button("Back to reviews", "", "secondary")}`,
       "Review",
@@ -848,11 +1021,18 @@ async function renderReview(id, tab) {
     return;
   }
   if (review.contentState === "locked") {
-    frame(emptyCard("Encrypted review", "Review content is available only to its creator."), "Review");
+    frame(
+      emptyCard(
+        "Encrypted review",
+        "Review content is available only to its creator.",
+      ),
+      "Review",
+    );
     return;
   }
   const reviewOrgId = review.org_id || review.orgId;
-  currentOrg = orgs.find((organization) => organization.id === reviewOrgId) || null;
+  currentOrg =
+    orgs.find((organization) => organization.id === reviewOrgId) || null;
   const canManage = isReviewOwner(review);
   const canReviewResponses = canManage || currentOrg?.role === "reviewer";
   if (!canManage && !canReviewResponses) {
@@ -939,8 +1119,14 @@ async function renderReview(id, tab) {
       }
   });
   document.querySelector("#share")?.addEventListener("click", async () => {
-    try { await copyText(await api.getInvitationURL({ reviewId: id }), "Secret response link"); }
-    catch (e) { toast(say(e)); }
+    try {
+      await copyText(
+        await api.getInvitationURL({ reviewId: id }),
+        "Secret response link",
+      );
+    } catch (e) {
+      toast(say(e));
+    }
   });
   bind("#edit-review", async (fd) => {
     const questions = [...document.querySelectorAll(".question")].map((q) => ({
@@ -1027,19 +1213,23 @@ function renderResponseResults(result, error, r) {
   const items = Array.isArray(result.items) ? result.items : [],
     questions = r.questions || [];
   if (!items.length)
-     return `<section class="card empty"><strong>No responses yet</strong>Submitted responses will appear here once they are available to review.</section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
+    return `<section class="card empty"><strong>No responses yet</strong>Submitted responses will appear here once they are available to review.</section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
   return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? " · more responses available" : ""}</p></div></div><div class="review-list">${items
     .map(
       (item, index) =>
-        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(new Date(item.acceptedAt).toLocaleString()) : ""}</span></div>${item.status === "invalid" ? '<p class="alert" role="status">This response could not be decrypted or validated.</p>' : questions
-          .map((q) => {
-            const answer = (item.answers || []).find(
-                (a) => a.questionId === q.id,
-              ),
-              value = answer?.value;
-            return `<div class="question-preview"><strong>${esc(q.text || "Question")}</strong><p class="answer-copy">${value === undefined || value === null ? "No answer" : esc(Array.isArray(value) ? value.join(", ") : value)}</p></div>`;
-          })
-          .join("")}${(item.answers || [])
+        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(new Date(item.acceptedAt).toLocaleString()) : ""}</span></div>${
+          item.status === "invalid"
+            ? '<p class="alert" role="status">This response could not be decrypted or validated.</p>'
+            : questions
+                .map((q) => {
+                  const answer = (item.answers || []).find(
+                      (a) => a.questionId === q.id,
+                    ),
+                    value = answer?.value;
+                  return `<div class="question-preview"><strong>${esc(q.text || "Question")}</strong><p class="answer-copy">${value === undefined || value === null ? "No answer" : esc(Array.isArray(value) ? value.join(", ") : value)}</p></div>`;
+                })
+                .join("")
+        }${(item.answers || [])
           .filter((a) => !questions.some((q) => q.id === a.questionId))
           .map(
             (a) =>
@@ -1049,7 +1239,7 @@ function renderResponseResults(result, error, r) {
     )
     .join(
       "",
-     )}</div>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
+    )}</div>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
 }
 function questionHTML(q = {}) {
   return `<div class="question"><div class="question-top"><strong>Question</strong><button class="icon-btn" type="button" data-remove aria-label="Remove question">×</button></div><div class="field"><label>Question text</label><input name="qtext" required maxlength="500" value="${esc(q.text)}"></div><div class="inline"><div class="field"><label>Answer type</label><select name="qtype"><option value="text" ${q.type === "text" ? "selected" : ""}>Text</option><option value="single" ${q.type === "single" ? "selected" : ""}>Choose one</option><option value="multiple" ${q.type === "multiple" ? "selected" : ""}>Choose multiple</option></select></div><label class="check"><input name="qrequired" type="checkbox" ${q.required ? "checked" : ""}> Required</label></div><div class="field"><label>Choices <span class="help">(one per line, for choice questions)</span></label><textarea name="qoptions">${esc((q.options || []).join("\n"))}</textarea></div></div>`;
@@ -1065,11 +1255,23 @@ function dt(v) {
 }
 async function renderRespond(invitation, routedId) {
   if (invitation?.invalid && invitation.missingKey) {
-    frame(emptyCard("Complete invitation link required.", "Ask the person who shared this review for its complete secret link."), "Respond");
+    frame(
+      emptyCard(
+        "Complete invitation link required.",
+        "Ask the person who shared this review for its complete secret link.",
+      ),
+      "Respond",
+    );
     return;
   }
   if ((!invitation || invitation.invalid) && routedId) {
-    frame(emptyCard("This invitation could not be read", "Check that you have the complete, unchanged invitation link."), "Respond");
+    frame(
+      emptyCard(
+        "This invitation could not be read",
+        "Check that you have the complete, unchanged invitation link.",
+      ),
+      "Respond",
+    );
     return;
   }
   const id = invitation?.reviewId;
@@ -1085,14 +1287,26 @@ async function renderRespond(invitation, routedId) {
   }
   let r;
   try {
-    r = await api.getReview({ reviewId: id, contentKey: invitation.contentKey });
+    r = await api.getReview({
+      reviewId: id,
+      contentKey: invitation.contentKey,
+    });
   } catch (e) {
-    frame(`${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`, "Respond");
+    frame(
+      `${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`,
+      "Respond",
+    );
     toast(say(e));
     return;
   }
   if (r.contentState === "locked" || !Array.isArray(r.questions)) {
-    frame(emptyCard("This invitation could not be read", "Check that you have the complete, unchanged invitation link."), "Respond");
+    frame(
+      emptyCard(
+        "This invitation could not be read",
+        "Check that you have the complete, unchanged invitation link.",
+      ),
+      "Respond",
+    );
     return;
   }
   const questions = r.questions || [];
@@ -1134,7 +1348,11 @@ async function renderRespond(invitation, routedId) {
       index: i,
       value: q.type === "multiple" ? fd.getAll(`q-${i}`) : fd.get(`q-${i}`),
     }));
-    let p = await api.prepareResponse({ reviewId: id, contentKey: invitation.contentKey, answers });
+    let p = await api.prepareResponse({
+      reviewId: id,
+      contentKey: invitation.contentKey,
+      answers,
+    });
     let result = await api.submitResponse({ pendingId: p.pendingId });
     const box = document.querySelector("#receipt");
     if (result.status === "pending") {
