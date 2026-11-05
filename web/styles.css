@@ -328,6 +328,15 @@ a {
   border-radius: var(--radius-control);
   background: var(--surface)
 }
+.org-list { padding: var(--space-2); }
+.org-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--space-3); padding: var(--space-3); border: 0; border-radius: var(--radius-control); box-shadow: none; }
+.org-row + .org-row { border-top: 1px solid var(--line); border-radius: 0; }
+.org-avatar { width: 40px; height: 40px; flex: none; border-radius: var(--radius-control); }
+.org-row .org-info strong { font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.org-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-top: var(--space-1); }
+.org-role { color: var(--muted); font-size: 13px; }
+.org-open { min-width: 104px; min-height: 44px; flex: none; }
+.org-list .status-positive .icon { filter: var(--accent-icon-filter); }
 .review-info {
   min-width: 0;
   flex: 1
@@ -838,6 +847,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
     gap: var(--space-3);
     flex-wrap: wrap
   }
+  .org-row { grid-template-columns: 36px minmax(0,1fr); gap: var(--space-2) var(--space-3); }
+  .org-avatar { width: 36px; height: 36px; }
+  .org-row > .org-open { grid-column: 1 / -1; width: 100%; margin-inline-start: 0; }
+  .org-list.card { padding: var(--space-2); }
+  .review-row.org-row { padding: var(--space-3); }
   .form-card,.auth-card {
     padding: var(--space-4)
   }

@@ -31,6 +31,8 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Group organization names, roles, and status badges in compact list rows, with
+  full-width Open actions on mobile, 44px tap targets, and theme-matched Approved icons.
 - Download receipts as readable PNG cards containing the complete signed receipt
   in a QR code. Read receipt images locally before applying the existing signature
   checks; keep signing keys separate from receipt data.

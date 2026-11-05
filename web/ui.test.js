@@ -439,6 +439,18 @@ test("shared responsive rules live with components rather than appended override
   assert.doesNotMatch(styles, /Shared rhythm and resilient layouts/);
 });
 
+test("organization rows group role and status while preserving Open action target", () => {
+  assert.match(source, /class="review-row org-row"[\s\S]*?class="review-info org-info"[\s\S]*?class="org-meta"[\s\S]*?class="org-role"[\s\S]*?\$\{statusBadge\(o\.status \|\| "active"\)\}[\s\S]*?class="button secondary org-open" data-org="\$\{esc\(o\.id\)\}"/);
+  assert.match(styles, /\.org-row \.org-info strong \{[^}]*font-size: 15px/);
+  assert.match(styles, /\.org-row \+ \.org-row \{[^}]*border-top: 1px solid var\(--line\)/);
+  assert.doesNotMatch(styles, /\.org-meta \.status-positive \.icon/);
+  assert.match(styles, /\.org-open \{[^}]*min-height: 44px/);
+  assert.match(styles, /\.org-row > \.org-open \{ grid-column: 1 \/ -1; width: 100%; margin-inline-start: 0; \}/);
+  assert.match(styles, /\.org-list \.status-positive \.icon \{ filter: var\(--accent-icon-filter\); \}/);
+  assert.match(styles, /\.org-list\.card \{ padding: var\(--space-2\); \}/);
+  assert.match(styles, /\.review-row\.org-row \{ padding: var\(--space-3\); \}/);
+});
+
 test("JSON and CSV exports confirm that browser download started", async () => {
   const handlers = new Map();
   const notices = [];
