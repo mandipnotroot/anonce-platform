@@ -9,6 +9,8 @@ No version has been released.
 ## Unreleased
 
 ### Added
+- Optional `ANONCE_DB_VOLUME` selection for fresh-database deployments without
+  deleting the previous database or changing Caddy's TLS volumes.
 - Direct organization membership by registered email alongside invite links,
   multiple organization admins, and owner-only admin appointment controls.
 - Browser-local recovery phrase copy and plain-text download controls.

@@ -91,7 +91,8 @@ networks:
     internal: true
   edge: {}
 volumes:
-  pgdata: {}
+  pgdata:
+    name: ${ANONCE_DB_VOLUME:-${COMPOSE_PROJECT_NAME}_pgdata}
   caddy_data: {}
   caddy_config: {}
 secrets:

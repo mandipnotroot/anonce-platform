@@ -51,6 +51,18 @@ in each client's hosts file, and trust the local Caddy root CA in the browser.
 The current local CA certificate is exported to `.env.local-ca.crt`.
 Local credentials and keys stay in ignored `.env` and `secrets/` files.
 
+To initialize a fresh database, set `ANONCE_DB_VOLUME` in `.env` to a new,
+unused Docker volume name. Leaving it unset retains the Compose project's
+default `<project>_pgdata` volume. Keep the same project name to preserve Caddy's
+TLS volumes. Rebuilding images alone does not reset a database.
+
+Before switching volumes, build the images, stop application writes, and take
+a protected database backup as described below. Recreate the database and app
+with the same Compose command, then verify readiness and the mounted volume.
+Do not delete the previous volume or run `down -v`. A fresh database contains no
+previous accounts, organizations, or responses. Rollback requires the previous
+application image and database volume together; preserve the server key as well.
+
 ### Configuration
 
 Copy `.env.example` to `.env`; fill every blank with strong distinct credentials,
