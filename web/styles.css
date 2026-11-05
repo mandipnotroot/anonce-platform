@@ -27,7 +27,10 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
   --radius-control: 8px;
   --radius-card: 12px;
   --text-small: 12px;
@@ -154,6 +157,7 @@ a {
 }
 /* Main layout and page headers */
 .content {
+  width: 100%;
   max-width: 1000px;
   margin: 0 auto
 }
@@ -174,7 +178,9 @@ a {
 .subtitle {
   margin: 7px 0 0;
   color: var(--muted);
-  font-size: 14px
+  max-width: 62ch;
+  font-size: 14px;
+  line-height: 1.5
 }
 .eyebrow {
   margin: 0 0 10px;
@@ -200,15 +206,15 @@ a {
   padding: var(--space-6)
 }
 .question {
-  padding: 18px;
-  margin: 14px 0
+  padding: var(--space-5);
+  margin: 0 0 var(--space-4)
 }
 .card,.form-card,.question,.review-row { transition: border-color .18s ease, box-shadow .18s ease }
 .review-row:hover { border-color: var(--blue); box-shadow: var(--shadow) }
 /* Actions and data summaries */
 .button {
   display: inline-flex;
-  min-height: 39px;
+  min-height: 42px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -240,7 +246,7 @@ a {
   color: var(--button-ink)
 }
 .button.small {
-  min-height: 32px;
+  min-height: 36px;
   padding: 5px 10px;
   font-size: 13px
 }
@@ -254,7 +260,7 @@ a {
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(3,minmax(0,1fr));
-  gap: 14px
+  gap: var(--space-4)
 }
 .stat {
   padding: 18px
@@ -274,7 +280,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin: 30px 0 13px
+  margin: var(--space-8) 0 var(--space-3)
 }
 .section-title {
   margin: 0;
@@ -332,7 +338,7 @@ a {
 .field {
   display: grid;
   gap: var(--space-2);
-  margin: 0 0 17px
+  margin: 0 0 var(--space-5)
 }
 .field label,.label {
   font-size: var(--text-label);
@@ -340,10 +346,11 @@ a {
 }
 .field input,.field textarea,.field select,.answer-group textarea {
   width: 100%;
+  min-width: 0;
   min-height: 41px;
   padding: 9px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--ink)
 }
@@ -364,12 +371,13 @@ textarea {
   font-size: 13px
 }
 .alert,.notice {
-  padding: 13px 15px;
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--line);
   border-left:3px solid var(--blue);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--soft);
-  color: var(--ink)
+  color: var(--ink);
+  line-height: 1.55
 }
 .alert { margin-bottom: 14px }
 .notice {
@@ -409,9 +417,11 @@ textarea {
   gap: 8px
 }
 .answer-option {
-  padding: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 6px
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere
 }
 .answer-option input,.check input {
   accent-color: var(--blue)
@@ -420,7 +430,7 @@ textarea {
   margin: 15px 0;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 6px
+  border-radius: var(--radius-control)
 }
 .question-preview strong {
   display: block;
@@ -475,11 +485,13 @@ textarea {
 .auth-wrap {
   min-height: calc(100vh - 150px);
   display: grid;
-  place-items: center
+  place-items: center;
+  padding-block: var(--space-6)
 }
 .auth-card {
   width: min(100%,520px);
-  padding: 30px
+  padding: var(--space-8);
+  box-shadow: var(--shadow)
 }
 .auth-inner-form {
   padding: 0;
@@ -511,7 +523,7 @@ textarea {
   border-collapse: collapse
 }
 .simple-table th,.simple-table td {
-  padding: 11px;
+  padding: 12px 14px;
   text-align: left;
   border-bottom: 1px solid var(--line)
 }
@@ -520,7 +532,9 @@ textarea {
   font-size: 12px
 }
 .table-wrap {
-  overflow-x:auto
+  max-width: 100%;
+  overflow-x:auto;
+  overscroll-behavior-x: contain
 }
 .share-box {
   display: flex;
@@ -528,9 +542,46 @@ textarea {
   margin-top:10px
 }
 .share-box input {
+  width: 100%;
   min-width: 0;
   flex: 1
 }
+.auth-card > h1 { margin: 0; font-size: clamp(28px,4vw,36px); line-height: 1.2; letter-spacing: -.04em }
+.auth-card > p:not(.eyebrow) { color: var(--muted) }
+.auth-card > .button { width: 100% }
+.auth-card .divider { margin-block: var(--space-5) }
+.form-error:empty { display: none }
+.alert p:last-child,.notice p:last-child { margin-bottom: 0 }
+.check { align-items: flex-start; line-height: 1.5 }
+.check input,.answer-option input { flex: none; margin-top: .2em; accent-color: var(--blue) }
+.review-info,.review-row,.field,.content { min-width: 0 }
+.review-info small { line-height: 1.6; overflow-wrap: anywhere }
+.section-title { line-height: 1.35; overflow-wrap: anywhere }
+.page-head > :first-child { min-width: 0 }
+.page-head .subtitle { margin-top: var(--space-2) }
+.question-preview { min-width: 0; overflow-wrap: anywhere; border-radius: var(--radius-control) }
+.answer-group { margin-inline: 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-control) }
+.answer-group legend { padding: 0; margin-bottom: var(--space-2) }
+.field textarea { line-height: 1.5 }
+.simple-table td { vertical-align: middle }
+.member-email,.member-email span { min-width: 0 }
+.member-email span,.member-help { overflow-wrap: anywhere }
+.member-help { margin: 0 0 var(--space-3); line-height: 1.5 }
+.member-actions { min-width: 92px }
+.icon-btn { width: 40px; height: 40px; flex: none; border-radius: var(--radius-control) }
+.site-footer { flex-wrap: wrap; margin-top: auto }
+.site-footer p { line-height: 1.5 }
+.source-link { min-height: 32px }
+.receipt-actions,.recovery-actions { flex-wrap: wrap; gap: var(--space-3) }
+.receipt-actions .button { flex: 1 1 180px }
+.toolbar { gap: var(--space-3) }
+.stat { min-width: 0; padding: var(--space-5) }
+.stat-value { line-height: 1.2 }
+.tabs { flex-wrap: wrap; gap: var(--space-5) }
+.simple-table { min-width: 620px }
+.toast-region { z-index: 120 }
+.toast-close { min-width: 36px; min-height: 36px }
+.skip-link { z-index: 120 }
 .response-card {
   max-width: 760px;
   margin: 0 auto
@@ -658,7 +709,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .site-header .nav { grid-column: 1 / -1; grid-row: 2; justify-self: center }
 }
 @media (max-width:640px) {
-  .shell { padding: 0 18px }
+  .shell { padding: 0 16px }
   .site-header { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 16px 0 }
   .header-account { position: static; min-width: 0; align-self: center }
   .nav { width: 100%; justify-content: stretch }
@@ -678,14 +729,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
     margin-bottom:22px
   }
   .page-head h1 {
-    font-size: 27px
+    font-size: clamp(26px,7vw,32px)
   }
   .page-head .button {
-    width: 100%
+    width: auto;
+    max-width: 100%
   }
   .stat-grid {
     grid-template-columns: repeat(2,minmax(0,1fr));
-    gap: 12px
+    gap: var(--space-3)
   }
   .stat {
     padding: 13px
@@ -697,8 +749,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
     font-size: 12px
   }
   .review-row {
-    padding: 13px;
-    gap: 10px
+    padding: var(--space-4);
+    gap: var(--space-3);
+    flex-wrap: wrap
   }
   .form-card,.auth-card {
     padding: var(--space-4)
@@ -726,6 +779,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .share-box { align-items: stretch }
   .share-box .button { flex: none }
   .toolbar > *, .recovery-actions > .button { max-width: 100% }
+  .section-row { align-items: flex-start; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6) }
+  .toolbar { width: 100% }
+  .toolbar > .button { flex: 1 1 auto }
+  .inline { gap: 0 }
+  .review-info { flex-basis: calc(100% - 32px) }
+  .review-row > .button { margin-inline-start: auto }
+  .stat:last-child:nth-child(odd) { grid-column: 1 / -1 }
+  .share-box input { width: 100% }
+  .site-footer { padding-top: var(--space-4) }
 }
 @media (max-width:390px) {
   .shell { padding-inline: 12px }
@@ -733,7 +795,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .nav .icon { width: 17px; height: 17px }
   .header-account { font-size: 11px }
   .form-card,.auth-card { padding: var(--space-3) }
-  .word-grid { grid-template-columns: 1fr; gap: 8px }
+  .word-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-2) }
   .share-box { flex-direction: column }
   .share-box .button { width: 100% }
 }

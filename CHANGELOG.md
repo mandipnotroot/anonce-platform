@@ -27,6 +27,9 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Refine shared spacing, form controls, cards, tables, and responsive layouts
+  across authentication, recovery, workspaces, reviews, and response flows.
+  Shorten interface copy while retaining recovery and anonymity limitations.
 - Replace usernames with unique normalized email addresses for registration,
   sign-in, and recovery. Show member emails to organization owners and admins;
   email addresses are not mailbox-verified.

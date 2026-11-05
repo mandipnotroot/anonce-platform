@@ -212,6 +212,22 @@ test("successful mutations report success without duplicating password inline fe
   assert.doesNotMatch(source, /#password \.form-error"\)\.textContent\s*=\s*"Password updated/);
 });
 
+test("security copy stays concise and keeps network-correlation limit", () => {
+  assert.match(source, /Your response is submitted without account credentials/);
+  assert.match(source, /cannot prevent network or timing correlation/);
+  assert.match(source, /Anyone with this phrase may recover your account/);
+  assert.match(source, /Replacing it disables your old phrase/);
+  assert.doesNotMatch(source, /Create a replacement phrase\. Your old recovery phrase will no longer work/);
+});
+
+test("shared responsive rules live with components rather than appended overrides", () => {
+  assert.match(styles, /\.card \{\s*padding: var\(--space-6\)/);
+  assert.match(styles, /\.simple-table \{ min-width: 620px \}/);
+  assert.match(styles, /\.review-row \{[^}]*flex-wrap: wrap/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?\.stat:last-child:nth-child\(odd\)/);
+  assert.doesNotMatch(styles, /Shared rhythm and resilient layouts/);
+});
+
 test("JSON and CSV exports confirm that browser download started", async () => {
   const handlers = new Map();
   const notices = [];
