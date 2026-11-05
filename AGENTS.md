@@ -26,6 +26,10 @@ These rules apply to every writer and all repository files. Read before editing.
   writers begin. Assign disjoint file scopes; escalate cross-scope changes.
 - Keep documentation and changelog accurate to implemented behavior. Record
   decisions, limitations, and unfinished work rather than implying completion.
+- Keep documentation concise. Use verified latest stable dependencies and Alpine
+  container images; pin versions and validate changes.
+- This is unreleased: target the current stack only; do not add legacy support
+  or upgrade migrations. Keep schema initialization and versioning as needed.
 
 ## Architecture
 - Build a Go standard-library-first modular monolith with explicit boundaries.

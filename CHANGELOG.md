@@ -19,6 +19,14 @@ No version has been released.
 - Docker/Compose/Caddy deployment scaffold, nonroot runtime, backup guidance,
   CI checks, crypto interoperability and opt-in disposable database/browser tests.
 - Visible corresponding-source links using the configured deployment source URL.
+- Local HTTPS deployment for `anonce.local`, bound to all interfaces.
+
+### Changed
+- Use Alpine containers and current stable Go, Node.js, PostgreSQL, Caddy,
+  Go dependencies, and CI actions. Keep existing exact npm pins, already current.
+
+### Fixed
+- Quote the Compose tmpfs mount so its security options remain a single entry.
 
 Recorded validation does not constitute an independent audit, a release, or
 approval for sensitive production data.

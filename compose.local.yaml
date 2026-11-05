@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Local HTTPS only; trust the exported local CA on each client explicitly.
+services:
+  caddy:
+    ports: !override
+      - "0.0.0.0:80:8080"
+      - "0.0.0.0:443:8443"
+      - "0.0.0.0:443:8443/udp"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro

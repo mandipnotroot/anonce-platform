@@ -12,7 +12,7 @@ and optionally UDP 443. All user interactions remain browser-only.
 
 ## Deployment contracts
 
-PostgreSQL 17 uses backend-owned initialization scripts in `db/init` by default;
+PostgreSQL 18 uses backend-owned initialization scripts in `db/init` by default;
 `ANONCE_DB_INIT_DIR` can override that directory. Before startup, confirm it
 contains nonempty reviewed scripts, not an empty placeholder. They must create distinct member and
 anonymous login roles using the supplied role passwords, with no superuser,
@@ -35,6 +35,21 @@ Browser build uses `scripts/build.mjs` and emits `web/crypto.bundle.js`, retaini
 the vanilla app/API/UI files. Docker copies both `scripts/` and `web/` for this build.
 
 ## First setup (review deployment prerequisites first)
+
+### Local deployment
+
+Use `ANONCE_DOMAIN=anonce.local` with the local override:
+
+```sh
+docker compose -p anonce-local -f compose.yaml -f compose.local.yaml up -d --build
+```
+
+HTTPS listens on all interfaces. Map `anonce.local` to the server's LAN IP
+in each client's hosts file, and trust the local Caddy root CA in the browser.
+The current local CA certificate is exported to `.env.local-ca.crt`.
+Local credentials and keys stay in ignored `.env` and `secrets/` files.
+
+### Configuration
 
 Copy `.env.example` to `.env`; fill every blank with strong distinct credentials,
 correct role URLs (URL-encode passwords), public domain, and reviewed init path.
@@ -87,7 +102,9 @@ Do not add access logs, request tracing, or identifying database statement logs.
 The host/network can still observe timing and addresses; this is not protection
 against malicious served code or traffic correlation.
 
-## Backup, restore, upgrades
+## Backup and restore
+
+PostgreSQL 18 mounts `pgdata` at `/var/lib/postgresql`.
 
 A disposable custom-format backup/restore exercise matched all 14 table counts
 and sorted SHA-256 row digests, including ciphertext/receipt digests. This is not
@@ -112,7 +129,3 @@ docker compose exec -T db pg_restore -U anonce_admin -d anonce --exit-on-error <
 
 Restore into a fresh initialized database, not over live data. Verify grants,
 integrity, migration versions, and application behavior before reopening access.
-Before upgrades, review source and migration changes, retain encrypted backups,
-test in staging, then rebuild/restart. Do not assume schema downgrades are safe;
-rollback may require restoring the matching database and key. No automatic
-rollback, rotation, recovery, or availability guarantee is claimed.

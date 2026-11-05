@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 services:
   db:
-    image: postgres:17-bookworm
+    image: postgres:18.6-alpine3.24
     user: postgres
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -19,7 +19,7 @@ services:
       ANONCE_MEMBER_DB_PASSWORD: ${ANONCE_MEMBER_DB_PASSWORD:?set member role password}
       ANONCE_ANON_DB_PASSWORD: ${ANONCE_ANON_DB_PASSWORD:?set anonymous role password}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - type: bind
         source: ${ANONCE_DB_INIT_DIR:-./db/init}
         target: /docker-entrypoint-initdb.d
@@ -54,7 +54,7 @@ services:
       db:
         condition: service_healthy
     read_only: true
-    tmpfs: [/tmp:size=16m,noexec,nosuid]
+    tmpfs: ["/tmp:size=16m,noexec,nosuid"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped

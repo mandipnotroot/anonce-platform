@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{
+    http_port 8080
+    https_port 8443
+    admin off
+    log {
+        output discard
+    }
+}
+http://anonce.local:8080 {
+    redir https://anonce.local{uri} permanent
+}
+anonce.local {
+    tls internal
+    header Alt-Svc "h3=\":443\"; ma=2592000"
+    # No access logging. Backend owns CSP and other strict response headers.
+    @anonymous path /api/anon/*
+    handle @anonymous {
+        reverse_proxy app:8080 {
+            header_up -Cookie
+            header_up -Authorization
+            header_up -Forwarded
+            header_up -X-Forwarded-For
+            header_up -X-Real-IP
+            header_up -True-Client-IP
+            header_up -CF-Connecting-IP
+            header_up -X-Client-IP
+        }
+    }
+    handle {
+        reverse_proxy app:8080
+    }
+}
