@@ -1,0 +1,4 @@
+# Keep local coordination searchable despite .gitignore.
+!.slim/
+!.slim/deepwork/
+!.slim/deepwork/**

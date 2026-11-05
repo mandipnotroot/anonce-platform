@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+.git
+.slim
+.env
+.env.*
+!.env.example
+secrets
+backups
+node_modules
+bin
+coverage
+*.key
+*.pem
+*.out
+/web/crypto.bundle.js
+/web/crypto.bundle.js.map
+/web/crypto.bundle.js.LEGAL.txt

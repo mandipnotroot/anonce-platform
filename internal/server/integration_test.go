@@ -1,0 +1,258 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package server
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"github.com/cloudflare/circl/blindsign/blindrsa"
+	"github.com/mandipnotroot/anonce-platform/internal/protocol"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"testing"
+)
+
+type testUser struct {
+	id             string
+	pw, re, member ed25519.PrivateKey
+	cookie, csrf   string
+}
+
+func request(h http.Handler, method, path string, v any, u *testUser) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(v)
+	r := httptest.NewRequest(method, path, bytes.NewReader(b))
+	r.Header.Set("Origin", "https://anonce.test")
+	r.Header.Set("Content-Type", "application/json")
+	if u != nil {
+		r.Header.Set("Cookie", cookieName+"="+u.cookie)
+		r.Header.Set("X-CSRF-Token", u.csrf)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+func result(t *testing.T, w *httptest.ResponseRecorder, status int) map[string]any {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("status %d want %d: %s", w.Code, status, w.Body.String())
+	}
+	var v map[string]any
+	if e := json.Unmarshal(w.Body.Bytes(), &v); e != nil {
+		t.Fatal(e)
+	}
+	return v
+}
+func signed(t *testing.T, s *Server, h http.Handler, u *testUser, action string, p any, pre bool) envelope {
+	t.Helper()
+	b, _ := json.Marshal(p)
+	who := u
+	if pre {
+		who = nil
+	}
+	c := result(t, request(h, "POST", "/api/member/challenges", map[string]string{"account_id": u.id, "action": action, "payload_hash": protocol.B64(protocol.Hash(b))}, who), 200)
+	epoch, _ := strconv.ParseUint(c["credential_epoch"].(string), 10, 64)
+	expires, _ := strconv.ParseUint(c["expires_at"].(string), 10, 64)
+	msg := protocol.E("challenge", s.deployment, []byte(s.cfg.Origin), mustDecode(u.id), mustDecode(c["challenge_id"].(string)), []byte(action), protocol.U64(epoch), protocol.Hash(b), mustDecode(c["nonce"].(string)), protocol.U64(expires))
+	pfs := proof{Challenge: c["challenge_id"].(string), Password: protocol.B64(ed25519.Sign(u.pw, msg)), Recovery: protocol.B64(ed25519.Sign(u.re, msg)), Membership: protocol.B64(ed25519.Sign(u.member, msg))}
+	return envelope{protocol.B64(b), pfs}
+}
+func fakeWrapper() wrapper {
+	return wrapper{1, protocol.ID(), protocol.B64(protocol.Random(12)), protocol.B64(protocol.Random(48))}
+}
+func fakeObject() object {
+	return object{1, protocol.ID(), "1", protocol.B64(protocol.Random(12)), protocol.B64(protocol.Random(48))}
+}
+func newUser(t *testing.T, s *Server, h http.Handler) *testUser {
+	t.Helper()
+	_, pw, _ := ed25519.GenerateKey(rand.Reader)
+	_, re, _ := ed25519.GenerateKey(rand.Reader)
+	_, mp, _ := ed25519.GenerateKey(rand.Reader)
+	u := &testUser{id: protocol.ID(), pw: pw, re: re, member: mp}
+	p := registration{Request: protocol.ID(), Account: u.id, Login: "user-" + u.id, KDF: kdf{19, protocol.B64(protocol.Random(16)), 65536, 3, 1, 32}, Password: protocol.B64(pw.Public().(ed25519.PublicKey)), RecoverySalt: protocol.B64(protocol.Random(32)), Recovery: protocol.B64(re.Public().(ed25519.PublicKey)), PasswordWrap: fakeWrapper(), RecoveryWrap: fakeWrapper(), Membership: protocol.B64(mp.Public().(ed25519.PublicKey)), Objects: []object{fakeObject()}}
+	env := signed(t, s, h, u, "register", p, true)
+	result(t, request(h, "POST", "/api/member/register", env, nil), 201)
+	loginUser(t, s, h, u, "login-password")
+	return u
+}
+func loginUser(t *testing.T, s *Server, h http.Handler, u *testUser, method string) {
+	p := map[string]string{"request_id": protocol.ID(), "account_id": u.id, "method": method}
+	env := signed(t, s, h, u, method, p, true)
+	w := request(h, "POST", "/api/member/session", env, nil)
+	v := result(t, w, 200)
+	u.cookie = w.Result().Cookies()[0].Value
+	u.csrf = v["csrf_token"].(string)
+}
+func testServer(t *testing.T) *Server {
+	t.Helper()
+	url := os.Getenv("ANONCE_TEST_DATABASE_URL")
+	anon := os.Getenv("ANONCE_TEST_ANON_DATABASE_URL")
+	if url == "" || anon == "" {
+		t.Skip("disposable PostgreSQL URLs not configured")
+	}
+	key := filepath.Join(t.TempDir(), "master")
+	if e := os.WriteFile(key, []byte(protocol.B64(protocol.Hash([]byte("anonce disposable integration master fixture only")))), 0600); e != nil {
+		t.Fatal(e)
+	}
+	s, e := New(context.Background(), Config{DatabaseURL: url, AnonymousURL: anon, Origin: "https://anonce.test", KeyFile: key, WebDir: t.TempDir(), SourceURL: "https://github.com/mandipnotroot/anonce-platform"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(s.Close)
+	return s
+}
+func TestIntegrationWholeFlowConcurrent(t *testing.T) {
+	s := testServer(t)
+	h := s.Handler()
+	u := newUser(t, s, h)
+	ctx := context.Background()
+	// Isolation is enforced by PostgreSQL, not merely handler routing.
+	if _, e := s.anonymous.Exec(ctx, "SELECT * FROM member.accounts"); e == nil {
+		t.Fatal("anonymous read accounts")
+	}
+	if _, e := s.anonymous.Exec(ctx, "UPDATE anon.reviews SET accepted_count=100"); e == nil {
+		t.Fatal("anonymous mutate reviews")
+	}
+	orgEnv := signed(t, s, h, u, "org-create", map[string]string{"request_id": protocol.ID(), "name": "Test organization"}, false)
+	org := result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 201)["id"].(string)
+	// Exact mutation retry is cached; changed/reused challenge cannot create again.
+	result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 200)
+	path := "/api/member/orgs/" + org + "/reviews"
+	env := signed(t, s, h, u, "review-create", map[string]any{"request_id": protocol.ID(), "title": "Feedback", "max_responses": 1}, false)
+	v := result(t, request(h, "POST", path, env, u), 201)
+	id := v["id"].(string)
+	path = "/api/member/reviews/" + id
+	questions := []question{{"q1", "text", "Feedback", true, []choice{}}}
+	update := map[string]any{"request_id": protocol.ID(), "expected_revision": "1", "title": "Feedback", "description": "Private", "questions": questions, "max_responses": 1, "opens_at": nil, "closes_at": nil}
+	env = signed(t, s, h, u, "review-update", update, false)
+	v = result(t, request(h, "PUT", path, env, u), 200)
+	cert := result(t, request(h, "GET", "/api/member/orgs/"+org+"/certificate", nil, u), 200)
+	d := descriptor{V: 1, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Account: u.id, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Title: "Feedback", Description: "Private", Questions: questions, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string), Max: 1}
+	desc, _ := json.Marshal(d)
+	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc))), "vault_write": vaultWrite{"0", fakeObject()}}
+	// An otherwise exact, genuinely CA-signed but expired leaf cannot publish.
+	expired := expiredCert(t, s, org, d.Membership, u.member.Public().(ed25519.PublicKey))
+	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
+		t.Fatal(e)
+	}
+	badD := d
+	badD.Certificate = expired
+	badBytes, _ := json.Marshal(badD)
+	badPublish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(badBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", badBytes))), "vault_write": vaultWrite{"0", fakeObject()}}
+	badEnv := signed(t, s, h, u, "review-publish", badPublish, false)
+	result(t, request(h, "POST", path+"/publish", badEnv, u), 400)
+	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", d.Certificate, d.Membership); e != nil {
+		t.Fatal(e)
+	}
+	env = signed(t, s, h, u, "review-publish", publish, false)
+	result(t, request(h, "POST", path+"/publish", env, u), 200)
+	pub, e := x509.ParsePKIXPublicKey(mustDecode(d.Public))
+	if e != nil {
+		t.Fatal(e)
+	}
+	client, e := blindrsa.NewClient(blindrsa.SHA384PSSRandomized, pub.(*rsa.PublicKey))
+	if e != nil {
+		t.Fatal(e)
+	}
+	serial := protocol.Random(32)
+	msg := protocol.E("authorization", s.deployment, mustDecode(id), protocol.Hash(desc), mustDecode(d.Issuer), serial)
+	prepared, e := client.Prepare(rand.Reader, msg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	blinded, state, e := client.Blind(rand.Reader, prepared)
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Two independently signed quota requests race; precisely one reserves a slot.
+	type issuance struct {
+		env     envelope
+		request string
+	}
+	requests := make([]issuance, 2)
+	for i := range requests {
+		req := protocol.ID()
+		p := map[string]any{"request_id": req, "issuer_key_id": d.Issuer, "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}
+		requests[i] = issuance{signed(t, s, h, u, "issue", p, false), req}
+	}
+	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
+		t.Fatal(e)
+	}
+	result(t, request(h, "POST", path+"/issuances", requests[0].env, u), 403)
+	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", d.Certificate, d.Membership); e != nil {
+		t.Fatal(e)
+	}
+	responses := make([]*httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for i := range responses {
+		wg.Go(func() { responses[i] = request(h, "POST", path+"/issuances", requests[i].env, u) })
+	}
+	wg.Wait()
+	success := -1
+	for i, w := range responses {
+		if w.Code == 200 {
+			if success != -1 {
+				t.Fatal("quota overrun")
+			}
+			success = i
+		} else if w.Code != 409 {
+			t.Fatalf("issue %d: %s", w.Code, w.Body.String())
+		}
+	}
+	if success < 0 {
+		t.Fatal("no issue succeeded")
+	}
+	issued := result(t, responses[success], 200)
+	retry := result(t, request(h, "POST", path+"/issuances", requests[success].env, u), 200)
+	if issued["blind_signature"] != retry["blind_signature"] {
+		t.Fatal("issuance retry changed")
+	}
+	sig, e := client.Finalize(state, mustDecode(issued["blind_signature"].(string)))
+	if e != nil {
+		t.Fatal(e)
+	}
+	sub := submission{id, d.Issuer, protocol.B64(prepared), protocol.B64(sig), protocol.B64(protocol.Random(32)), protocol.B64(protocol.Random(64))}
+	responses = make([]*httptest.ResponseRecorder, 12)
+	for i := range responses {
+		wg.Go(func() { responses[i] = request(h, "POST", "/api/anon/submissions", sub, nil) })
+	}
+	wg.Wait()
+	var receipt string
+	for _, w := range responses {
+		v := result(t, w, 200)
+		if receipt != "" && receipt != v["receipt_id"] {
+			t.Fatal("receipt changed")
+		}
+		receipt = v["receipt_id"].(string)
+	}
+	v = result(t, request(h, "GET", path, nil, u), 200)
+	if v["accepted_count"] != "1" || v["issued_count"] != "1" {
+		t.Fatalf("counters: %v", v)
+	}
+	closeEnv := signed(t, s, h, u, "review-close", revisionRequest{protocol.ID(), "3"}, false)
+	result(t, request(h, "POST", path+"/close", closeEnv, u), 200)
+	result(t, request(h, "POST", "/api/anon/submissions", sub, nil), 200)
+	sub.Ciphertext = protocol.B64(protocol.Random(64))
+	result(t, request(h, "POST", "/api/anon/submissions", sub, nil), 409)
+	lookup := map[string]string{"review_id": id, "issuer_key_id": d.Issuer, "serial": protocol.B64(serial)}
+	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, nil), 200)
+	result(t, request(h, "POST", "/api/anon/receipts/lookup", lookup, u), 400)
+	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
+		t.Fatal(e)
+	}
+	rows := result(t, request(h, "GET", path+"/submissions", nil, u), 200)
+	if len(rows["items"].([]any)) != 1 {
+		t.Fatal("missing response")
+	}
+	// Recovery sessions cannot create organizations but can read the encrypted vault.
+	loginUser(t, s, h, u, "login-recovery")
+	result(t, request(h, "GET", "/api/member/vault", nil, u), 200)
+	result(t, request(h, "GET", "/api/member/orgs", nil, u), 403)
+}

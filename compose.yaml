@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+services:
+  db:
+    image: postgres:17-bookworm
+    user: postgres
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        found=0
+        for script in /docker-entrypoint-initdb.d/*.sh /docker-entrypoint-initdb.d/*.sql /docker-entrypoint-initdb.d/*.sql.gz; do
+          if [ -s "$$script" ]; then found=1; fi
+        done
+        [ "$$found" = 1 ] || { echo 'Missing nonempty database initialization scripts' >&2; exit 1; }
+        exec docker-entrypoint.sh postgres
+    environment:
+      POSTGRES_DB: anonce
+      POSTGRES_USER: anonce_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong database administrator password}
+      ANONCE_MEMBER_DB_PASSWORD: ${ANONCE_MEMBER_DB_PASSWORD:?set member role password}
+      ANONCE_ANON_DB_PASSWORD: ${ANONCE_ANON_DB_PASSWORD:?set anonymous role password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - type: bind
+        source: ${ANONCE_DB_INIT_DIR:-./db/init}
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U anonce_admin -d anonce"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    logging:
+      driver: none
+  app:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set member/migration role URL, never administrator}
+      ANON_DATABASE_URL: ${ANON_DATABASE_URL:?set distinct restricted anonymous role URL}
+      ANONCE_ORIGIN: https://${ANONCE_DOMAIN:?set public domain}
+      ANONCE_ADDR: :8080
+      ANONCE_KEY_FILE: /run/secrets/server_key
+      ANONCE_WEB_DIR: /app/web
+      ANONCE_SOURCE_URL: ${ANONCE_SOURCE_URL:?set complete corresponding source URL}
+    secrets: [server_key]
+    networks: [database, edge]
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp:size=16m,noexec,nosuid]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: none
+  caddy:
+    build:
+      context: .
+      target: proxy
+    user: "1000:1000"
+    environment:
+      ANONCE_DOMAIN: ${ANONCE_DOMAIN:?set public domain}
+    ports: ["80:8080", "443:8443", "443:8443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on: [app]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    logging:
+      driver: none
+networks:
+  database:
+    internal: true
+  edge: {}
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}
+secrets:
+  server_key:
+    file: ${ANONCE_SERVER_KEY_FILE:?set host server key path}

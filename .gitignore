@@ -1,0 +1,29 @@
+# Generated Go artifacts
+/bin/
+/build/
+/dist/
+*.test
+*.out
+coverage/
+coverage.*
+
+# Node dependencies and build caches
+node_modules/
+.cache/
+.npm/
+
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# Local coordination state
+.slim/deepwork/
+
+# Browser crypto build outputs (regenerated from pinned dependencies)
+/web/crypto.bundle.js
+/web/crypto.bundle.js.map
+/web/crypto.bundle.js.LEGAL.txt
