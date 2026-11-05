@@ -5,6 +5,10 @@ import { saveSealed, loadSealed, allEncrypted, getDeviceRecord, putDeviceRecord,
 
 let state, config, generation=0;
 export function getReceiptTrust() { return C.getReceiptTrust(); }
+export async function loadReceiptTrust() {
+  const config = await request('/api/public/config', { anonymous:true });
+  return {v:1,deployment_id:config.deployment_id,receipt_key_id:config.receipt_key_id,receipt_keys:config.receipt_keys};
+}
 // Scan JSON structure before parsing so duplicate keys cannot disappear during parsing.
 function receiptJSON(text) {
   const invalid=()=>{throw new APIError('INVALID_RECEIPT','Invalid receipt or trust JSON.');};

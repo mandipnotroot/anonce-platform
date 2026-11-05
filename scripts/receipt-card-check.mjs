@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { chromium } from "playwright";
@@ -9,12 +10,15 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
   const vector = JSON.parse(await readFile(new URL("../testdata/receipt-v2.json", import.meta.url), "utf8"));
   const server = createServer(async (request, response) => {
     try {
-      if (request.url === "/") {
-        response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><main id="app"></main>');
+      const pathname = new URL(request.url, "http://localhost").pathname;
+      if (pathname === "/api/public/config") {
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ ...vector.trust, ca_certificate: "unused" }));
         return;
       }
-      const path = `${process.cwd()}/web/${request.url.slice(1)}`;
-      response.setHeader("Content-Type", request.url.endsWith(".css") ? "text/css" : "text/javascript");
+      const path = pathname === "/" ? `${process.cwd()}/web/index.html` : `${process.cwd()}/web/${pathname.slice(1)}`;
+      response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+      response.setHeader("Content-Type", pathname === "/" || pathname.endsWith(".html") ? "text/html" : pathname.endsWith(".css") ? "text/css" : "text/javascript");
       response.end(await readFile(path));
     } catch {
       response.statusCode = 404;
@@ -23,13 +27,17 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   let browser;
+  let tempDir;
   try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1280, height: 900 } });
-    await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.evaluate(() => {
-      document.querySelector("#app").innerHTML = '<section class="notice receipt-notice"><h2>Response accepted</h2><p class="receipt-status">Receipt signature verified</p><p>Accepted <time>Nov 5, 2026</time></p><p>Keep a copy of this receipt. It confirms acceptance, not what your response said.</p><div class="receipt-actions"><button type="button" class="button" id="download">Download receipt PNG</button><a class="button ghost" href="#/verify-receipt">Verify a receipt</a></div></section>';
-    });
+    const pageErrors = [];
+    const requestFailures = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("console", message => { if (message.type() === "error") pageErrors.push(message.text()); });
+    page.on("requestfailed", request => requestFailures.push(`${request.url()}: ${request.failure()?.errorText}`));
+    await page.goto(`http://127.0.0.1:${server.address().port}/#/verify-receipt`);
+    await page.waitForSelector("#verify-receipt-file", { state: "attached", timeout: 5000 }).catch(() => { throw new Error(`Verifier did not render: ${JSON.stringify({ errors: pageErrors })}`); });
     const layouts = [];
     for (const width of [320, 375, 1280]) {
       await page.setViewportSize({ width, height: 900 });
@@ -37,38 +45,31 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
     }
     assert.ok(layouts.every(({ width, document }) => document <= width));
 
+    tempDir = await mkdtemp("/tmp/opencode/anonce-receipt-");
+    const pngPath = join(tempDir, "receipt.png");
+    const trustPath = join(tempDir, "trust.json");
     const card = await page.evaluate(async (receipt) => {
       const { renderReceiptPNG } = await import("/receipt-card.js");
       const blob = await renderReceiptPNG({ receipt });
-      window.cardURL = URL.createObjectURL(blob);
-      document.querySelector("#download").onclick = () => {
-        const link = document.createElement("a");
-        link.href = window.cardURL;
-        link.download = "anonce-receipt.png";
-        document.body.append(link);
-        link.click();
-        link.remove();
-      };
-      return { type: blob.type, size: blob.size };
+      return { type: blob.type, size: blob.size, bytes: [...new Uint8Array(await blob.arrayBuffer())] };
     }, vector.receipt);
     assert.equal(card.type, "image/png");
-    const downloadEvent = page.waitForEvent("download");
-    await page.click("#download");
-    const download = await downloadEvent;
-    assert.equal(download.suggestedFilename(), "anonce-receipt.png");
-    const png = await readFile(await download.path());
-    const verification = await page.evaluate(async ({ receipt, trust, bytes }) => {
-      const { decodeReceiptPNG } = await import("/receipt-qr.bundle.js");
-      const { verifySavedReceipt } = await import("/app.js");
-      const text = await decodeReceiptPNG({ file: new Blob([new Uint8Array(bytes)], { type: "image/png" }) });
-      if (text !== JSON.stringify(receipt)) throw new Error("Downloaded card changed receipt bytes.");
-      await verifySavedReceipt({ receiptText: text, trustText: JSON.stringify(trust) });
-      return { decodedExact: true, signatureVerified: true };
-    }, { receipt: vector.receipt, trust: vector.trust, bytes: [...png] });
-    assert.deepEqual(verification, { decodedExact: true, signatureVerified: true });
-    console.log(JSON.stringify({ card, filename: download.suggestedFilename(), verification, layouts }));
+    await writeFile(pngPath, Buffer.from(card.bytes));
+    await writeFile(trustPath, JSON.stringify(vector.trust));
+    await page.locator(".verify-trust summary").click();
+    await page.locator("#verify-trust-file").setInputFiles(trustPath);
+    await page.waitForFunction(() => document.querySelector("#verify-trust-text").value.includes('"keys"') || document.querySelector("#verify-trust-text").value.length > 0);
+    await page.locator("#verify-receipt-file").setInputFiles(pngPath);
+    await page.waitForFunction(() => document.querySelector("#receipt-file-status").textContent === "Receipt image loaded. Ready to verify.", null, { timeout: 15000 }).catch(async () => { throw new Error(`PNG decode state: ${JSON.stringify(await page.evaluate(() => ({ files: [...document.querySelector("#verify-receipt-file").files].map(file => file.name), receiptTextLength: document.querySelector("#verify-receipt-text").value.length, status: document.querySelector("#receipt-file-status").textContent, result: document.querySelector("#verify-result").textContent })))}; errors=${JSON.stringify(pageErrors)} requests=${JSON.stringify(requestFailures)}`); });
+    const states = await page.evaluate(() => ({ fileCount: document.querySelector("#verify-receipt-file").files.length, receiptTextLength: document.querySelector("#verify-receipt-text").value.length, status: document.querySelector("#receipt-file-status").textContent }));
+    assert.ok(states.receiptTextLength > 0, JSON.stringify(states));
+    await page.click("#verify-receipt");
+    await page.waitForFunction(() => document.querySelector("#verify-result").textContent.includes("Receipt signature verified"));
+    assert.deepEqual(pageErrors, []);
+    console.log(JSON.stringify({ card: { type: card.type, size: card.size }, states, verified: true, layouts }));
   } finally {
     await browser?.close();
+    if (tempDir) await rm(tempDir, { recursive: true });
     await new Promise((resolve) => server.close(resolve));
   }
 });

@@ -28,8 +28,9 @@ merely because a network request failed; retry the saved pending response.
    Configuration files have a 64 KiB limit. Never trust a key merely because it
    accompanies a receipt or appears in an image.
 4. Choose **Verify receipt**. Receipt checking runs locally without uploading
-   either file. Loading the website initially still requires its served assets
-   and configuration.
+   either file. Loading the website and its current public signing keys still
+   requires network requests. An independently obtained configuration can be
+   imported if the current site's keys cannot be loaded.
 
 Use **Download this site’s public configuration** inside the signing-key options
 to retain trusted public keys for later checks. Keep the configuration's origin and authenticity in mind when

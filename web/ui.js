@@ -224,7 +224,7 @@ async function load() {
   const route = path();
   if (route[0] === "verify-receipt") {
     session = null;
-    return renderReceiptVerifier();
+    return await renderReceiptVerifier();
   }
   try {
     session = await api.getSession();
@@ -307,21 +307,28 @@ async function load() {
     toast(say(e));
   }
 }
-function renderReceiptVerifier() {
-  const currentTrust = JSON.stringify(api.getReceiptTrust(), null, 2);
-  frame(`${head("Verify a receipt", "Confirm that receipt was signed. No sign-in or network request is needed.")}
+async function renderReceiptVerifier() {
+  let currentTrust = "";
+  let trustAvailable = true;
+  try {
+    currentTrust = JSON.stringify(await api.loadReceiptTrust(), null, 2);
+  } catch {
+    trustAvailable = false;
+  }
+  if (path()[0] !== "verify-receipt") return;
+  frame(`${head("Verify a receipt", "Public signing keys load once from this site. Image reading and signature checking happen locally.")}
     <section class="card form-card verifier-card">
       <div class="verifier-intro"><span class="verifier-step">A private, local check</span><p>Choose the receipt file you downloaded. You do not need to open or edit JSON.</p></div>
       <label class="field receipt-file-field"><span>Receipt card image</span><input id="verify-receipt-file" type="file" accept="image/png,.png" aria-describedby="receipt-limit receipt-file-status"><span id="receipt-file-status" class="help" aria-live="polite">Choose your Anonce receipt PNG.</span></label>
       <details class="verifier-paste"><summary>Paste receipt JSON instead</summary><label class="field" for="verify-receipt-text">Receipt JSON<textarea id="verify-receipt-text" rows="7" maxlength="65536" aria-describedby="receipt-limit"></textarea></label></details>
       <p id="receipt-limit" class="help">Receipt image up to 4 MiB. Verification starts only when you press the button.</p>
       <p class="notice verifier-trust-note">This check uses public signing keys published by this site unless you choose another configuration. A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt.</p>
-      <details class="verify-trust"><summary>Choose which public signing keys to trust</summary><p class="help">By default, this uses keys published by this site. For an independent check, get a configuration from a source you trust.</p>
-        <label class="trust-choice"><input type="radio" name="trust-source" value="current" checked> Use keys published by this site</label>
-        <label class="trust-choice"><input type="radio" name="trust-source" value="import"> Use an independently obtained configuration</label>
+      <details class="verify-trust"><summary>Choose which public signing keys to trust</summary><p class="help">${trustAvailable ? "This configuration uses keys published by this site. For an independent check, get a configuration from a source you trust." : "Could not load this site’s public signing keys. Choose an independently obtained configuration to continue."}</p>
+        <label class="trust-choice"><input type="radio" name="trust-source" value="current" ${trustAvailable ? "checked" : "disabled"}> Use keys published by this site</label>
+        <label class="trust-choice"><input type="radio" name="trust-source" value="import" ${trustAvailable ? "" : "checked"}> Use an independently obtained configuration</label>
         <label class="field">Configuration file<input id="verify-trust-file" type="file" accept="application/json,.json"></label>
-        <label class="field" for="verify-trust-text">Configuration JSON<textarea id="verify-trust-text" rows="6" maxlength="65536" disabled>${esc(currentTrust)}</textarea></label>
-        <button type="button" class="button secondary" id="download-trust">Download this site’s public configuration</button>
+        <label class="field" for="verify-trust-text">Configuration JSON<textarea id="verify-trust-text" rows="6" maxlength="65536" ${trustAvailable ? "disabled" : ""}>${esc(currentTrust)}</textarea></label>
+        <button type="button" class="button secondary" id="download-trust" ${trustAvailable ? "" : "disabled"}>Download this site’s public configuration</button>
       </details>
       <button type="button" class="button verify-submit" id="verify-receipt">Verify receipt</button>
       <div id="verify-result" role="status" aria-live="polite"></div>
@@ -330,6 +337,7 @@ function renderReceiptVerifier() {
   const receiptText = document.querySelector("#verify-receipt-text");
   const receiptFile = document.querySelector("#verify-receipt-file");
   const trustText = document.querySelector("#verify-trust-text");
+  trustText.disabled = trustAvailable;
   const trustFile = document.querySelector("#verify-trust-file");
   const result = document.querySelector("#verify-result");
   const verifyButton = document.querySelector("#verify-receipt");
@@ -344,7 +352,7 @@ function renderReceiptVerifier() {
     verifyButton.disabled = false;
     return generation;
   };
-  const currentChoice = () => document.querySelector('input[name="trust-source"]:checked').value === "current";
+  const currentChoice = () => document.querySelector('input[name="trust-source"]:checked')?.value === "current";
   receiptText.addEventListener("input", () => { clearResult(); receiptFileStatus.textContent = "Using pasted receipt JSON."; });
   trustText.addEventListener("input", clearResult);
   document.querySelectorAll('input[name="trust-source"]').forEach((radio) => radio.addEventListener("change", () => {
@@ -383,7 +391,7 @@ function renderReceiptVerifier() {
     loadVerifierFile(trustFile.files[0], trustText, result, clearResult, (token) => token === generation);
   });
   document.querySelector("#download-trust").onclick = () => {
-    const data = JSON.stringify(api.getReceiptTrust(), null, 2);
+    const data = currentTrust;
     const url = URL.createObjectURL(new Blob([`${data}\n`], { type: "application/json;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "anonce-receipt-trust.json";
     document.body.appendChild(link);
@@ -395,6 +403,10 @@ function renderReceiptVerifier() {
     const check = generation;
     const inputText = receiptText.value;
     const selectedTrust = currentChoice() ? currentTrust : trustText.value;
+    if (!inputText.trim() && receiptFileStatus.textContent.startsWith("Could not read receipt image.")) {
+      result.textContent = "This image does not contain a readable receipt QR code.";
+      return;
+    }
     if (!inputText.trim() || !selectedTrust.trim()) {
       result.textContent = !inputText.trim() ? "Choose a receipt PNG or paste receipt JSON first." : "Choose or paste a public trust configuration.";
       return;

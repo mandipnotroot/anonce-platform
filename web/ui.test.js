@@ -217,23 +217,23 @@ test("receipt verifier uses local API only and enforces UTF-8 byte bounds", asyn
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ receiptText: "receipt", trustText: "trust" }]);
   await assert.rejects(verify("é".repeat(32769), "trust"), /64 KiB/);
   assert.equal(calls.length, 1);
-  assert.match(source, /route\[0\] === "verify-receipt"\) \{\s*session = null;\s*return renderReceiptVerifier\(\);/);
+  assert.match(source, /route\[0\] === "verify-receipt"\) \{\s*session = null;\s*return await renderReceiptVerifier\(\);/);
   assert.ok(source.indexOf('if (route[0] === "verify-receipt")') < source.indexOf("session = await api.getSession()"));
   assert.match(source, /verifyReceiptLocally\(inputText, selectedTrust\)/);
   assert.match(source, /verifySavedReceipt/);
   assert.match(source, /href="#\/verify-receipt"/);
   assert.match(source, /does not prove response contents, storage, anonymity, or trusted time/);
   assert.match(source, /does not match the receipt to your original response/);
-  assert.doesNotMatch(source.slice(source.indexOf("function renderReceiptVerifier"), source.indexOf("function formatReceiptTime")), /fetch\s*\(|api\.(?!getReceiptTrust|verifySavedReceipt)/);
+  assert.doesNotMatch(source.slice(source.indexOf("function renderReceiptVerifier"), source.indexOf("function formatReceiptTime")), /fetch\s*\(|api\.(?!loadReceiptTrust|verifySavedReceipt)/);
 });
 
 test("receipt verifier is file-first, keeps JSON and trust choices disclosed, and stays in navigation", () => {
-  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const verifier = source.slice(source.indexOf("async function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
   assert.match(source, /href="#\/verify-receipt" aria-label="Verify receipt"/);
   assert.match(verifier, /Choose the receipt file you downloaded/);
   assert.match(verifier, /<details class="verifier-paste"><summary>Paste receipt JSON instead/);
   assert.match(verifier, /<details class="verify-trust"><summary>Choose which public signing keys to trust/);
-  assert.match(verifier, /This check uses public signing keys published by this site unless you choose another configuration/);
+  assert.match(verifier, /This configuration uses keys published by this site/);
   assert.match(verifier, /A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt/);
   assert.match(verifier, /independent check, get a configuration from a source you trust/);
   assert.match(verifier, /decodeReceiptPNG\(\{ file: selectedFile \}\)/);
@@ -245,16 +245,16 @@ test("receipt verifier is file-first, keeps JSON and trust choices disclosed, an
 });
 
 test("receipt verifier DOM handlers report empty, successful, failed, and stale checks", async () => {
-  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const verifier = source.slice(source.indexOf("async function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
   const nodes = new Map();
   const make = (value = "") => ({ value, textContent: "", innerHTML: "", disabled: false, files: [], listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, replaceChildren() { this.textContent = ""; this.innerHTML = ""; } });
   for (const id of ["#verify-receipt-text", "#verify-receipt-file", "#verify-trust-text", "#verify-trust-file", "#verify-result", "#verify-receipt", "#receipt-file-status", "#download-trust"]) nodes.set(id, make());
   const radios = [{ value: "current", checked: true, addEventListener(_type, fn) { this.onchange = fn; } }, { value: "import", checked: false, addEventListener(_type, fn) { this.onchange = fn; } }];
   const document = { querySelector: selector => selector.includes("trust-source") ? radios.find(radio => radio.checked) : nodes.get(selector), querySelectorAll: selector => selector.includes("trust-source") ? radios : [] };
   const pending = [];
-  const api = { getReceiptTrust: () => ({ trust: "current" }), verifySavedReceipt: input => new Promise((resolve, reject) => pending.push({ input, resolve, reject })) };
-  const context = { document, api, frame: markup => { context.markup = markup; }, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, formatReceiptTime: () => "accepted time", verifyReceiptLocally: (receiptText, trustText) => api.verifySavedReceipt({ receiptText, trustText }) };
-  vm.runInNewContext(`${verifier}; renderReceiptVerifier()`, context);
+  const api = { loadReceiptTrust: async () => ({ trust: "current" }), verifySavedReceipt: input => new Promise((resolve, reject) => pending.push({ input, resolve, reject })) };
+  const context = { document, api, frame: markup => { context.markup = markup; }, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, formatReceiptTime: () => "accepted time", verifyReceiptLocally: (receiptText, trustText) => api.verifySavedReceipt({ receiptText, trustText }), path: () => ["verify-receipt"] };
+  await vm.runInNewContext("(async () => { " + verifier + "; await renderReceiptVerifier(); })()", context);
   const input = nodes.get("#verify-receipt-text"), result = nodes.get("#verify-result"), button = nodes.get("#verify-receipt");
   await button.onclick();
   assert.match(result.textContent, /Choose a receipt PNG/);
@@ -282,16 +282,16 @@ test("receipt verifier DOM handlers report empty, successful, failed, and stale 
 });
 
 test("pending receipt image decode disables verification and reports invalidation", async () => {
-  const verifier = source.slice(source.indexOf("function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const verifier = source.slice(source.indexOf("async function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
   const nodes = new Map();
   const make = (value = "") => ({ value, textContent: "", innerHTML: "", disabled: false, isConnected: true, files: [], listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, replaceChildren() { this.textContent = ""; this.innerHTML = ""; } });
   for (const id of ["#verify-receipt-text", "#verify-receipt-file", "#verify-trust-text", "#verify-trust-file", "#verify-result", "#verify-receipt", "#receipt-file-status", "#download-trust"]) nodes.set(id, make());
   const radios = [{ value: "current", checked: true, addEventListener(_type, fn) { this.onchange = fn; } }, { value: "import", checked: false, addEventListener(_type, fn) { this.onchange = fn; } }];
   const document = { querySelector: selector => selector.includes("trust-source") ? radios.find(radio => radio.checked) : nodes.get(selector), querySelectorAll: selector => selector.includes("trust-source") ? radios : [] };
   const pending = [];
-  const api = { getReceiptTrust: () => ({ trust: "current" }) };
-  const context = { document, api, frame() {}, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, decodeReceiptPNG: () => new Promise((resolve, reject) => pending.push({ resolve, reject })), verifyReceiptLocally: async () => ({ receipt: { accepted_at: "1" } }), formatReceiptTime: () => "accepted time" };
-  vm.runInNewContext(`${verifier}; renderReceiptVerifier()`, context);
+  const api = { loadReceiptTrust: async () => ({ trust: "current" }) };
+  const context = { document, api, frame() {}, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, decodeReceiptPNG: () => new Promise((resolve, reject) => pending.push({ resolve, reject })), verifyReceiptLocally: async () => ({ receipt: { accepted_at: "1" } }), formatReceiptTime: () => "accepted time", path: () => ["verify-receipt"] };
+  await vm.runInNewContext("(async () => { " + verifier + "; await renderReceiptVerifier(); })()", context);
   const file = nodes.get("#verify-receipt-file"), button = nodes.get("#verify-receipt"), status = nodes.get("#receipt-file-status"), text = nodes.get("#verify-receipt-text"), trust = nodes.get("#verify-trust-text");
   file.files = [{ size: 10 }];
   file.listeners.change();
@@ -312,6 +312,26 @@ test("pending receipt image decode disables verification and reports invalidatio
   pending[1].resolve("stale decoded receipt");
   await Promise.resolve();
   assert.equal(text.value, "");
+});
+
+test("unavailable site trust leaves independent configuration editable and preserves image error", async () => {
+  const verifier = source.slice(source.indexOf("async function renderReceiptVerifier()"), source.indexOf("function formatReceiptTime("));
+  const nodes = new Map();
+  const make = () => ({ value: "", textContent: "", innerHTML: "", disabled: false, files: [], listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, replaceChildren() { this.textContent = ""; this.innerHTML = ""; } });
+  for (const id of ["#verify-receipt-text", "#verify-receipt-file", "#verify-trust-text", "#verify-trust-file", "#verify-result", "#verify-receipt", "#receipt-file-status", "#download-trust"]) nodes.set(id, make());
+  const radios = [{ value: "current", checked: true, disabled: false, addEventListener() {} }, { value: "import", checked: false, addEventListener() {} }];
+  const document = { querySelector: selector => selector.includes("trust-source") ? radios.find(radio => radio.checked) : nodes.get(selector), querySelectorAll: selector => selector.includes("trust-source") ? radios : [] };
+  const context = { document, api: { async loadReceiptTrust() { throw Error("offline"); } }, frame: markup => { context.markup = markup; }, head: () => "", esc: String, icon: () => "", JSON, toast() {}, URL: {}, Blob: class {}, formatReceiptTime: () => "accepted time", path: () => ["verify-receipt"] };
+  await vm.runInNewContext("(async () => { " + verifier + "; await renderReceiptVerifier(); })()", context);
+  assert.match(context.markup, /value="current" disabled/);
+  assert.match(context.markup, /value="import" checked/);
+  assert.doesNotMatch(context.markup, /id="verify-trust-text"[^>]*disabled/);
+  assert.equal(nodes.get("#verify-trust-text").disabled, false);
+  const status = nodes.get("#receipt-file-status"), result = nodes.get("#verify-result");
+  status.textContent = "Could not read receipt image. Choose another PNG.";
+  result.textContent = "This image does not contain a readable receipt QR code.";
+  await nodes.get("#verify-receipt").onclick();
+  assert.equal(result.textContent, "This image does not contain a readable receipt QR code.");
 });
 
 test("receipt times never render invalid dates for out-of-range values", () => {

@@ -25,3 +25,36 @@ test('PNG rejects IHDR and dimension limits before image allocation', async () =
     await assert.rejects(decodeReceiptPNG({file: new Blob([bytes])}), /IHDR/);
   }
 });
+
+test('PNG closes bitmap after dimension mismatch and canvas failure', async t => {
+  const bytes = new Uint8Array(33);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 13);
+  view.setUint32(12, 0x49484452);
+  view.setUint32(16, 1);
+  view.setUint32(20, 1);
+  const file = new Blob([bytes], {type: 'image/png'});
+  let closed = 0;
+  let bitmapWidth = 2;
+  for (const name of ['createImageBitmap', 'document']) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+    t.after(() => {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    });
+  }
+  globalThis.createImageBitmap = async source => {
+    assert.equal(source, file);
+    return {width: bitmapWidth, height: 1, close() {closed++;}};
+  };
+  await assert.rejects(decodeReceiptPNG({file}), /dimensions mismatch/);
+  assert.equal(closed, 1);
+  bitmapWidth = 1;
+  const canvas = {width: 0, height: 0, getContext() {return null;}};
+  globalThis.document = {createElement() {return canvas;}};
+  await assert.rejects(decodeReceiptPNG({file}), /Canvas is unavailable/);
+  assert.equal(closed, 2);
+  assert.equal(canvas.width, 0);
+  assert.equal(canvas.height, 0);
+});

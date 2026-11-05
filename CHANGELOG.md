@@ -72,6 +72,8 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Decode receipt PNGs without blob image URLs blocked by the site's security
+  policy, and load public signing keys when opening the verifier directly.
 - Verify signed receipt context before returning cached acceptance or decrypting
   reviewer results; use only verified receipt timestamps.
 - Reject unsafe server master-key files and bound reads of key material.

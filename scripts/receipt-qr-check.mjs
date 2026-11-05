@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 
 await build({stdin: {contents: "import QRCode from 'qrcode/lib/browser.js'; export {QRCode};", resolveDir: process.cwd()}, bundle: true, format: 'esm', platform: 'browser', outfile: '/tmp/opencode/qr-test-encoder.js'});
 const vector = JSON.parse(await readFile('testdata/receipt-v2.json', 'utf8'));
+const csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 const server = createServer(async (req, res) => {
+  res.setHeader('Content-Security-Policy', csp);
   try {
     if (req.url === '/') {res.end('<!doctype html>'); return;}
     const path = req.url === '/encoder.js' ? '/tmp/opencode/qr-test-encoder.js' : `${process.cwd()}/web/${req.url.slice(1)}`;
@@ -20,7 +22,12 @@ let browser;
 try {
   browser = await chromium.launch({headless: true});
   const page = await browser.newPage();
+  page.on('console', message => {if (message.type() === 'error') console.error(message.text());});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.evaluate(() => {
+    window.cspViolations = [];
+    document.addEventListener('securitypolicyviolation', event => window.cspViolations.push({directive: event.effectiveDirective, blockedURI: event.blockedURI}));
+  });
   const result = await page.evaluate(async vector => {
     const {createReceiptQRCanvas, decodeReceiptPNG} = await import('/receipt-qr.bundle.js');
     const {verifySavedReceipt} = await import('/app.js');
@@ -53,6 +60,7 @@ try {
     return {width: canvas.width, negatives, exact: true, signatureVerified: true, fullCardVerified: true};
   }, vector);
   assert.equal(result.negatives, 5);
+  assert.deepEqual(await page.evaluate(() => window.cspViolations), []);
   console.log(JSON.stringify(result));
 } finally {
   await browser?.close();

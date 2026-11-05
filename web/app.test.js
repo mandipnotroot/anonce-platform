@@ -18,10 +18,20 @@ async function service(overrides={}) {
     loadSealed:overrides.loadSealed,saveSealed:overrides.saveSealed|| (async()=>{}),
   });
   vm.runInContext(source+`;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust};
+    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust};
     globalThis.setSigned=value=>{signed=value;};`,context);
   return context;
 }
+
+test('standalone receipt trust loads only public config anonymously without crypto init',async()=>{
+  let requestArgs;
+  const config={v:99,deployment_id:'deployment',receipt_key_id:'current',receipt_keys:[{receipt_key_id:'current',receipt_public_key:'public'}],ca_certificate:'unused'};
+  const context=await service({request:async(...args)=>{requestArgs=args;return config;}});
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.service.loadReceiptTrust())),{
+    v:1,deployment_id:'deployment',receipt_key_id:'current',receipt_keys:config.receipt_keys,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(requestArgs)),['/api/public/config',{anonymous:true}]);
+});
 
 test('issuance padding has fixed byte length, whitespace roundtrip, and fits request limits',async()=>{
   const sealed=[];

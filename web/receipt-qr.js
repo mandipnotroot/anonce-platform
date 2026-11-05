@@ -21,13 +21,10 @@ export async function decodeReceiptPNG({file}) {
   if (view.getUint32(8) !== 13 || view.getUint32(12) !== 0x49484452) throw new Error('Invalid PNG IHDR');
   const width = view.getUint32(16), height = view.getUint32(20);
   if (!width || !height || width > 4096 || height > 4096 || width * height > 16_000_000) throw new Error('PNG dimensions exceed limits');
-  const url = URL.createObjectURL(file);
-  const image = new Image();
+  const image = await createImageBitmap(file);
   let canvas;
   try {
-    image.src = url;
-    await image.decode();
-    if (image.naturalWidth !== width || image.naturalHeight !== height) throw new Error('PNG dimensions mismatch');
+    if (image.width !== width || image.height !== height) throw new Error('PNG dimensions mismatch');
     canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -42,8 +39,7 @@ export async function decodeReceiptPNG({file}) {
     if (result.binaryData.length > 1600) throw new Error('Receipt QR payload exceeds 1600 UTF-8 bytes');
     return new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(new Uint8Array(result.binaryData));
   } finally {
-    image.src = '';
-    URL.revokeObjectURL(url);
+    image.close();
     if (canvas) canvas.width = canvas.height = 0;
   }
 }
