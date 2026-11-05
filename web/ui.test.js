@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./ui.js", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const helperSource = source.slice(source.indexOf("function recoveryPhrasePanel"), source.indexOf("async function load()"));
 const toastSource = source.slice(source.indexOf("function toast("), source.indexOf("async function copyText("));
 
@@ -153,6 +154,7 @@ test("accepted signed receipts render complete escaped JSON for initial and retr
 test("receipt tools copy and download complete formatted JSON", async () => {
   const receipt = { signature: "full-signature", nested: { proof: "complete-proof" } };
   const copied = [];
+  const notices = [];
   let blob;
   const callbacks = {};
   const box = { querySelector(selector) { return { set onclick(callback) { callbacks[selector] = callback; } }; } };
@@ -163,6 +165,7 @@ test("receipt tools copy and download complete formatted JSON", async () => {
     URL: { createObjectURL() { return "blob:receipt"; }, revokeObjectURL() {} },
     document: { body: { appendChild() {} }, createElement() { return { click() {}, remove() {} }; } },
     copyText: async (text, label) => copied.push({ text, label }),
+    toast: (message, type = "error") => notices.push({ message, type }),
   };
   vm.runInNewContext(`${sourceTools}\nbindReceiptTools(box, receipt);`, { ...context, box, receipt });
   await callbacks["[data-receipt-copy]"]();
@@ -171,6 +174,7 @@ test("receipt tools copy and download complete formatted JSON", async () => {
   assert.deepEqual(copied, [{ text: expected, label: "Receipt" }]);
   assert.equal(blob.parts[0], `${expected}\n`);
   assert.equal(blob.type, "application/json;charset=utf-8");
+  assert.deepEqual(notices, [{ message: "Receipt download started.", type: "success" }]);
 });
 
 test("receipt JSON wraps within narrow layouts", () => {
@@ -180,4 +184,86 @@ test("receipt JSON wraps within narrow layouts", () => {
   assert.match(styles, /\.receipt-notice\s*\{\s*margin-top:\s*18px/);
   assert.match(styles, /\.receipt-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*10px/);
   assert.match(source, /receipt-notice[\s\S]*?receipt-actions/);
+});
+
+test("shared spacing tokens drive cards, forms, fields, and responsive layouts", () => {
+  for (const token of ["--space-2", "--space-3", "--space-4", "--space-6"]) {
+    assert.match(styles, new RegExp(`\\bvar\\(${token}\\)`), `${token} must be used`);
+  }
+  assert.match(styles, /\.card \{\s*padding:\s*var\(--space-6\)/);
+  assert.match(styles, /\.field\s*\{[^}]*gap:\s*var\(--space-2\)/);
+  assert.match(styles, /\.card\s*\{\s*padding:\s*var\(--space-4\)/);
+  assert.match(styles, /\.form-card,.auth-card\s*\{\s*padding:\s*var\(--space-3\)/);
+  assert.match(styles, /--radius-control:\s*8px/);
+  assert.match(styles, /--radius-card:\s*12px/);
+});
+
+test("browser theme metadata follows light and dark system preference", () => {
+  assert.match(html, /theme-color" content="#f4f7f9" media="\(prefers-color-scheme: light\)"/);
+  assert.match(html, /theme-color" content="#141a1f" media="\(prefers-color-scheme: dark\)"/);
+});
+
+test("successful mutations report success without duplicating password inline feedback", () => {
+  for (const message of ["Organization created.", "Invitation created.", "Member approved.", "Membership revoked.", "Password updated.", "Recovery phrase replaced. Save your new phrase.", "Review draft created.", "Review published.", "Review closed.", "Review draft saved.", "Receipt download started.", "Recovery phrase download started."]) {
+    assert.ok(source.includes(`toast("${message}", "success")`), `missing success feedback: ${message}`);
+  }
+  assert.match(source, /catch \(error\) \{\s*toast\(say\(error\)\);\s*button\.disabled = false;/);
+  assert.match(source, /document\.querySelector\("#password \.form-error"\)\.textContent = ""/);
+  assert.doesNotMatch(source, /#password \.form-error"\)\.textContent\s*=\s*"Password updated/);
+});
+
+test("JSON and CSV exports confirm that browser download started", async () => {
+  const handlers = new Map();
+  const notices = [];
+  const clicks = [];
+  let urlNumber = 0;
+  const context = {
+    api: { async exportResponses({ format }) { return { blob: { format }, filename: `responses.${format}` }; } },
+    document: {
+      querySelector(selector) { return { addEventListener(_type, handler) { handlers.set(selector, handler); } }; },
+      createElement() { return { click() { clicks.push(this.download); } }; },
+    },
+    URL: { createObjectURL() { return `blob:${++urlNumber}`; }, revokeObjectURL() {} },
+    toast: (message, type = "error") => notices.push({ message, type }),
+    say: String,
+  };
+  const exportsSource = source.slice(source.indexOf("function bindResponseExports("), source.indexOf("function renderResponseResults("));
+  vm.runInNewContext(`${exportsSource}\nbindResponseExports("review-1");`, context);
+  await handlers.get("#export-json")();
+  await handlers.get("#export-csv")();
+  assert.deepEqual(clicks, ["responses.json", "responses.csv"]);
+  assert.deepEqual(notices, [
+    { message: "JSON export download started.", type: "success" },
+    { message: "CSV export download started.", type: "success" },
+  ]);
+});
+
+test("logout reports success or failure and restores button after failure", async () => {
+  const button = { disabled: false };
+  const notices = [];
+  const navigations = [];
+  let logoutFails = false;
+  const context = {
+    api: { async logout() { if (logoutFails) throw new Error("Logout failed."); } },
+    document: { querySelector() { return button; } },
+    session: { account_id: "acct" },
+    go: (route) => navigations.push(route),
+    toast: (message, type = "error") => notices.push({ message, type }),
+    say: (error) => error.message,
+  };
+  const handler = source.match(/document\.querySelector\("#logout"\)\.onclick = async \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(handler, "logout handler must remain testable");
+  const logout = vm.runInNewContext(`(async () => {${handler[1]}\n})`, context);
+  logoutFails = true;
+  await logout();
+  assert.equal(button.disabled, false);
+  assert.deepEqual(notices[0], { message: "Logout failed.", type: "error" });
+  assert.equal(context.session.account_id, "acct");
+  assert.deepEqual(navigations, []);
+  logoutFails = false;
+  await logout();
+  assert.equal(button.disabled, true);
+  assert.equal(context.session, null);
+  assert.deepEqual(navigations, ["/login"]);
+  assert.deepEqual(notices[1], { message: "Signed out.", type: "success" });
 });

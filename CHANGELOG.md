@@ -23,6 +23,8 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Share spacing, typography, and corner-radius tokens across cards, forms, and
+  responsive layouts; match browser theme colors to light and dark preferences.
 - Align the web interface with the reference design: centered header navigation,
   a constrained content area, a shared footer, and consistent light/dark cards
   and forms across desktop and mobile screens.
@@ -37,6 +39,9 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Confirm organization, invitation, membership, review, password, recovery, and
+  download actions with shared success toasts. Avoid duplicate password feedback
+  and restore the sign-out button after failed requests.
 - Hide completed response forms and separate receipt content and actions with
   consistent spacing, keeping long receipt values within narrow screens.
 - Display complete signed response receipts as readable JSON instead of

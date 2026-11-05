@@ -83,6 +83,7 @@ function bindReceiptTools(box, receipt) {
       link.remove();
       URL.revokeObjectURL(url);
     }
+    toast("Receipt download started.", "success");
   };
 }
 function icon(name) {
@@ -162,7 +163,7 @@ function bindRecoveryPhraseTools(words, prefix = "recovery") {
       link.remove();
       URL.revokeObjectURL(url);
     }
-    toast("Recovery phrase file downloaded.", "success");
+    toast("Recovery phrase download started.", "success");
   };
 }
 function bind(form, fn) {
@@ -460,6 +461,7 @@ function renderOrgs() {
   document.querySelector("#create-org") &&
     bind("#create-org", async (fd) => {
       await api.createOrganization({ name: fd.get("name") });
+      toast("Organization created.", "success");
       load();
     });
   document.querySelectorAll("[data-org]").forEach(
@@ -479,6 +481,7 @@ function renderOrgs() {
           role: fd.get("role"),
           expiresAt,
         });
+      toast("Invitation created.", "success");
       document.querySelector("#invite-result").innerHTML =
         `<div class="notice">Invite created. Share this link with the member:<div class="share-box"><input readonly value="${esc(location.origin + location.pathname + "#/invite/" + r.token)}" aria-label="Invitation link"><button class="button small" type="button" id="copy">Copy</button></div></div>`;
       renderButtonIcons(document.querySelector("#invite-result"));
@@ -510,6 +513,7 @@ async function loadMembers() {
               orgId: currentOrg.id,
               memberId: b.dataset.approve,
             });
+            toast("Member approved.", "success");
             loadMembers();
           } catch (e) {
             toast(say(e));
@@ -525,6 +529,7 @@ async function loadMembers() {
                 orgId: currentOrg.id,
                 memberId: b.dataset.revoke,
               });
+              toast("Membership revoked.", "success");
               loadMembers();
             } catch (e) {
               toast(say(e));
@@ -547,14 +552,15 @@ async function renderAccount() {
       newPassword: fd.get("newPassword"),
     });
     document.querySelector("#password").reset();
-    document.querySelector("#password .form-error").textContent =
-      "Password updated.";
+    document.querySelector("#password .form-error").textContent = "";
+    toast("Password updated.", "success");
   });
   bind("#rotate", async (fd) => {
     const r = await api.rotateRecovery({
       currentPassword: fd.get("currentPassword"),
     });
     phrase = r.recoveryWords;
+    toast("Recovery phrase replaced. Save your new phrase.", "success");
     document.querySelector("#new-phrase").innerHTML =
       `<div class="alert"><strong>Save your new phrase now.</strong> The old phrase is replaced. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(phrase, "rotated-recovery")}<label class="check"><input id="rotated-saved" type="checkbox"> I saved the new phrase</label>`;
     renderButtonIcons(document.querySelector("#new-phrase"));
@@ -568,9 +574,17 @@ async function renderAccount() {
     };
   });
   document.querySelector("#logout").onclick = async () => {
-    await api.logout();
-    session = null;
-    go("/login");
+    const button = document.querySelector("#logout");
+    button.disabled = true;
+    try {
+      await api.logout();
+      session = null;
+      toast("Signed out.", "success");
+      go("/login");
+    } catch (error) {
+      toast(say(error));
+      button.disabled = false;
+    }
   };
 }
 async function renderReview(id, tab) {
@@ -585,6 +599,7 @@ async function renderReview(id, tab) {
         title: fd.get("title"),
         maxResponses: Number(fd.get("maxResponses")),
       });
+      toast("Review draft created.", "success");
       go(`/review/${encodeURIComponent(r.id)}/edit`);
     });
     return;
@@ -665,6 +680,7 @@ async function renderReview(id, tab) {
         reviewId: id,
         expectedRevision: review.revision,
       });
+      toast("Review published.", "success");
       load();
     } catch (e) {
       toast(say(e));
@@ -677,6 +693,7 @@ async function renderReview(id, tab) {
           reviewId: id,
           expectedRevision: review.revision,
         });
+        toast("Review closed.", "success");
         load();
       } catch (e) {
         toast(say(e));
@@ -715,6 +732,7 @@ async function renderReview(id, tab) {
         : null,
       questions,
     });
+    toast("Review draft saved.", "success");
     load();
   });
   document.querySelector("#add-question")?.addEventListener("click", () => {
@@ -760,6 +778,7 @@ function bindResponseExports(id) {
         a.download = f.filename;
         a.click();
         URL.revokeObjectURL(url);
+        toast(`${fmt.toUpperCase()} export download started.`, "success");
       } catch (e) {
         toast(say(e));
       }
