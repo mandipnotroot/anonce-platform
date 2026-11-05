@@ -46,10 +46,18 @@ export const setMockRole=role=>mockRole=role;
 export const listOrganizations=async()=>({items:[{id:"org",name:"Demo workspace",role:mockRole},{id:"other",name:"Other workspace",role:mockRole}]});
 export const listMembers=async()=>({items:[{id:"owner",email:"owner@example.net",role:"owner",status:"approved"},{id:"admin",email:"admin@example.net",role:"admin",status:"approved"},{id:"reviewer",email:"reviewer@example.net",role:"reviewer",status:"approved"},{id:"respondent",email:"respondent@example.net",role:"respondent",status:"approved"},{id:"pending",email:"pending@example.net",role:"respondent",status:"pending"},{id:"revoked",email:"revoked@example.net",role:"reviewer",status:"revoked"}]});
 export const addMember=async({email,role})=>addedMembers.push({email,role});
+export const approveMember=async()=>{};
+export const revokeMember=async()=>{};
 export const changeMemberRole=async()=>{};
 export const listReviews=async()=>({items:[],next:null});
 export const listPendingResponses=async()=>({items:[]});
-export const getReview=async()=>({id:"review",org_id:"other",title:"Demo review",status:"closed",creator_account_id:"acct",revision:1,questions:[]});
+export const createReview=async()=>({id:"new-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",revision:1,questions:[]});
+export const updateReview=async()=>({});
+export const publishReview=async()=>({});
+export const prepareResponse=async()=>({pendingId:"pending-response"});
+export const submitResponse=async()=>({status:"accepted",receipt:{version:1,signature:"mock-signed-receipt"}});
+export const lookupReceipt=async()=>({status:"accepted",receipt:{version:1,signature:"mock-signed-receipt"}});
+export const getReview=async({reviewId})=>({id:reviewId,org_id:reviewId==="review"?"other":"org",title:reviewId==="review"?"Demo review":"Draft review",description:"Share feedback",status:reviewId==="review"?"closed":"draft",creator_account_id:"acct",revision:1,questions:[{id:"question-1",text:"What should change?",type:"text",required:true,options:[]}]});
 export const listResponses=async()=>({items:[{id:"r1",acceptedAt:"2026-01-01T00:00:00Z",status:"invalid",error:"RESPONSE_UNREADABLE",answers:[]}],next:null});
 `;
 
@@ -88,13 +96,31 @@ try {
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button .icon")].every((icon) => icon.complete && icon.naturalWidth > 0)), true, `${name} action icon failed to load`);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll(".button")].every((button) => button.querySelector(".icon"))), true, `${name} action button icon missing`);
         if (name === "recovery") assert.equal(await page.evaluate(() => { const alert = document.querySelector(".auth-card .alert").getBoundingClientRect(); const firstWord = document.querySelector(".word").getBoundingClientRect(); return firstWord.top - alert.bottom >= 12; }), true, `recovery warning touches word grid at ${viewport.width}px`);
-        if (name === "results") assert.ok(await page.evaluate(() => {
-          const badge = document.querySelector(".status-closed");
-          if (!badge) return 0;
-          const luminance = (color) => color.match(/\d+/g).slice(0, 3).map(value => Number(value) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
-          const colors = [getComputedStyle(badge).color, getComputedStyle(badge).backgroundColor].map(luminance).sort((a, b) => b - a);
-          return (colors[0] + .05) / (colors[1] + .05);
-        }) >= 4.5, `closed badge contrast below WCAG AA at ${viewport.width}px (${colorScheme})`);
+        if (name === "results") {
+          const contrast = await page.evaluate(() => {
+            const luminance = (color) => color.match(/[\d.]+/g).slice(0, 3).map(value => Number(value) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+            return ["positive", "warning", "danger", "closed", "muted"].map(tone => {
+              const badge = document.createElement("span");
+              badge.className = `status-badge status-${tone}`;
+              const icon = document.querySelector(".status-badge .icon")?.cloneNode();
+              if (icon) badge.appendChild(icon);
+              document.body.appendChild(badge);
+              const style = getComputedStyle(badge);
+              const ratio = (first, second) => { const colors = [first, second].map(luminance).sort((a, b) => b - a); return (colors[0] + .05) / (colors[1] + .05); };
+              const textContrast = ratio(style.color, style.backgroundColor);
+              const borderContrast = ratio(style.borderTopColor, style.backgroundColor);
+              const iconStyle = icon && getComputedStyle(icon);
+              const iconVisible = Boolean(iconStyle && iconStyle.filter !== "none" && iconStyle.opacity !== "0");
+              badge.remove();
+              return { tone, textContrast, borderContrast, iconVisible };
+            });
+          });
+          for (const { tone, textContrast, borderContrast, iconVisible } of contrast) {
+            assert.ok(textContrast >= 4.5, `${tone} badge text contrast ${textContrast.toFixed(2)} below WCAG AA at ${viewport.width}px (${colorScheme})`);
+            assert.ok(borderContrast >= 3, `${tone} badge boundary contrast ${borderContrast.toFixed(2)} below 3:1 at ${viewport.width}px (${colorScheme})`);
+            assert.equal(iconVisible, true, `${tone} badge icon filter missing at ${viewport.width}px (${colorScheme})`);
+          }
+        }
         await page.screenshot({ path: join(artifactDir, `anonce-${name}-${viewport.width}-${colorScheme}.png`), fullPage: true });
       }
     }
@@ -163,6 +189,11 @@ try {
   assert.equal(await page.locator('#member-area [data-revoke="revoked"]').count(), 0, "admins cannot revoke an already revoked member");
   await page.getByRole("button", { name: "Add by email" }).click();
   assert.deepEqual(await page.locator("#member-role option").evaluateAll(options => options.map(option => option.value)), ["reviewer", "respondent"], "admins cannot add other admins");
+  let revokePrompt = "";
+  page.once("dialog", async (dialog) => { revokePrompt = dialog.message(); await dialog.accept(); });
+  await page.locator('[data-revoke="reviewer"]').click();
+  await page.locator("#toast-region").getByText("Membership revoked.").waitFor();
+  assert.equal(revokePrompt, "Revoke this membership?");
 
   await page.evaluate(() => { location.hash = "#/review/review/results"; });
   await page.getByText("This response could not be decrypted or validated.").waitFor();
@@ -174,6 +205,29 @@ try {
   await page.locator("#toast-region").getByText("Response link copied.").waitFor();
   assert.match(await page.evaluate(() => navigator.clipboard.readText()), /#\/respond\/review$/);
   await captures("results");
+  await page.evaluate(() => { location.hash = "#/review/new/edit"; });
+  await page.getByRole("heading", { name: "Start a new review" }).waitFor();
+  await page.getByLabel("Review title").fill("New journey review");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  await page.getByRole("heading", { name: "Draft review" }).waitFor();
+  await page.getByRole("button", { name: "Add question" }).click();
+  await page.locator('[name="qtext"]').last().fill("What would help?");
+  await page.getByRole("button", { name: "Preview" }).click();
+  await page.getByText("What would help?", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.locator("#toast-region").getByText("Review draft saved.").waitFor();
+  await page.getByRole("button", { name: "Publish review" }).click();
+  await page.locator("#toast-region").getByText("Review published.").waitFor();
+  await page.evaluate(() => { location.hash = "#/respond/review"; });
+  await page.getByRole("heading", { name: "Demo review" }).waitFor();
+  await page.getByLabel("What should change?").fill("Clearer guidance");
+  await page.getByRole("button", { name: "Send response" }).click();
+  await page.getByText("Response accepted.").waitFor();
+  await page.getByRole("button", { name: "Copy receipt" }).waitFor();
+  assert.match(await page.locator(".receipt-data").textContent(), /mock-signed-receipt/);
+  await page.keyboard.press("Tab");
+  const focused = await page.evaluate(() => document.activeElement.matches(":focus-visible") && getComputedStyle(document.activeElement).outlineStyle !== "none" && getComputedStyle(document.activeElement).outlineWidth !== "0px");
+  assert.equal(focused, true, "keyboard focus indicator missing on receipt action");
   const routeBeforeSkip = await page.evaluate(() => location.hash);
   const headingBeforeSkip = await page.getByRole("heading", { level: 1 }).textContent();
   await page.locator(".skip-link").focus();
@@ -200,7 +254,8 @@ try {
         iconFailures: [...document.querySelectorAll(".icon")].filter((icon) => !icon.complete || icon.naturalWidth === 0).length,
       }));
       assert.equal(theme.scheme, "light dark");
-      assert.equal(theme.background, colorScheme === "dark" ? "#141a1f" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
+      assert.equal(theme.background, colorScheme === "dark" ? "#08090a" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
+      if (colorScheme === "dark") assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(8, 9, 10)", "dark theme background must be near-black");
       iconFilters[colorScheme] = theme.iconFilter;
       const palette = await page.evaluate(() => ({
         accent: getComputedStyle(document.documentElement).getPropertyValue("--accent-icon-filter").trim(),
@@ -249,7 +304,7 @@ try {
   await rotateButton.click();
   await recoveryPage.locator("#new-phrase .word").first().waitFor();
   assert.ok(await rotateButton.locator(".icon").count(), "icon disappeared after submit busy-state restore");
-  console.log("UI check passed: light/dark themes, responsive overflow, Lucide assets, skip navigation, recovery flows, invalid response notice.");
+  console.log("UI check passed: auth, registration/recovery, org membership and confirm dialog, review create/edit/preview/publish/results, submission/receipt, account rotation, notifications, focus, theme and responsive checks.");
 } finally {
   await browser?.close();
   await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));

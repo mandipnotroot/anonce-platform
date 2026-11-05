@@ -39,6 +39,32 @@ Independent **source-first** security review should focus on cryptographic trans
 
 ## Executed evidence — 2026-11-05
 
+### Shared UI cleanup and near-black dark theme
+
+Final checks used Node.js v26.12.1 with
+`PATH=/tmp/opencode/anonce-node26:$PATH`. All commands exited 0:
+
+- `npm run build`.
+- `npm test`: 44 tests passed, zero failures or skips.
+- `node scripts/ui-check.mjs`: mocked authentication, registration/recovery,
+  organization membership and revoke confirmation, review creation/editing/
+  preview/publication/results, response submission/receipt, account rotation,
+  notifications, and keyboard focus checks passed. Representative pages were
+  checked in both themes at widths from 320 to 1365 pixels. Status text contrast
+  met 4.5:1 and borders against badge backgrounds met 3:1 for tested tones.
+- `node scripts/ui-responsive.mjs`: navigation geometry and overflow checks
+  passed at 320, 375, 390, 640, 768, and 1280 pixels in both themes.
+- `git diff --check`.
+
+Logs are retained in `/tmp/opencode/anonce-ui-final`; browser screenshots are
+in `/tmp/anonce-ui`. Mobile dark-theme member and results screenshots were also
+inspected. Icon checks establish asset loading and theme-aware filters, not
+pixel-measured icon contrast. These checks are not a full WCAG conformance audit.
+Live-backend E2E, assistive-technology testing, invite creation/acceptance,
+membership approval actions, and pending-submission retry journeys were not run
+for this change. Cryptography, authentication, authorization, and business logic
+were not changed.
+
 ### Email accounts and organization admins
 
 Final reconciled checks used Go 1.27.3, Node.js 26.12.1, and a fresh disposable

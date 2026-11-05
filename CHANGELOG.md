@@ -27,6 +27,9 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
+- Use near-black neutral dark-theme surfaces while keeping theme color for
+  accents. Standardize shared section, list, toolbar, and mobile form spacing,
+  and shorten dashboard, account, and review setup copy.
 - Refine shared spacing, form controls, cards, tables, and responsive layouts
   across authentication, recovery, workspaces, reviews, and response flows.
   Shorten interface copy while retaining recovery and anonymity limitations.
@@ -51,6 +54,8 @@ No version has been released.
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
 ### Fixed
+- Improve status badge text, icon sizing, and boundary visibility in both themes;
+  remove doubled review-card spacing and distinguish icon-button interaction states.
 - Confirm organization, invitation, membership, review, password, recovery, and
   download actions with shared success toasts. Avoid duplicate password feedback
   and restore the sign-out button after failed requests.

@@ -37,6 +37,19 @@
   --text-label: 13px;
   --text-section: 17px;
   --text-body: 15px;
+  --status-positive-ink: #145b3c;
+  --status-positive-bg: #e7f5ed;
+  --status-positive-line: #527b61;
+  --status-warning-ink: #684006;
+  --status-warning-bg: #fff4d8;
+  --status-warning-line: #a67d2e;
+  --status-danger-ink: #842525;
+  --status-danger-bg: #fce9e7;
+  --status-danger-line: #b56b64;
+  --status-closed-ink: #56327f;
+  --status-closed-bg: #f0e8fb;
+  --status-closed-line: #8a67aa;
+  --status-neutral-line: #71808b;
   --icon-filter: var(--accent-icon-filter);
   --accent-icon-filter: brightness(0) saturate(100%) invert(29%) sepia(24%) saturate(1060%) hue-rotate(132deg) brightness(91%);
   font-family: Geist,system-ui,sans-serif;
@@ -45,20 +58,33 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #141a1f;
-    --surface: #1d252b;
+    --paper: #08090a;
+    --surface: #111315;
     --ink: #edf2f5;
     --muted: #bdc8d0;
-    --line: #3d4a54;
+    --line: #34383b;
     --blue: #8be0d5;
     --blue-hover: #a9eee4;
     --button-ink: #102522;
     --button-icon-filter: brightness(0) saturate(100%) invert(11%) sepia(14%) saturate(804%) hue-rotate(112deg) brightness(95%);
     --secondary-icon-filter: brightness(0) saturate(100%) invert(87%) sepia(13%) saturate(184%) hue-rotate(153deg) brightness(98%);
-    --button-secondary: #263a38;
+    --button-secondary: #202426;
     --danger: #ffb3ac;
-    --soft: #252f37;
+    --soft: #191c1f;
     --shadow: 0 1px 2px #0003, 0 12px 32px #0002;
+    --status-positive-ink: #a8e5bf;
+    --status-positive-bg: #19382b;
+    --status-positive-line: #548767;
+    --status-warning-ink: #f4d28a;
+    --status-warning-bg: #3b301a;
+    --status-warning-line: #a08445;
+    --status-danger-ink: #ffb3ac;
+    --status-danger-bg: #402321;
+    --status-danger-line: #a86963;
+    --status-closed-ink: #e4c8ff;
+    --status-closed-bg: #38294d;
+    --status-closed-line: #9a7bbb;
+    --status-neutral-line: #697780;
     --icon-filter: var(--accent-icon-filter);
     --accent-icon-filter: brightness(0) saturate(100%) invert(83%) sepia(25%) saturate(580%) hue-rotate(117deg) brightness(96%)
   }
@@ -263,7 +289,7 @@ a {
   gap: var(--space-4)
 }
 .stat {
-  padding: 18px
+  padding: var(--space-5)
 }
 .stat-label {
   color: var(--muted);
@@ -279,7 +305,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: var(--space-3);
   margin: var(--space-8) 0 var(--space-3)
 }
 .section-title {
@@ -290,13 +316,14 @@ a {
 }
 .review-list {
   display: grid;
-  gap: 10px
+  gap: var(--space-3)
 }
+.review-list > .card { margin-bottom: 0 }
 .review-row {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 15px 17px;
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--surface)
@@ -427,8 +454,8 @@ textarea {
   accent-color: var(--blue)
 }
 .question-preview {
-  margin: 15px 0;
-  padding: 16px;
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-control)
 }
@@ -466,16 +493,16 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  margin: 17px 0
+  gap: var(--space-3);
+  margin: var(--space-4) 0
 }
 .button .icon { width: 16px; height: 16px; filter: var(--button-icon-filter) }
 .button.secondary .icon,.button.ghost .icon { filter: var(--secondary-icon-filter) }
 .button.danger .icon { filter: var(--button-icon-filter) }
 .button:disabled .icon { filter: var(--secondary-icon-filter) }
 .button:focus-visible { outline-offset: 3px }
-.toolbar { gap: 12px }
-.inline { gap: 16px }
+.toolbar { gap: var(--space-3) }
+.inline { gap: var(--space-4) }
 .recovery-actions [role=status] {
   flex-basis: 100%;
   min-height: 1.5em;
@@ -500,13 +527,13 @@ textarea {
 }
 .divider {
   height: 1px;
-  margin: 22px 0;
+  margin: var(--space-6) 0;
   background: var(--line)
 }
 .tabs {
   display: flex;
-  gap: 18px;
-  margin: 0 0 18px;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
   border-bottom: 1px solid var(--line)
 }
 .tabs a {
@@ -610,6 +637,8 @@ textarea {
   color: var(--ink);
   cursor: pointer
 }
+.icon-btn:hover { border-color: var(--blue); background: var(--button-secondary) }
+.icon-btn:disabled { color: var(--muted); background: var(--soft); cursor: not-allowed }
 .skeleton {
   height: 100px;
   border-radius: 6px;
@@ -646,15 +675,14 @@ textarea {
 .workspace-label .workspace-icon .icon { width: 17px; height: 17px; filter: var(--button-icon-filter) }
 .workspace-label small { display: block; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .12em; line-height: 1.2 }
 .workspace-label strong { display: block; max-width: min(60vw,460px); overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap }
-.status-badge { display: inline-flex; align-items: center; gap: 5px; width: fit-content; vertical-align: middle; padding: 3px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 670; line-height: 1.4; white-space: nowrap }
-.status-badge .icon { width: 13px; height: 13px; filter: var(--secondary-icon-filter) }
-.status-positive { color: #176644; background: #e7f5ed; border-color: #c0e5cf }
-.status-closed { color: #56327f; background: #f0e8fb; border-color: #d3bee9 }
-.status-warning { color: #80510d; background: #fff4d8; border-color: #f0d99a }
-.status-neutral,.status-muted { color: var(--muted); background: var(--soft); border-color: var(--line) }
-.status-danger { color: #912b2b; background: #fce9e7; border-color: #efc4bf }
-@media (prefers-color-scheme: dark) { .status-closed { color: #e8d7ff; background: #38294d; border-color: #69518b } }
-.member-help { margin: -8px 0 13px; color: var(--muted); font-size: 13px }
+.status-badge { display: inline-flex; align-items: center; gap: 6px; width: fit-content; vertical-align: middle; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 650; line-height: 1.35; white-space: nowrap }
+.status-badge .icon { width: 14px; height: 14px; filter: var(--secondary-icon-filter) }
+.status-positive { color: var(--status-positive-ink); background: var(--status-positive-bg); border-color: var(--status-positive-line) }
+.status-closed { color: var(--status-closed-ink); background: var(--status-closed-bg); border-color: var(--status-closed-line) }
+.status-warning { color: var(--status-warning-ink); background: var(--status-warning-bg); border-color: var(--status-warning-line) }
+.status-neutral,.status-muted { color: var(--muted); background: var(--soft); border-color: var(--status-neutral-line) }
+.status-danger { color: var(--status-danger-ink); background: var(--status-danger-bg); border-color: var(--status-danger-line) }
+.member-help { margin: 0 0 var(--space-4); color: var(--muted); font-size: 13px }
 .member-email { display: inline-flex; align-items: center; gap: 8px; overflow-wrap: anywhere }
 .member-email .icon { width: 15px; height: 15px; flex: none }
 .member-actions { white-space: nowrap }
@@ -794,7 +822,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
   .nav a { padding: 6px 2px; font-size: 11px; line-height: 1.1 }
   .nav .icon { width: 17px; height: 17px }
   .header-account { font-size: 11px }
-  .form-card,.auth-card { padding: var(--space-3) }
+  .form-card,.auth-card { padding: var(--space-4) }
   .word-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-2) }
   .share-box { flex-direction: column }
   .share-box .button { width: 100% }

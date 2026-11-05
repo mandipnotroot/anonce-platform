@@ -193,14 +193,14 @@ test("shared spacing tokens drive cards, forms, fields, and responsive layouts",
   assert.match(styles, /\.card \{\s*padding:\s*var\(--space-6\)/);
   assert.match(styles, /\.field\s*\{[^}]*gap:\s*var\(--space-2\)/);
   assert.match(styles, /\.card\s*\{\s*padding:\s*var\(--space-4\)/);
-  assert.match(styles, /\.form-card,.auth-card\s*\{\s*padding:\s*var\(--space-3\)/);
+  assert.match(styles, /\.form-card,.auth-card\s*\{\s*padding:\s*var\(--space-4\)/);
   assert.match(styles, /--radius-control:\s*8px/);
   assert.match(styles, /--radius-card:\s*12px/);
 });
 
 test("browser theme metadata follows light and dark system preference", () => {
   assert.match(html, /theme-color" content="#f4f7f9" media="\(prefers-color-scheme: light\)"/);
-  assert.match(html, /theme-color" content="#141a1f" media="\(prefers-color-scheme: dark\)"/);
+  assert.match(html, /theme-color" content="#08090a" media="\(prefers-color-scheme: dark\)"/);
 });
 
 test("successful mutations report success without duplicating password inline feedback", () => {
