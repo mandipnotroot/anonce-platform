@@ -200,7 +200,7 @@ test("shared spacing tokens drive cards, forms, fields, and responsive layouts",
 
 test("browser theme metadata follows light and dark system preference", () => {
   assert.match(html, /theme-color" content="#f4f7f9" media="\(prefers-color-scheme: light\)"/);
-  assert.match(html, /theme-color" content="#08090a" media="\(prefers-color-scheme: dark\)"/);
+  assert.match(html, /theme-color" content="#141318" media="\(prefers-color-scheme: dark\)"/);
 });
 
 test("successful mutations report success without duplicating password inline feedback", () => {

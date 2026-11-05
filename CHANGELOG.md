@@ -27,7 +27,7 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
-- Use near-black neutral dark-theme surfaces while keeping theme color for
+- Use soft charcoal dark-theme surfaces while keeping theme color for
   accents. Standardize shared section, list, toolbar, and mobile form spacing,
   and shorten dashboard, account, and review setup copy.
 - Refine shared spacing, form controls, cards, tables, and responsive layouts

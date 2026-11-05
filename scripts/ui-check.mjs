@@ -254,8 +254,8 @@ try {
         iconFailures: [...document.querySelectorAll(".icon")].filter((icon) => !icon.complete || icon.naturalWidth === 0).length,
       }));
       assert.equal(theme.scheme, "light dark");
-      assert.equal(theme.background, colorScheme === "dark" ? "#08090a" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
-      if (colorScheme === "dark") assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(8, 9, 10)", "dark theme background must be near-black");
+      assert.equal(theme.background, colorScheme === "dark" ? "#141318" : "#f4f7f9", `${colorScheme} theme missing at ${viewport.width}px`);
+      if (colorScheme === "dark") assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(20, 19, 24)", "dark theme background must use charcoal");
       iconFilters[colorScheme] = theme.iconFilter;
       const palette = await page.evaluate(() => ({
         accent: getComputedStyle(document.documentElement).getPropertyValue("--accent-icon-filter").trim(),

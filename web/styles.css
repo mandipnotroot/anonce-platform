@@ -58,19 +58,19 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #08090a;
-    --surface: #111315;
+    --paper: #141318;
+    --surface: #1d1b22;
     --ink: #edf2f5;
     --muted: #bdc8d0;
-    --line: #34383b;
+    --line: #38353e;
     --blue: #8be0d5;
     --blue-hover: #a9eee4;
     --button-ink: #102522;
     --button-icon-filter: brightness(0) saturate(100%) invert(11%) sepia(14%) saturate(804%) hue-rotate(112deg) brightness(95%);
     --secondary-icon-filter: brightness(0) saturate(100%) invert(87%) sepia(13%) saturate(184%) hue-rotate(153deg) brightness(98%);
-    --button-secondary: #202426;
+    --button-secondary: #29262e;
     --danger: #ffb3ac;
-    --soft: #191c1f;
+    --soft: #242129;
     --shadow: 0 1px 2px #0003, 0 12px 32px #0002;
     --status-positive-ink: #a8e5bf;
     --status-positive-bg: #19382b;

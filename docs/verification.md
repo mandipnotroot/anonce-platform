@@ -41,6 +41,14 @@ Independent **source-first** security review should focus on cryptographic trans
 
 ### Shared UI cleanup and near-black dark theme
 
+The subsequent palette refinement replaces the near-black background with
+`#141318` and matching charcoal surfaces. On Node.js v26.12.1, `npm test`
+(44 passing tests), `node scripts/ui-check.mjs`, and `git diff --check` each
+exited 0. The browser check confirmed `rgb(20, 19, 24)` for the dark body
+background; the refreshed desktop dark screenshot was inspected. Logs are in
+`/tmp/opencode/anonce-charcoal-tests.log` and
+`/tmp/opencode/anonce-charcoal-browser.log`.
+
 Final checks used Node.js v26.12.1 with
 `PATH=/tmp/opencode/anonce-node26:$PATH`. All commands exited 0:
 
