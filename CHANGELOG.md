@@ -23,10 +23,13 @@ No version has been released.
 - Local HTTPS deployment for `anonce.local`, bound to all interfaces.
 
 ### Changed
-- Use a dark-only interface with accessible focus states and responsive navigation.
+- Make contributor guidance independent of personal Git identities and coding
+  tools, document pull request expectations, and align runtime requirements with CI.
+- Use neutral light/dark surfaces, accessible focus states, responsive navigation,
+  and a keyboard skip link without decorative gradients.
 - Report unreadable encrypted responses individually in reviewer results and exports.
-- Simplify the web interface with self-hosted Geist typography, text navigation symbols,
-  restrained navigation, and plain review status text instead of badges.
+- Simplify the web interface with self-hosted Geist typography, locally bundled
+  Lucide navigation icons, restrained navigation, and plain review status text.
 - Use Alpine containers and current stable Go, Node.js, PostgreSQL, Caddy,
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 

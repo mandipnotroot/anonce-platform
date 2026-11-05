@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # Anonce
 
-Private, anonymous feedback for verified members. A Go 1.27/PostgreSQL 17 modular
+Private, anonymous feedback for verified members. A Go 1.27/PostgreSQL 18 modular
 monolith serves HTML, CSS and vanilla browser ES modules, with locally bundled
 cryptographic dependencies and same-origin HTTPS.
 
@@ -51,7 +51,7 @@ See [architecture/threat boundaries](docs/architecture.md),
 
 ## Development and deployment
 
-Requires Go 1.27, Node 24, and PostgreSQL 17 (or Docker Compose v2). Operator/dev
+Requires Go 1.27.3, Node.js 26, and PostgreSQL 18 (or Docker Compose v2). Operator/dev
 commands only; do not use real sensitive data in development.
 
 ```sh
@@ -83,8 +83,9 @@ ANONCE_E2E_ORIGIN=https://localhost:18443 ANONCE_E2E_ALLOW_SELF_SIGNED=1 npm run
 ```
 
 Self-signed TLS bypass is explicitly restricted to loopback test origins, never
-public deployment. Current Node 24 E2E evidence covers the whole browser flow,
+public deployment. Historical Node 24 E2E evidence covers the whole browser flow,
 lost-reply exact retry and original-phrase recovery, not every failure/renewal case.
+Later Node 26 checks are listed separately in the verification record.
 
 ## Project and license
 

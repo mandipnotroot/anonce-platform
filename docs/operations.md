@@ -5,8 +5,10 @@ Not production ready or approved for sensitive production data. Broad validation
 and the final image's hardened local smoke passed; no public deployment launched.
 Focused checks confirmed nonroot PostgreSQL initialization, proxy-volume writes,
 offline Caddy configuration, and UID65532 secret reads with a synthetic fixture.
-Disposable Node 24 HTTPS browser E2E passed the whole flow, lost-reply retry and
-original-phrase recovery; this does not certify production safety or all branches.
+Historical disposable Node 24 HTTPS browser E2E passed the whole flow, lost-reply
+retry and original-phrase recovery. The current build uses Node.js 26; see
+[verification evidence](verification.md) for later checks and their limits.
+Neither result certifies production safety or all branches.
 Requires Docker Compose v2, DNS for one public domain, and inbound TCP 80/443
 and optionally UDP 443. All user interactions remain browser-only.
 

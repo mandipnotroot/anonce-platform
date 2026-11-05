@@ -2,9 +2,33 @@
 # Contributing to Anonce
 
 Development happens at https://github.com/mandipnotroot/anonce-platform.
+Contributions are welcome through issues and pull requests. Discuss substantial
+architecture, protocol, dependency, or interface changes before starting work.
+Report vulnerabilities privately through [SECURITY.md](SECURITY.md), not issues.
+
 Read [AGENTS.md](AGENTS.md) before editing; its architecture, privacy,
-cryptography, UI ownership, and evidence requirements apply to contributions.
-Agree shared contracts and disjoint file scopes before parallel work.
+cryptography, interface, and evidence requirements apply to contributions.
+No specific coding assistant or editor is required. Use your own Git author
+identity. Agree shared contracts and disjoint file scopes before parallel work.
+
+## Local setup
+
+Fork and clone the repository, then create a branch for your change. Install the
+Go version declared in `go.mod` and the Node.js version used in
+[CI](.github/workflows/ci.yml). See [README.md](README.md) for build and test
+commands, and [operations](docs/operations.md) for a disposable HTTPS environment.
+Use only synthetic test data. Never commit local environment files or keys.
+
+## Pull requests
+
+Keep each pull request focused. Describe the problem, the change, and any known
+limitations. Include exact test commands and results; explain skipped checks.
+For interface changes, include screenshots at desktop and mobile widths and
+check keyboard navigation. Update affected documentation, tests, and the
+`Unreleased` changelog when behavior changes. A maintainer must review changes
+before merging.
+
+## Standards
 
 Required standards:
 - [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
@@ -17,7 +41,8 @@ commands, exit statuses, and skipped checks; do not claim unperformed tests or
 security review. See [README.md](README.md) for existing developer checks and
 [operations](docs/operations.md) for disposable deployment requirements. Database
 integration tests skip without their explicit test database environment variables;
-never point them at production data. Final E2E/source gates remain in progress.
+never point them at production data. Recorded E2E results and remaining release
+gates are documented in [verification evidence](docs/verification.md).
 Use the [private security reporting process](SECURITY.md) for vulnerabilities.
 
 Original contributions are accepted under **AGPL-3.0-only** and must include

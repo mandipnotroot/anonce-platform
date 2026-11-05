@@ -2,12 +2,13 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, resolve, sep } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import { chromium } from "playwright";
 
 const root = resolve(fileURLToPath(new URL("../web/", import.meta.url)));
-const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".woff2": "font/woff2" };
+const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, "http://127.0.0.1").pathname;
   if (pathname === "/app.js") {
@@ -76,9 +77,11 @@ try {
       scheme: getComputedStyle(document.documentElement).colorScheme,
       background: getComputedStyle(document.body).backgroundColor,
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      iconFailures: [...document.querySelectorAll(".icon")].filter((icon) => !icon.complete || icon.naturalWidth === 0).length,
     }));
-    assert.equal(theme.scheme, "dark");
+    assert.equal(theme.scheme, "light dark");
     assert.equal(theme.overflow, false, `horizontal overflow at ${viewport.width}px`);
+    assert.equal(theme.iconFailures, 0, `broken Lucide icon at ${viewport.width}px`);
   }
 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -88,6 +91,40 @@ try {
 
   await page.evaluate(() => { location.hash = "#/review/review/results"; });
   await page.getByText("This response could not be decrypted or validated.").waitFor();
+  const routeBeforeSkip = await page.evaluate(() => location.hash);
+  const headingBeforeSkip = await page.getByRole("heading", { level: 1 }).textContent();
+  await page.locator(".skip-link").focus();
+  await page.locator(".skip-link").press("Enter");
+  const skipResult = await page.evaluate(() => ({
+    route: location.hash,
+    focus: document.activeElement?.id,
+    heading: document.querySelector(".page-head h1")?.textContent || document.querySelector(".response-card h1")?.textContent,
+  }));
+  assert.equal(skipResult.route, routeBeforeSkip, "skip navigation changed application route");
+  assert.equal(skipResult.focus, "main-content", "skip navigation did not focus main landmark");
+  assert.equal(skipResult.heading, headingBeforeSkip, "skip navigation replaced current page");
+
+  for (const viewport of [{ width: 1365, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const iconFilters = {};
+    for (const colorScheme of ["light", "dark"]) {
+      await page.emulateMedia({ colorScheme });
+      const theme = await page.evaluate(() => ({
+        scheme: getComputedStyle(document.documentElement).colorScheme,
+        background: getComputedStyle(document.documentElement).getPropertyValue("--paper").trim(),
+        iconFilter: getComputedStyle(document.querySelector(".icon")).filter,
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        iconFailures: [...document.querySelectorAll(".icon")].filter((icon) => !icon.complete || icon.naturalWidth === 0).length,
+      }));
+      assert.equal(theme.scheme, "light dark");
+      assert.equal(theme.background, colorScheme === "dark" ? "#10171c" : "#f5f7f8", `${colorScheme} theme missing at ${viewport.width}px`);
+      iconFilters[colorScheme] = theme.iconFilter;
+      assert.equal(theme.overflow, false, `horizontal overflow at ${viewport.width}px`);
+      assert.equal(theme.iconFailures, 0, `broken Lucide icon at ${viewport.width}px`);
+      await page.screenshot({ path: join(tmpdir(), `anonce-${viewport.width}-${colorScheme}.png`), fullPage: true });
+    }
+    assert.notEqual(iconFilters.dark, iconFilters.light, `icon filter did not change for dark mode at ${viewport.width}px`);
+  }
 
   const recoveryPage = await context.newPage();
   await recoveryPage.goto(`http://127.0.0.1:${port}/index.html#/recover`);
@@ -105,7 +142,7 @@ try {
   await recoveryPage.getByRole("button", { name: "Rotate recovery phrase" }).click();
   await recoveryPage.getByRole("button", { name: "Copy phrase" }).waitFor();
   await verifyRecoveryTools(recoveryPage, expectedPhrase);
-  console.log("UI check passed: dark theme, responsive overflow, register/recover/rotation controls, invalid response notice.");
+  console.log("UI check passed: light/dark themes, responsive overflow, Lucide assets, skip navigation, recovery flows, invalid response notice.");
 } finally {
   await browser?.close();
   await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));

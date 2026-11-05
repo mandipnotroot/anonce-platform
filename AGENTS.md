@@ -1,6 +1,9 @@
-# Anonce contributor instructions
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+# Repository guidance
 
-These rules apply to every writer and all repository files. Read before editing.
+This guidance applies to all contributors and automated coding tools working in
+this repository. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the
+contribution process. Nested guidance may add requirements for its directory.
 
 ## Mandatory references
 - Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
@@ -15,9 +18,9 @@ These rules apply to every writer and all repository files. Read before editing.
   `go.mod`; use modern idioms only when supported by that version. Before a
   module exists, agree on a supported version; never assume the newest features.
 
-## Ownership and workflow
-- Repository: `mandipnotroot/anonce-platform`; author identity: `mandipnotroot`
-  <326847047+mandipnotroot@users.noreply.github.com>.
+## Contribution workflow
+- Use your own contributor identity and Git configuration. Never attribute a
+  contribution to another person or require a maintainer's author identity.
 - Original sources must carry `SPDX-License-Identifier: AGPL-3.0-only` in an
   appropriate comment. Preserve third-party licenses and attribution.
 - Preserve existing work; no destructive resets, force pushes, or unsolicited
@@ -37,11 +40,16 @@ These rules apply to every writer and all repository files. Read before editing.
   where the standard library lacks the prescribed primitive.
 - Use PostgreSQL, parameterized SQL, and transactional migrations. Never build
   SQL by interpolating untrusted values.
-- Browser stack: HTML, CSS, and vanilla JavaScript ES modules; no JS framework.
-  Bundle established crypto dependencies locally; no runtime CDN crypto imports.
-- All user flows are web-only. Route every UI design/implementation task through
-  `@designer`, providing file scope and goal, including layout, styling,
-  responsiveness, accessibility, animation, and component behavior.
+- Browser stack: HTML, CSS, and vanilla JavaScript ES modules by default. A
+  lightweight frontend-only framework requires a documented need and review of
+  bundle size, accessibility, maintenance, and build complexity. Keep the Go
+  backend independent of frontend tooling.
+- Bundle established crypto dependencies locally; no runtime CDN crypto imports.
+- All user flows are web-only. UI changes must consider layout, hierarchy,
+  responsiveness, keyboard access, focus states, and component behavior. Use
+  consistent bundled icons with visible labels or accessible names. Prefer
+  purposeful controls over decorative elements. When specialist design review is
+  available, use it; no particular editor, agent, or paid tool is required.
 
 ## Security and privacy invariants
 - Never implement cryptographic primitives. Use established implementations of

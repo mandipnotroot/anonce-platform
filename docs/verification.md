@@ -23,7 +23,7 @@ focused source reviews constitute an audit or production-readiness approval.
 
 ## Browser flows
 
-Full registration and phrase confirmation; password login; create organization; invite, accept pending, approve; create/edit/publish review; multiple per-member authorizations where configured; respond at `#respond/<id>`; reviewer decrypt and export. Cross-device phrase recovery, credential reset and restored encrypted vault; phrase rotation snapshot warning. Preserve exact pending issuance and submission bytes across crashes/retries. Anonymous requests carry no credentials/referrer, do not follow redirects and retry the identical submission, not newly encrypted ciphertext. Review keyboard/accessibility/responsive behavior with `@designer` and a file-specific goal.
+Full registration and phrase confirmation; password login; create organization; invite, accept pending, approve; create/edit/publish review; multiple per-member authorizations where configured; respond at `#respond/<id>`; reviewer decrypt and export. Cross-device phrase recovery, credential reset and restored encrypted vault; phrase rotation snapshot warning. Preserve exact pending issuance and submission bytes across crashes/retries. Anonymous requests carry no credentials/referrer, do not follow redirects and retry the identical submission, not newly encrypted ciphertext. Review keyboard access, accessibility, and responsive behavior with a file-specific goal; no particular design tool or coding assistant is required.
 
 Use actual exports in `web/crypto.js` and tests/vectors in `web/crypto.test.js`, not an implementation-progress snapshot. Export presence is not passing evidence.
 
@@ -120,6 +120,34 @@ These checks are targeted regression evidence, not a full cryptographic audit.
 The mock browser harness does not establish real HTTPS, account recovery or
 end-to-end server behavior. Previous deployment evidence is historical, not a
 deployment of the current changes.
+
+## Interface simplification and contributor guidance — 2026-11-05
+
+The interface follows the reference project's restrained visual principles:
+neutral surfaces, clear labels, simple borders, and locally served icons. No
+frontend framework or dependency was added. Contributor instructions no longer
+prescribe a maintainer's Git identity or a particular coding assistant.
+
+- In an isolated, network-disabled `node:26.12.1-bookworm-slim` container,
+  `npm run build && npm test` exited 0: 31 tests passed, none failed or skipped.
+  The container used read-only source/dependency mounts and a temporary working
+  copy; no environment files, server keys, or databases were mounted.
+- `/tmp/opencode/anonce-node26/node scripts/ui-check.mjs` exited 0 using the
+  Node.js 26.12.1 binary extracted from that same image. The mock browser harness
+  checked light/dark themes at 1365px and 390px, horizontal overflow, local Lucide
+  asset loading, distinct dark icon filters, recovery controls, unreadable-response
+  notices, and skip-link focus without changing the current route or content.
+- `git diff --check` exited 0. A local documentation-link check passed for all
+  25 checked links in the top-level contributor documents and the modified
+  operations/verification documents.
+
+Screenshots of synthetic review results were inspected at desktop/mobile sizes.
+These are mock-harness captures, not evidence of a deployed application. Earlier
+focused browser checks used host Node.js 22; the final run above used the supported
+Node.js 26 runtime. Backend/database tests, real HTTPS E2E, a container rebuild,
+manual assistive-technology testing, and a full contrast audit were not run for
+this interface/documentation change. Previous deployment evidence remains
+historical. This work does not establish project-wide production readiness.
 
 ## Remaining limitations
 
