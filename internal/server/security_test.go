@@ -156,9 +156,9 @@ func TestIntegrationCertificateAndRevocation(t *testing.T) {
 	// Last approved owner cannot revoke self.
 	revoke := signed(t, s, h, u, "member-revoke", map[string]string{"request_id": protocol.ID()}, false)
 	result(t, request(h, "POST", "/api/member/orgs/"+org+"/members/"+member+"/revoke", revoke, u), 409)
-	// Pending membership remains unauthorized until owner approval; any approved member can create a review.
+	// Pending membership remains unauthorized until owner approval; an approved reviewer can create a review.
 	invited := newUser(t, s, h)
-	invite := signed(t, s, h, u, "invite-create", map[string]string{"request_id": protocol.ID(), "role": "respondent", "expires_at": format(time.Now().Add(time.Hour).Unix())}, false)
+	invite := signed(t, s, h, u, "invite-create", map[string]string{"request_id": protocol.ID(), "role": "reviewer", "expires_at": format(time.Now().Add(time.Hour).Unix())}, false)
 	token := result(t, request(h, "POST", "/api/member/orgs/"+org+"/invites", invite, u), 201)["token"].(string)
 	accept := signed(t, s, h, invited, "invite-accept", map[string]string{"request_id": protocol.ID(), "invite_token": token}, false)
 	m := result(t, request(h, "POST", "/api/member/invites/accept", accept, invited), 201)["id"].(string)

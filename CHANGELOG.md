@@ -11,6 +11,10 @@ No version has been released.
 
 ### Added
 
+- Dedicated disposable PostgreSQL CI coverage with distinct member and anonymous
+  roles, plus an opt-in guard that fails tests when required database URLs are
+  missing. Container CI validates base/local Compose configurations and builds
+  application and proxy images without deploying or publishing them.
 - Browser-side encryption of review titles, descriptions, and complete questions,
   including drafts, with separate invitation-link content keys and answer keys.
   Secret links permit question reading, not membership or answer decryption.
@@ -38,6 +42,8 @@ No version has been released.
 
 ### Changed
 
+- Gate proxy startup on application readiness, allow 30 seconds for Compose
+  shutdown, and force HTTP connections closed if the 15-second drain fails.
 - Align organization-table selects with shared form controls, reuse theme-aware
   success colors, and standardize recovery-word and icon-button shapes and sizes.
 - Extend mock browser screenshots to cover review creation and editing, response
@@ -113,6 +119,15 @@ No version has been released.
 
 ### Fixed
 
+- Enforce review creation roles on the server under the organization lock,
+  including retries after demotion. Respondents retain response authorization
+  access; existing creators retain access to their reviews.
+- Preserve successful credential-change outcomes and new recovery words when
+  automatic sign-in fails after the server commits the change. Prompt for manual
+  sign-in instead of reporting the committed change as a failure.
+- Warn before discarding an unacknowledged recovery phrase through navigation,
+  sign-out, or another rotation. Keep recovery words browser-memory-only;
+  browser unload prompts cannot guarantee preservation after reload or closure.
 - Use the selected organization's approved membership to show review creation,
   creator metrics, and member-management controls. Hide unavailable actions from
   respondents and keep server-side permission enforcement unchanged.

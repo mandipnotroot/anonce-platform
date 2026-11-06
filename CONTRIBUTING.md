@@ -115,6 +115,14 @@ For a self-signed loopback E2E deployment only, set
 Database tests that skip without their URLs are not database or concurrency
 evidence. CI configuration alone is not evidence that a check passed.
 
+CI includes a disposable PostgreSQL job initialized with the repository's role
+setup script. It sets `ANONCE_REQUIRE_DATABASE_TESTS=1`, so missing either database
+URL fails tests instead of skipping them. Set the same flag for local checks that
+must include database coverage. The separate container job validates both Compose
+configurations and builds the application and proxy images without publishing or
+starting the deployment. These jobs do not establish live HTTPS, backup recovery,
+or independent security-review evidence.
+
 Select focused positive and negative tests for each change. Before a release,
 establish current-revision evidence for:
 

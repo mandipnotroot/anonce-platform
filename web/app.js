@@ -997,11 +997,18 @@ async function credentialChange({
     payload,
     proofs,
   );
-  state = undefined;
-  const session = await login({
+  const session = await loginAfterCredentialChange({
     email: s.email,
     password: newPassword || currentPassword,
   });
+  if (!session)
+    return recoveryOnly
+      ? {
+          session: null,
+          recoveryWords: recovery.words.split(" "),
+          reauthenticationRequired: true,
+        }
+      : { reauthenticationRequired: true };
   return recoveryOnly
     ? { session, recoveryWords: recovery.words.split(" ") }
     : session;
@@ -1009,6 +1016,16 @@ async function credentialChange({
 export const changePassword = (options) => credentialChange(options);
 export const rotateRecovery = (options) =>
   credentialChange({ ...options, recoveryOnly: true });
+async function loginAfterCredentialChange(options) {
+  state = undefined;
+  try {
+    return await login(options);
+  } catch {
+    // Login may set state before device-cache persistence fails.
+    state = undefined;
+    return null;
+  }
+}
 export async function recover({ email, words, newPassword }) {
   await initialize();
   const params = await request("/api/member/auth/params", {
@@ -1068,10 +1085,14 @@ export async function recover({ email, words, newPassword }) {
       new_recovery_sig: cr.r.authSeed,
     },
   );
-  state = undefined;
+  const nextSession = await loginAfterCredentialChange({
+    email,
+    password: newPassword,
+  });
   return {
-    session: await login({ email, password: newPassword }),
+    session: nextSession,
     recoveryWords: cr.recovery.words.split(" "),
+    ...(!nextSession ? { reauthenticationRequired: true } : {}),
   };
 }
 async function seal(objectId, value, revision = "1") {

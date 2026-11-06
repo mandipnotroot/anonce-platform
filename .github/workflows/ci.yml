@@ -23,3 +23,70 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run test:interop
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ANONCE_REQUIRE_DATABASE_TESTS: "1"
+      ANONCE_TEST_DATABASE_URL: postgres://anonce_member:ci-member-only@127.0.0.1:5432/anonce?sslmode=disable
+      ANONCE_TEST_ANON_DATABASE_URL: postgres://anonce_anon:ci-anonymous-only@127.0.0.1:5432/anonce?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - name: Start disposable PostgreSQL with restricted roles
+        run: |
+          docker run --detach --name anonce-test-db \
+            --publish 127.0.0.1:5432:5432 \
+            --memory 1g --cpus 1 --pids-limit 256 \
+            --env POSTGRES_DB=anonce \
+            --env POSTGRES_USER=anonce_admin \
+            --env POSTGRES_PASSWORD=ci-admin-only \
+            --env ANONCE_MEMBER_DB_PASSWORD=ci-member-only \
+            --env ANONCE_ANON_DB_PASSWORD=ci-anonymous-only \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/db/init,target=/docker-entrypoint-initdb.d,readonly" \
+            --health-cmd 'pg_isready -h 127.0.0.1 -U anonce_admin -d anonce' \
+            --health-interval 2s --health-timeout 5s --health-retries 30 \
+            postgres:18.6-alpine3.24
+          for attempt in $(seq 1 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' anonce-test-db)
+            if [ "$status" = healthy ]; then exit 0; fi
+            if [ "$status" = unhealthy ]; then exit 1; fi
+            sleep 2
+          done
+          exit 1
+      - name: Run database integration and role isolation tests
+        run: go test -race -count=1 -timeout=10m ./internal/server
+      - name: Remove disposable PostgreSQL
+        if: always()
+        run: docker rm --force --volumes anonce-test-db
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: anonce-ci
+      POSTGRES_PASSWORD: ci-admin-only
+      ANONCE_MEMBER_DB_PASSWORD: ci-member-only
+      ANONCE_ANON_DB_PASSWORD: ci-anonymous-only
+      DATABASE_URL: postgres://anonce_member:ci-member-only@db:5432/anonce?sslmode=disable
+      ANON_DATABASE_URL: postgres://anonce_anon:ci-anonymous-only@db:5432/anonce?sslmode=disable
+      ANONCE_DOMAIN: anonce.invalid
+      ANONCE_SOURCE_URL: https://github.com/mandipnotroot/anonce-platform
+      ANONCE_SERVER_KEY_FILE: ${{ runner.temp }}/anonce-ci-server-key
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Create disposable dummy key file
+        run: |
+          umask 077
+          printf '%s' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' > "$ANONCE_SERVER_KEY_FILE"
+      - name: Validate base Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+      - name: Validate local Compose override
+        run: docker compose -f compose.yaml -f compose.local.yaml config --quiet
+      - name: Build application and proxy images without publishing
+        run: docker compose -f compose.yaml build app caddy
+      - name: Remove disposable dummy key file
+        if: always()
+        run: rm -f -- "$ANONCE_SERVER_KEY_FILE"

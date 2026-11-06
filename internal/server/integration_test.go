@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"github.com/cloudflare/circl/blindsign/blindrsa"
 	"github.com/mandipnotroot/anonce-platform/internal/protocol"
 	"net/http"
@@ -91,10 +92,48 @@ func loginUser(t *testing.T, s *Server, h http.Handler, u *testUser, method stri
 	u.cookie = w.Result().Cookies()[0].Value
 	u.csrf = v["csrf_token"].(string)
 }
-func testServer(t *testing.T) *Server {
-	t.Helper()
+func databaseTestConfig() (string, string, error) {
 	url := os.Getenv("ANONCE_TEST_DATABASE_URL")
 	anon := os.Getenv("ANONCE_TEST_ANON_DATABASE_URL")
+	if os.Getenv("ANONCE_REQUIRE_DATABASE_TESTS") == "1" && (url == "" || anon == "") {
+		return url, anon, errors.New("ANONCE_REQUIRE_DATABASE_TESTS=1 requires both ANONCE_TEST_DATABASE_URL and ANONCE_TEST_ANON_DATABASE_URL")
+	}
+	return url, anon, nil
+}
+
+func TestDatabaseTestConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, required, member, anonymous string
+		wantError                         bool
+	}{
+		{name: "optional absent"},
+		{name: "optional member only", member: "member"},
+		{name: "optional anonymous only", anonymous: "anonymous"},
+		{name: "required absent", required: "1", wantError: true},
+		{name: "required member only", required: "1", member: "member", wantError: true},
+		{name: "required anonymous only", required: "1", anonymous: "anonymous", wantError: true},
+		{name: "required complete", required: "1", member: "member", anonymous: "anonymous"},
+		{name: "optional complete", member: "member", anonymous: "anonymous"},
+		{name: "explicit opt-in only", required: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ANONCE_REQUIRE_DATABASE_TESTS", tc.required)
+			t.Setenv("ANONCE_TEST_DATABASE_URL", tc.member)
+			t.Setenv("ANONCE_TEST_ANON_DATABASE_URL", tc.anonymous)
+			member, anonymous, err := databaseTestConfig()
+			if member != tc.member || anonymous != tc.anonymous || (err != nil) != tc.wantError {
+				t.Fatalf("database configuration mismatch: error=%v, want error=%v", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func testServer(t *testing.T) *Server {
+	t.Helper()
+	url, anon, err := databaseTestConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if url == "" || anon == "" {
 		t.Skip("disposable PostgreSQL URLs not configured")
 	}

@@ -139,7 +139,11 @@ docker compose up -d
 The local image/runtime checks do not establish public DNS, certificate issuance,
 or production Compose deployment success.
 Caddy terminates same-origin TLS; only Caddy publishes ports. PostgreSQL is on
-an internal network. Caddy strips listed identity headers on anonymous routes;
+an internal network. Compose waits for application readiness before starting
+Caddy. The application readiness probe checks both database roles; an unhealthy
+status after startup does not automatically restart the container or stop Caddy.
+Compose allows 30 seconds for application shutdown, including its 15-second HTTP
+drain. Caddy strips listed identity headers on anonymous routes;
 backend must ignore transport identity and all unrecognized identity headers.
 Do not add access logs, request tracing, or identifying database statement logs.
 The host/network can still observe timing and addresses; this is not protection

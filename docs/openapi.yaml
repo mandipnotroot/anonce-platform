@@ -875,7 +875,7 @@ paths:
     post:
       operationId: createReview
       summary: Create draft and dedicated RSA-3072 issuer key
-      description: 'SignedEnvelope payload decodes to ReviewCreate. Action review-create; approved member, full session, membership_sig. Browser supplies review_id and encrypted content. Atomically creates review and creator vault object with matching ID, expected_revision "0", and revision "1". max_responses is 1..100 per member, not global capacity. Exact retry returns 200.'
+      description: 'SignedEnvelope payload decodes to ReviewCreate. Action review-create; approved owner, admin, or reviewer, full session, membership_sig. Creation role is rechecked under the organization lock before cached retries or writes. Respondents may obtain response authorizations but cannot create reviews. Browser supplies review_id and encrypted content. Atomically creates review and creator vault object with matching ID, expected_revision "0", and revision "1". max_responses is 1..100 per member, not global capacity. Exact authorized retry returns 200.'
       x-challenge-action: review-create
       x-payload-schema: "#/components/schemas/ReviewCreate"
       parameters:

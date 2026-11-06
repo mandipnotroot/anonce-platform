@@ -42,6 +42,15 @@ func run() error {
 	case <-ctx.Done():
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return h.Shutdown(c)
+		return shutdownHTTP(c, h)
 	}
+}
+
+func shutdownHTTP(ctx context.Context, h *http.Server) error {
+	if err := h.Shutdown(ctx); err != nil {
+		// Close active connections before the caller closes the database pools.
+		_ = h.Close()
+		return err
+	}
+	return nil
 }

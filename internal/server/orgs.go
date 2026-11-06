@@ -505,7 +505,8 @@ func transactionAuthorization(r *http.Request, tx pgx.Tx, x *verified) error {
 		return problem{403, "forbidden"}
 	}
 	manage := strings.Contains(r.URL.Path, "/invites") || strings.Contains(r.URL.Path, "/members")
-	if state != "approved" || (manage && role != "owner" && role != "admin") || (strings.HasSuffix(r.URL.Path, "/role") && role != "owner") {
+	createReview := r.Method == http.MethodPost && r.URL.Path == "/api/member/orgs/"+org+"/reviews"
+	if state != "approved" || (manage && role != "owner" && role != "admin") || (strings.HasSuffix(r.URL.Path, "/role") && role != "owner") || (createReview && role != "owner" && role != "admin" && role != "reviewer") {
 		return problem{403, "forbidden"}
 	}
 	return nil

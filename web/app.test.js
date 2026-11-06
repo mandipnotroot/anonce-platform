@@ -65,6 +65,101 @@ async function service(overrides = {}) {
   return context;
 }
 
+async function credentialService({ mutationFails = false, loginFailure } = {}) {
+  const words = Array(12).fill("abandon");
+  const session = { account_id: "YQ", credential_epoch: "2" };
+  const mutations = [];
+  const context = await service({
+    C: {
+      derivePassword: async () => ({ authSeed: new Uint8Array(32) }),
+      deriveRecovery: async () => ({ authSeed: new Uint8Array(32) }),
+      generateRecovery: async () => ({ words: words.join(" ") }),
+      authenticationPublicKey: async () => new Uint8Array(32),
+      passwordMetadataHash: async () => new Uint8Array(32),
+      recoveryMetadataHash: async () => new Uint8Array(32),
+      wrapVaultMaster: async () => ({ ciphertext: "wrapped" }),
+    },
+    request: async (path) => {
+      if (path === "/api/member/auth/params") {
+        if (loginFailure === "request" && mutations.length)
+          throw Error("private login failure");
+        return { account_id: "YQ", password_kdf: {}, recovery_salt: "YQ" };
+      }
+      if (path === "/api/member/me") return session;
+      throw Error("Unexpected request: " + path);
+    },
+  });
+  context.setSigned(async (path) => {
+    mutations.push(path);
+    if (mutationFails) throw Error("mutation rejected");
+    return {};
+  });
+  context.credentialSession = session;
+  context.failCache = loginFailure === "cache";
+  vm.runInContext(
+    `initialize=async()=>({});
+    sessionStart=async()=>credentialSession;
+    vaultOpen=async()=>({masterKey:new Uint8Array(32)});
+    cacheState=async()=>{if(failCache)throw Error('private cache failure');};
+    state={accountId:'YQ',email:'member@example.test',masterKey:new Uint8Array(32),params:{password_kdf:{}},session:credentialSession};
+    globalThis.credentialOperations={changePassword,rotateRecovery,recover};
+    globalThis.hasActiveState=()=>Boolean(state);`,
+    context,
+  );
+  return { context, mutations, words, session };
+}
+
+for (const operation of ["changePassword", "rotateRecovery", "recover"]) {
+  const options = {
+    email: "member@example.test",
+    currentPassword: "old password",
+    newPassword: "new password",
+    words: Array(12).fill("old").join(" "),
+  };
+  for (const loginFailure of ["request", "cache"]) {
+    test(`${operation} preserves committed result after ${loginFailure} login failure`, async () => {
+      const { context, mutations, words } = await credentialService({
+        loginFailure,
+      });
+      const result = await context.credentialOperations[operation](options);
+      assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+        ...(operation === "changePassword"
+          ? {}
+          : { session: null, recoveryWords: words }),
+        reauthenticationRequired: true,
+      });
+      assert.equal(mutations.length, 1);
+      assert.equal(context.hasActiveState(), false);
+    });
+  }
+  test(`${operation} rejects uncommitted mutation without returning recovery words`, async () => {
+    const { context, mutations } = await credentialService({
+      mutationFails: true,
+    });
+    await assert.rejects(
+      context.credentialOperations[operation](options),
+      /mutation rejected/,
+    );
+    assert.equal(mutations.length, 1);
+  });
+  test(`${operation} keeps successful return shape`, async () => {
+    const { context, session, words } = await credentialService();
+    const result = await context.credentialOperations[operation](options);
+    const expectedSession = {
+      ...session,
+      accountId: "YQ",
+      email: options.email,
+    };
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(result)),
+      operation === "changePassword"
+        ? expectedSession
+        : { session: expectedSession, recoveryWords: words },
+    );
+    assert.equal(context.hasActiveState(), true);
+  });
+}
+
 test("standalone receipt trust loads only public config anonymously without crypto init", async () => {
   let requestArgs;
   const config = {

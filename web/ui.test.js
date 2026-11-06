@@ -205,6 +205,121 @@ test("registration and account rotation share recovery controls", () => {
   assert.match(source, /This response could not be decrypted or validated\./);
 });
 
+test("cancelled route change preserves page and unsaved phrase; unload warns", () => {
+  const guardSource = source.slice(
+    source.indexOf("let acknowledgedPhraseHash"),
+    source.indexOf("const canCreateReviews"),
+  );
+  const listeners = {};
+  let hash = "#/account";
+  let prompted = 0;
+  let loads = 0;
+  const context = {
+    phrase: ["new", "phrase"],
+    location: {
+      get hash() {
+        return hash;
+      },
+    },
+    history: {
+      replaceState(_state, _title, value) {
+        hash = value;
+      },
+    },
+    window: {
+      addEventListener(name, callback) {
+        listeners[name] = callback;
+      },
+      confirm() {
+        prompted++;
+        return false;
+      },
+    },
+    load() {
+      loads++;
+    },
+  };
+  vm.runInNewContext(`${guardSource}\n`, context);
+  hash = "#/overview";
+  listeners.hashchange();
+  assert.equal(hash, "#/account");
+  assert.equal(context.phrase.length, 2);
+  assert.equal(prompted, 1);
+  assert.equal(loads, 0);
+  const event = {
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  listeners.beforeunload(event);
+  assert.equal(event.prevented, true);
+  assert.equal(event.returnValue, "");
+  assert.equal(loads, 0);
+});
+
+test("confirmed route discard clears phrase and phrase-free unload stays quiet", () => {
+  const guardSource = source.slice(
+    source.indexOf("let acknowledgedPhraseHash"),
+    source.indexOf("const canCreateReviews"),
+  );
+  const listeners = {};
+  let hash = "#/account";
+  let loads = 0;
+  const context = {
+    phrase: ["new", "phrase"],
+    location: {
+      get hash() {
+        return hash;
+      },
+    },
+    history: {
+      replaceState(_state, _title, value) {
+        hash = value;
+      },
+    },
+    window: {
+      addEventListener(name, callback) {
+        listeners[name] = callback;
+      },
+      confirm() {
+        return true;
+      },
+    },
+    load() {
+      loads++;
+    },
+  };
+  vm.runInNewContext(`${guardSource}\n`, context);
+  hash = "#/overview";
+  listeners.hashchange();
+  assert.equal(context.phrase, null);
+  assert.equal(hash, "#/overview");
+  assert.equal(loads, 1);
+  const event = {
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  listeners.beforeunload(event);
+  assert.equal(event.prevented, undefined);
+});
+
+test("rotation checks unsaved phrase before issuing credential mutation", () => {
+  const rotation = source.slice(
+    source.indexOf('bind("#rotate"'),
+    source.indexOf('document.querySelector("#logout")'),
+  );
+  assert.match(
+    rotation,
+    /if \(phrase && !protectRecoveryPhrase\(\)\) return;[\s\S]*?api\.rotateRecovery/,
+  );
+  assert.match(
+    rotation,
+    /session = r\.session;[\s\S]*?phrase = r\.recoveryWords/,
+  );
+  assert.match(rotation, /current password/);
+});
+
 test("responses use ordinary review routes without secret-link APIs", () => {
   const routeSource = source.slice(
     source.indexOf("const routeHash"),
@@ -1154,7 +1269,6 @@ test("successful mutations report success without duplicating password inline fe
     "Member approved.",
     "Membership revoked.",
     "Password updated.",
-    "Recovery phrase replaced. Save your new phrase.",
     "Review draft created.",
     "Review published.",
     "Review closed.",
@@ -1167,6 +1281,10 @@ test("successful mutations report success without duplicating password inline fe
       `missing success feedback: ${message}`,
     );
   }
+  assert.match(
+    source,
+    /toast\(\s*r\.reauthenticationRequired\s*\?\s*"Recovery phrase replaced\.[^"]*"\s*:\s*"Recovery phrase replaced\. Save your new phrase\.",\s*"success",?\s*\)/,
+  );
   assert.match(
     source,
     /catch \(error\) \{\s*toast\(say\(error\)\);\s*button\.disabled = false;/,
@@ -1444,9 +1562,12 @@ test("logout reports success or failure and restores button after failure", asyn
   const notices = [];
   const navigations = [];
   let logoutFails = false;
+  let phraseGuardAllows = true;
+  let logoutCalls = 0;
   const context = {
     api: {
       async logout() {
+        logoutCalls++;
         if (logoutFails) throw new Error("Logout failed.");
       },
     },
@@ -1456,6 +1577,7 @@ test("logout reports success or failure and restores button after failure", asyn
       },
     },
     session: { account_id: "acct" },
+    protectRecoveryPhrase: () => phraseGuardAllows,
     go: (route) => navigations.push(route),
     toast: (message, type = "error") => notices.push({ message, type }),
     say: (error) => error.message,
@@ -1465,12 +1587,18 @@ test("logout reports success or failure and restores button after failure", asyn
   );
   assert.ok(handler, "logout handler must remain testable");
   const logout = vm.runInNewContext(`(async () => {${handler[1]}\n})`, context);
+  phraseGuardAllows = false;
+  await logout();
+  assert.equal(logoutCalls, 0);
+  assert.equal(button.disabled, false);
+  phraseGuardAllows = true;
   logoutFails = true;
   await logout();
   assert.equal(button.disabled, false);
   assert.deepEqual(notices[0], { message: "Logout failed.", type: "error" });
   assert.equal(context.session.account_id, "acct");
   assert.deepEqual(navigations, []);
+  assert.equal(logoutCalls, 1);
   logoutFails = false;
   await logout();
   assert.equal(button.disabled, true);

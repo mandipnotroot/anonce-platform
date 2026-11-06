@@ -15,6 +15,35 @@ let session = null,
   reviewNext = null,
   busy = false,
   loadGeneration = 0;
+let acknowledgedPhraseHash = location.hash;
+function protectRecoveryPhrase() {
+  if (!phrase) {
+    acknowledgedPhraseHash = location.hash;
+    return true;
+  }
+  const discard = window.confirm(
+    "You have not confirmed saving your new recovery phrase. Discarding it without a saved copy may prevent account recovery. Choose Cancel to keep it visible, or OK to discard it.",
+  );
+  if (discard) {
+    phrase = null;
+    acknowledgedPhraseHash = location.hash;
+    return true;
+  }
+  return false;
+}
+window.addEventListener("beforeunload", (event) => {
+  if (!phrase) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+window.addEventListener("hashchange", () => {
+  if (phrase && !protectRecoveryPhrase()) {
+    history.replaceState(null, "", acknowledgedPhraseHash);
+    return;
+  }
+  acknowledgedPhraseHash = location.hash;
+  load();
+});
 const canCreateReviews = (organization) =>
   isApprovedOrganization(organization) &&
   ["owner", "admin", "reviewer"].includes(organization?.role);
@@ -896,7 +925,7 @@ function renderAuth(mode, intent = "") {
       (document.querySelector("#continue").disabled = !e.target.checked);
     document.querySelector("#continue").onclick = () => {
       phrase = null;
-      const destination = returnRoute || "/";
+      const destination = session ? returnRoute || "/" : "/login";
       returnRoute = null;
       go(destination);
       load();
@@ -920,6 +949,11 @@ function renderAuth(mode, intent = "") {
       });
       phrase = result.recoveryWords;
       session = result.session;
+      if (result.reauthenticationRequired)
+        toast(
+          "Account recovery is complete. Save your new phrase, then sign in with your new password.",
+          "success",
+        );
       renderAuth("recover");
     } else {
       session = await api.login({
@@ -1094,20 +1128,36 @@ async function renderAccount() {
     "Account",
   );
   bind("#password", async (fd) => {
-    await api.changePassword({
+    const result = await api.changePassword({
       currentPassword: fd.get("currentPassword"),
       newPassword: fd.get("newPassword"),
     });
+    if (result?.reauthenticationRequired) {
+      toast(
+        "Password changed. Sign in again with your new password.",
+        "success",
+      );
+      session = null;
+      go("/login");
+      return;
+    }
     document.querySelector("#password").reset();
     document.querySelector("#password .form-error").textContent = "";
     toast("Password updated.", "success");
   });
   bind("#rotate", async (fd) => {
+    if (phrase && !protectRecoveryPhrase()) return;
     const r = await api.rotateRecovery({
       currentPassword: fd.get("currentPassword"),
     });
+    session = r.session;
     phrase = r.recoveryWords;
-    toast("Recovery phrase replaced. Save your new phrase.", "success");
+    toast(
+      r.reauthenticationRequired
+        ? "Recovery phrase replaced. Save it now, then sign in again with your current password."
+        : "Recovery phrase replaced. Save your new phrase.",
+      "success",
+    );
     document.querySelector("#new-phrase").innerHTML =
       `<div class="alert"><strong>Save your new phrase now.</strong> The old phrase is replaced. Copies and downloaded files are sensitive recovery credentials.</div>${recoveryPhrasePanel(phrase, "rotated-recovery")}<label class="check"><input id="rotated-saved" type="checkbox"> I saved the new phrase</label>`;
     renderButtonIcons(document.querySelector("#new-phrase"));
@@ -1116,11 +1166,16 @@ async function renderAccount() {
       if (e.target.checked && e.target.isConnected && phrase) {
         phrase = null;
         document.querySelector("#new-phrase").innerHTML =
-          '<div class="notice">Recovery phrase updated.</div>';
+          '<div class="notice">Phrase hidden. Keep your saved copy private.</div>';
+        if (!r.session) {
+          toast("Sign in with your current password to continue.", "success");
+          go("/login");
+        }
       }
     };
   });
   document.querySelector("#logout").onclick = async () => {
+    if (!protectRecoveryPhrase()) return;
     const button = document.querySelector("#logout");
     button.disabled = true;
     try {
@@ -1496,5 +1551,4 @@ async function renderRespond(id) {
     }
   });
 }
-window.addEventListener("hashchange", load);
 load();

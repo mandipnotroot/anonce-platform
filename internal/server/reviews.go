@@ -179,6 +179,8 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	// operation rechecks the creation role under the organization lock before
+	// returning cached results or generating an issuer key.
 	old, e := operation(r, tx, x, p.Request)
 	if e != nil {
 		fail(w, e)
