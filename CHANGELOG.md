@@ -38,6 +38,9 @@ No version has been released.
 
 ### Changed
 
+- Replace generic documentation diagrams with browser/deployment trust boundaries
+  and the publication, member key-delivery, blind-authorization, anonymous
+  submission, and creator-only decryption flow.
 - Replace secret review-content links with per-member HPKE key envelopes for all
   approved organization memberships at publication. Later-approved members do
   not receive historical keys. Answer decryption stays creator-only; dashboard

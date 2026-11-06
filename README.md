@@ -29,12 +29,29 @@ domain does not establish membership. Invitations do not send email.
 
 ```mermaid
 flowchart LR
-    Browser[Browser: vault and response crypto] -->|Same-origin HTTPS| Caddy
-    Caddy --> App[Go modular monolith]
-    App -->|Member role| DB[(PostgreSQL)]
-    App -->|Restricted anonymous role| DB
-    App --> Keys[Protected server-only keys]
+accTitle: Anonce deployment trust boundaries
+accDescr: Browser-held plaintext and private keys connect through HTTPS to a service that stores encrypted data and metadata. Server signing keys stay separate.
+    subgraph Client[Trusted browser boundary]
+        Browser[Member or creator browser<br/>Unlocked secrets and plaintext]
+    end
+    subgraph Service[Deployment boundary]
+        Proxy[HTTPS proxy]
+        App[Go service<br/>Ciphertext and public state]
+        DB[(PostgreSQL<br/>Encrypted vaults, reviews, answers<br/>Operational metadata)]
+        Keys[Protected server keys<br/>CA, blind issuer, receipt signer]
+        Proxy --> App
+        App -->|Member database role| DB
+        App -->|Restricted anonymous database role| DB
+        App --> Keys
+    end
+    Browser -->|Authenticated HTTPS: vault, membership, issuance| Proxy
+    Browser -->|Credential-free HTTPS: encrypted response| Proxy
+    Proxy -->|Encrypted content and envelopes| Browser
+    Proxy -->|Encrypted results and signed receipts| Browser
 ```
+
+This diagram shows system boundaries, not protection from malicious delivered
+code or network/timing correlation.
 
 Client private keys, review content keys, vault keys, password/recovery material, and question/response plaintext
 remain browser-only. Membership CA, blind issuer, and receipt signing keys are

@@ -14,14 +14,40 @@ This document describes system boundaries, not evidence of completed verificatio
 | PostgreSQL          | Parameterized SQL and transactional state changes enforce quotas, replay protection, and idempotency. Database integrity remains a trust requirement.                                                                                                             |
 
 ```mermaid
-flowchart LR
-    B[Browser] -->|Authenticated: encrypted vault and blind issuance| S[Go service]
-    B -->|Anonymous: authorization and encrypted response| S
-    S -->|Atomic state changes| D[(PostgreSQL)]
-    S -->|Signed acceptance receipt| B
-    D -->|Encrypted results| S
-    S -->|Encrypted results| R[Reviewer browser]
+sequenceDiagram
+accTitle: Review publication and response flow
+accDescr: Creator publishes encrypted questions and member key envelopes. An approved member uses one browser for content access, authenticated blind issuance, and credential-free encrypted submission. Only creator decrypts answers.
+    participant C as Creator browser
+    participant M as Same approved member browser
+    participant S as Go service
+    participant D as PostgreSQL
+    Note over C,M: Approved memberships, including creator, get content-key envelopes at publication. Later approvals do not.
+    Note over C,S: Phase 1 — publication
+        C->>C: Encrypt questions and retain answer private key in creator vault
+        C->>S: Authenticated publish: encrypted content and envelopes
+        S->>D: Atomically store publication and envelopes
+    Note over M,S: Phase 2 — approved member access and issuance
+        M->>S: Authenticated review access
+        S-->>M: Encrypted questions and own content-key envelope
+        M->>M: Decrypt questions and prepare blind authorization
+        M->>S: Authenticated blind-authorization request
+        S->>D: Atomically reserve per-member quota and cache signature
+        S-->>M: Blind signature
+    Note over M,S: Phase 3 — credential-free response and acceptance
+        M->>M: Unblind authorization and encrypt answers to creator public key
+        M->>S: Credential-free submission: authorization and ciphertext
+        S->>D: Atomically store ciphertext, spend, and signed receipt
+        S-->>M: Signed acceptance receipt
+    Note over C,S: Phase 4 — creator-only result decryption
+        C->>S: Authenticated creator result request
+        S-->>C: Encrypted answers and signed receipts
+        C->>C: Verify receipts and decrypt with creator-only answer private key
+    Note over S: Server cannot decrypt questions or answers.
+    Note over M,S: Credential-free transport does not prevent network/timing correlation.
 ```
+
+This diagram shows system boundaries, not protection from malicious delivered
+code or network/timing correlation.
 
 The browser encrypts review titles, descriptions, and complete questions before
 draft creation. Signed descriptors contain encrypted content, not plaintext
