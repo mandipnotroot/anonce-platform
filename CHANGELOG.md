@@ -97,8 +97,23 @@ No version has been released.
 - Use Alpine containers and current stable Go, Node.js, PostgreSQL, Caddy,
   Go dependencies, and CI actions. Keep existing exact npm pins, already current.
 
+### Removed
+
+- Remove the checked-in verification diary and historical run logs. Consolidate
+  repeatable test commands and release gates in the contribution guide; keep run
+  results in pull requests or CI artifacts and product limits in architecture docs.
+
 ### Fixed
 
+- Use the selected organization's approved membership to show review creation,
+  creator metrics, and member-management controls. Hide unavailable actions from
+  respondents and keep server-side permission enforcement unchanged.
+- Clear organization-specific review state when switching workspaces and ignore
+  stale review, pagination, and member-list responses. Restrict response-review
+  controls to creators, show pending membership guidance, and keep recovery
+  navigation limited to available flows.
+- Honor hidden controls consistently and prevent navigation label clipping on
+  narrow mobile screens.
 - Decode receipt PNGs without blob image URLs blocked by the site's security
   policy, and load public signing keys when opening the verifier directly.
 - Verify signed receipt context before returning cached acceptance or decrypting

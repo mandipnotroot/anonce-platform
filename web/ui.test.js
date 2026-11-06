@@ -332,6 +332,7 @@ test("review dashboard hides locked member metadata and aggregates creator-owned
   let rendered;
   const context = {
     reviews: [creator, member],
+    currentOrg: { role: "reviewer", status: "approved" },
     reviewNext: null,
     pendingResponses: [],
     frame(markup) {
@@ -347,6 +348,7 @@ test("review dashboard hides locked member metadata and aggregates creator-owned
     countText(value) {
       return String(value);
     },
+    canCreateReviews: () => true,
     root: {
       querySelectorAll() {
         return [];
@@ -597,7 +599,7 @@ test("receipt verifier uses local API only and enforces UTF-8 byte bounds", asyn
   );
   assert.ok(
     source.indexOf('if (route[0] === "verify-receipt")') <
-      source.indexOf("session = await api.getSession()"),
+      source.indexOf("const result = await api.getSession()"),
   );
   assert.match(source, /verifyReceiptLocally\(inputText, selectedTrust\)/);
   assert.match(source, /verifySavedReceipt/);
@@ -1232,6 +1234,156 @@ test("organization rows group role and status while preserving Open action targe
     styles,
     /\.review-row\.org-row\s*\{\s*padding:\s*var\(--space-3\);?\s*\}/,
   );
+  assert.match(styles, /\[hidden\]\s*\{\s*display:\s*none !important/);
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*390px\)[\s\S]*?\.nav\s*\{\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+  );
+});
+
+test("organization permissions require approved selected membership and full scope", () => {
+  assert.match(
+    source,
+    /const isApprovedOrganization = \(organization\) =>[\s\S]*?=== "approved"/,
+  );
+  assert.match(
+    source,
+    /const canCreateReviews = \(organization\) =>[\s\S]*?isApprovedOrganization/,
+  );
+  assert.match(
+    source,
+    /session\?\.scope !== "full" \|\| !canCreateReviews\(currentOrg\)/,
+  );
+  assert.match(source, /findApprovedOrganization\(orgs, currentOrg\?\.id\)/);
+  assert.match(
+    source,
+    /const selected = orgs\.find\(\(o\) => o\.id === b\.dataset\.org\);[\s\S]*?if \(!isApprovedOrganization\(selected\)\) return;[\s\S]*?resetOrganizationView\(\)/,
+  );
+  assert.match(
+    source,
+    /const canManageMemberships = \(organization\) =>[\s\S]*?\["owner", "admin"\]/,
+  );
+  assert.match(
+    source,
+    /orgs\.find\(\(organization\) => organization\.id === reviewOrgId\)/,
+  );
+  assert.doesNotMatch(source, /Math\.max\([^)]*role|roleRank|highestRole/i);
+});
+
+test("selected membership controls role affordances and excludes pending or revoked organizations", () => {
+  const helpers = source.slice(
+    source.indexOf("const canCreateReviews"),
+    source.indexOf("const esc ="),
+  );
+  const context = {
+    reviews: ["old review"],
+    pendingResponses: ["old response"],
+    reviewNext: "cursor",
+  };
+  const run = vm.runInNewContext(
+    `${helpers}; ({ canCreateReviews, findApprovedOrganization, resetOrganizationView, loadMembersIfAllowed })`,
+    context,
+  );
+  const memberships = [
+    { id: "team-a", role: "owner", status: "approved" },
+    { id: "team-b", role: "respondent", status: "approved" },
+    { id: "team-c", role: "admin", status: "pending" },
+    { id: "team-d", role: "owner", status: "revoked" },
+    { id: "team-e", role: "admin", status: "approved" },
+  ];
+  const respondentOrg = run.findApprovedOrganization(memberships, "team-b");
+  assert.equal(respondentOrg.role, "respondent");
+  assert.equal(run.canCreateReviews(respondentOrg), false);
+  assert.equal(
+    run.canCreateReviews(run.findApprovedOrganization(memberships, "team-a")),
+    true,
+  );
+  assert.equal(run.findApprovedOrganization(memberships, "team-c"), null);
+  assert.equal(run.findApprovedOrganization(memberships, "team-d"), null);
+  let rosterRequests = 0;
+  for (const organization of memberships) {
+    run.loadMembersIfAllowed(organization, () => rosterRequests++);
+  }
+  assert.equal(rosterRequests, 2);
+  run.resetOrganizationView();
+  assert.deepEqual(Array.from(context.reviews), []);
+  assert.deepEqual(Array.from(context.pendingResponses), []);
+  assert.equal(context.reviewNext, null);
+});
+
+test("review response controls remain creator-only for reviewer memberships", () => {
+  assert.match(source, /const canReviewResponses = canManage/);
+  assert.doesNotMatch(
+    source,
+    /canManage \|\| currentOrg\?\.role === "reviewer"/,
+  );
+  assert.doesNotMatch(source, /Not authorized/);
+  const helpers = source.slice(
+    source.indexOf("const isApprovedOrganization"),
+    source.indexOf("const isWorkspaceRouteAllowed"),
+  );
+  const canManage = vm.runInNewContext(`${helpers}; canManageMemberships`);
+  assert.equal(canManage({ role: "reviewer", status: "approved" }), false);
+  assert.equal(canManage({ role: "owner", status: "pending" }), false);
+});
+
+test("stale route loads cannot render, and recovery scope routes back to account", () => {
+  const helpers = source.slice(
+    source.indexOf("const isWorkspaceRouteAllowed"),
+    source.indexOf("const esc ="),
+  );
+  const current = vm.runInNewContext(
+    `${helpers}; ({ isCurrentLoad, isWorkspaceRouteAllowed, isPermissionError })`,
+  );
+  assert.equal(
+    current.isCurrentLoad({
+      requestId: 1,
+      requestedHash: "/",
+      currentRequestId: 2,
+      currentHash: "/orgs",
+    }),
+    false,
+  );
+  assert.equal(
+    current.isCurrentLoad({
+      requestId: 2,
+      requestedHash: "/orgs",
+      currentRequestId: 2,
+      currentHash: "/orgs",
+    }),
+    true,
+  );
+  assert.equal(
+    current.isCurrentLoad({
+      requestId: 2,
+      requestedHash: "/",
+      currentRequestId: 2,
+      currentHash: "/",
+      requestedOrgId: "team-a",
+      currentOrgId: "team-b",
+    }),
+    false,
+  );
+  assert.equal(
+    current.isWorkspaceRouteAllowed({ scope: "recovery" }, "orgs"),
+    false,
+  );
+  assert.equal(
+    current.isWorkspaceRouteAllowed({ scope: "recovery" }, "review"),
+    false,
+  );
+  assert.equal(
+    current.isWorkspaceRouteAllowed({ scope: "recovery" }, "respond"),
+    false,
+  );
+  assert.equal(
+    current.isWorkspaceRouteAllowed({ scope: "recovery" }, "account"),
+    true,
+  );
+  assert.equal(current.isPermissionError({ status: 403 }), true);
+  assert.equal(current.isPermissionError({ code: "NETWORK_ERROR" }), false);
+  assert.match(source, /button\("Account & recovery", "account"\)/);
+  assert.match(source, /Organization access pending/);
 });
 
 test("JSON and CSV exports confirm that browser download started", async () => {

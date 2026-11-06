@@ -9,12 +9,14 @@ const css = await readFile(new URL("styles.css", webURL), "utf8");
 const font = await readFile(new URL("assets/geist-variable.woff2", webURL));
 const icons = new Map(
   await Promise.all(
-    ["house", "building-2", "user-round"].map(async (name) => [
-      name,
-      (await readFile(new URL(`assets/icons/${name}.svg`, webURL))).toString(
-        "base64",
-      ),
-    ]),
+    ["house", "building-2", "check-circle-2", "user-round"].map(
+      async (name) => [
+        name,
+        (await readFile(new URL(`assets/icons/${name}.svg`, webURL))).toString(
+          "base64",
+        ),
+      ],
+    ),
   ),
 );
 const ui = await readFile(new URL("ui.js", webURL), "utf8");
@@ -55,7 +57,10 @@ try {
   renderFrame(
     root,
     "",
-    { email: "member.with.a.long.address@example.organization.example" },
+    {
+      email: "member.with.a.long.address@example.organization.example",
+      scope: "full",
+    },
     "#",
     '<div style="height:1600px">Scrollable workspace content</div>',
     "Overview",
@@ -94,7 +99,9 @@ try {
           activeCount: links.filter(
             (link) => link.getAttribute("aria-current") === "page",
           ).length,
-          accountLabel: links[2].getAttribute("aria-label"),
+          accountLabel: links
+            .find((link) => link.getAttribute("href") === "#/account")
+            .getAttribute("aria-label"),
           workspace: document.querySelector(".workspace-label strong")
             ?.textContent,
           workspaceLabel: document

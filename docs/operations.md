@@ -2,9 +2,10 @@
 
 # Operations (pre-release)
 
-**Not approved for sensitive production data.** Historical smoke, restore and
-Node 24 HTTPS browser checks do not validate the current revision or a public
-deployment. See [verification evidence](verification.md) for results and open gates.
+**Not approved for sensitive production data.** Validate the current revision and
+deployment against the
+[release gates](../CONTRIBUTING.md#verification-and-release-gates). Record results
+in pull requests or CI artifacts; historical checks do not validate a public deployment.
 
 | Prerequisite    | Contract                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------- |

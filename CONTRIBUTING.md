@@ -86,9 +86,60 @@ commands, exit statuses, and skipped checks; do not claim unperformed tests or
 security review. Update the [OpenAPI contract](docs/openapi.yaml) and
 [protocol formats](docs/protocol.md) when their contracts change. Database
 integration tests skip without their explicit test database environment variables;
-never point them at production data. Recorded E2E results and remaining release
-gates are documented in [verification evidence](docs/verification.md).
+never point them at production data. Follow the checks and release gates below.
 Use the [private security reporting process](SECURITY.md) for vulnerabilities.
+
+## Verification and release gates
+
+Use the Go version in `go.mod` and the Node.js version pinned in CI. Run checks
+with disposable synthetic data only. Record exact commands, exit statuses,
+relevant results, and skipped checks with reasons in the pull request or CI
+artifacts, not a checked-in execution diary. Results apply to the tested revision;
+historical passes do not validate later changes.
+
+| Check                                | Command                                                          | Preconditions and limits                                                                                                                                       |
+| ------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go formatting                        | `make fmt-check`                                                 | Checks tracked Go files                                                                                                                                        |
+| Web/document formatting              | `npm run format:check -- <changed supported files>`              | Supply explicit paths after formatting                                                                                                                         |
+| Go race tests                        | `make test`                                                      | Database tests require both `ANONCE_TEST_DATABASE_URL` and `ANONCE_TEST_ANON_DATABASE_URL`, using distinct member and anonymous roles in a disposable database |
+| Go static checks                     | `make vet`                                                       | Does not replace runtime tests                                                                                                                                 |
+| Browser modules and interoperability | `make browser`                                                   | Installs pinned dependencies, builds assets, and runs module and Go/browser crypto tests                                                                       |
+| Mock browser UI                      | `node scripts/ui-check.mjs` and `node scripts/ui-responsive.mjs` | Requires Playwright Chromium; mocked APIs do not validate live backend authorization or accessibility conformance                                              |
+| Compose configuration                | `make compose-check`                                             | Requires configured variables; does not start services                                                                                                         |
+| Container build                      | `make build`                                                     | Builds images; does not validate deployment                                                                                                                    |
+| Live HTTPS browser E2E               | `npm run test:e2e`                                               | Set `ANONCE_E2E_ORIGIN` to an already-running disposable HTTPS deployment                                                                                      |
+
+For a self-signed loopback E2E deployment only, set
+`ANONCE_E2E_ALLOW_SELF_SIGNED=1`. The bypass accepts only `localhost`,
+`127.0.0.1`, and `[::1]`. See [operations](docs/operations.md) for environment setup.
+Database tests that skip without their URLs are not database or concurrency
+evidence. CI configuration alone is not evidence that a check passed.
+
+Select focused positive and negative tests for each change. Before a release,
+establish current-revision evidence for:
+
+- Authentication, recovery scope, credential/vault revision conflicts, challenge
+  replay, and session revocation, including concurrent requests.
+- Per-organization roles, approval/revocation, cross-account access, creator-only
+  response decryption, and member content-key delivery before and after approval.
+- Cryptographic vectors, malformed inputs, context/key substitution, receipt
+  verification, key continuity, and browser-only secrets.
+- Atomic quota enforcement, idempotent retries, closure races, rollback, and
+  restart continuity against PostgreSQL with both restricted database roles.
+- Live multiaccount browser journeys for registration, recovery, publication,
+  response submission/retries, receipt verification, and creator decrypt/export.
+  Check browser persistence, logout cleanup, keyboard access, mobile layouts,
+  and assistive technology separately from module tests.
+- Anonymous credential omission, identifying-log prevention, metadata boundaries,
+  HTTPS/cookies/CSP, runtime key permissions, signing-key rotation, and encrypted
+  off-host backup/restore.
+- Independent source-first security review of transcripts, dependencies,
+  authorization, concurrency, browser storage, and metadata handling.
+
+These are required gates, not claims of completed testing, audit, or production
+approval. Keep trust assumptions and product limitations in
+[SECURITY.md](SECURITY.md), [architecture](docs/architecture.md), and the
+[protocol](docs/protocol.md).
 
 Original contributions are accepted under **AGPL-3.0-only** and must include
 appropriate SPDX notices. Preserve third-party licensing and update

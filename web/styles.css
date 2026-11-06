@@ -240,6 +240,9 @@ a {
 .hidden {
   display: none;
 }
+[hidden] {
+  display: none !important;
+}
 .form-card {
   padding: var(--space-6);
 }
@@ -1555,11 +1558,17 @@ select:focus-visible {
 @media (max-width: 390px) {
   .shell {
     padding-inline: 12px;
+    padding-bottom: calc(118px + env(safe-area-inset-bottom));
   }
   .nav a {
-    padding: 6px 2px;
-    font-size: 11px;
-    line-height: 1.1;
+    min-height: 48px;
+    padding: 6px 4px;
+    font-size: 12px;
+    line-height: 1.15;
+    white-space: normal;
+  }
+  .nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .nav .icon {
     width: 17px;

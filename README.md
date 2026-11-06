@@ -8,7 +8,7 @@ cryptography and same-origin HTTPS.
 
 **Pre-release. Not approved for sensitive production data.** No version has been
 released and no independent security audit or production-readiness claim is made.
-See [verification evidence and remaining gates](docs/verification.md).
+See [verification and release gates](CONTRIBUTING.md#verification-and-release-gates).
 
 ## Features and browser usage
 
@@ -92,8 +92,9 @@ make vet
 unit and crypto interoperability tests. Database integration tests require both
 `ANONCE_TEST_DATABASE_URL` and `ANONCE_TEST_ANON_DATABASE_URL` for distinct roles
 in a disposable database; they skip without those variables. Browser E2E needs an
-already-running disposable HTTPS service. See [verification](docs/verification.md)
-for commands, recorded evidence, and skipped checks.
+already-running disposable HTTPS service. See
+[verification and release gates](CONTRIBUTING.md#verification-and-release-gates)
+for commands and required coverage. Record run results in pull requests or CI artifacts.
 
 ## Documentation
 
@@ -102,7 +103,7 @@ for commands, recorded evidence, and skipped checks.
 - [OpenAPI contract](docs/openapi.yaml)
 - [Saving and verifying receipts](docs/receipts.md)
 - [Operations and local HTTPS](docs/operations.md)
-- [Verification evidence and release gates](docs/verification.md)
+- [Testing and release gates](CONTRIBUTING.md#verification-and-release-gates)
 
 ## Contributing and license
 

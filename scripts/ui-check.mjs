@@ -44,29 +44,31 @@ const mockModule = `
 let active = null;
 let mockRole = "owner";
 export const addedMembers=[];
+export const memberCalls=[];
+const organizationRole=id=>id==="respondent-org"?"respondent":id==="reviewer-org"?"reviewer":mockRole;
 const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"];
 export const getSourceURL=()=>"https://example.invalid/source";
 export const getSession=async()=>active;
-export const register=async({email})=>{active={account_id:"acct",email};return {recoveryWords:phrase,session:active};};
-export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");active={account_id:"acct",email};return active;};
-export const recover=async({email})=>{active={account_id:"acct",email};return {recoveryWords:phrase,session:active};};
+export const register=async({email})=>{active={account_id:"acct",email,scope:"full"};return {recoveryWords:phrase,session:active};};
+export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");active={account_id:"acct",email,scope:"full"};return active;};
+export const recover=async({email})=>{active={account_id:"acct",email,scope:"full"};return {recoveryWords:phrase,session:active};};
 export const rotateRecovery=async()=>({recoveryWords:phrase,session:active});
 export const setMockRole=role=>mockRole=role;
-export const listOrganizations=async()=>({items:[{id:"org",name:"Demo workspace",role:mockRole},{id:"other",name:"Other workspace",role:mockRole}]});
-export const listMembers=async()=>({items:[{id:"owner",email:"owner@example.net",role:"owner",status:"approved"},{id:"admin",email:"admin@example.net",role:"admin",status:"approved"},{id:"reviewer",email:"reviewer@example.net",role:"reviewer",status:"approved"},{id:"respondent",email:"respondent@example.net",role:"respondent",status:"approved"},{id:"pending",email:"pending@example.net",role:"respondent",status:"pending"},{id:"revoked",email:"revoked@example.net",role:"reviewer",status:"revoked"}]});
+export const listOrganizations=async()=>({items:[{id:"org",name:"Demo workspace",role:mockRole,status:"approved"},{id:"other",name:"Other workspace",role:mockRole,status:"approved"},{id:"respondent-org",name:"Respondent workspace",role:"respondent",status:"approved"},{id:"reviewer-org",name:"Reviewer workspace",role:"reviewer",status:"approved"},{id:"pending-org",name:"Pending workspace",role:"owner",status:"pending"},{id:"revoked-org",name:"Revoked workspace",role:"owner",status:"revoked"}]});
+export const listMembers=async({orgId})=>{memberCalls.push(orgId);if(!["owner","admin"].includes(organizationRole(orgId)))throw new Error("Forbidden");return {items:[{id:"owner",email:"owner@example.net",role:"owner",status:"approved"},{id:"admin",email:"admin@example.net",role:"admin",status:"approved"},{id:"reviewer",email:"reviewer@example.net",role:"reviewer",status:"approved"},{id:"respondent",email:"respondent@example.net",role:"respondent",status:"approved"},{id:"pending",email:"pending@example.net",role:"respondent",status:"pending"},{id:"revoked",email:"revoked@example.net",role:"reviewer",status:"revoked"}]};};
 export const addMember=async({email,role})=>addedMembers.push({email,role});
 export const approveMember=async()=>{};
 export const revokeMember=async()=>{};
 export const changeMemberRole=async()=>{};
 export const listReviews=async()=>({items:[],next:null});
 export const listPendingResponses=async()=>({items:[]});
-export const createReview=async()=>({id:"new-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",revision:1,questions:[]});
+export const createReview=async()=>({id:"new-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",is_creator:true,revision:1,questions:[]});
 export const updateReview=async()=>({});
 export const publishReview=async()=>({});
 export const prepareResponse=async()=>({pendingId:"pending-response"});
 export const submitResponse=async()=>({status:"accepted",receipt:{version:1,signature:"mock-signed-receipt"}});
 export const lookupReceipt=async()=>({status:"accepted",receipt:{version:1,signature:"mock-signed-receipt"}});
-export const getReview=async({reviewId})=>({id:reviewId,org_id:reviewId==="review"?"other":"org",title:reviewId==="review"?"Demo review":"Draft review",description:"Share feedback",status:reviewId==="review"?"closed":"draft",creator_account_id:"acct",revision:1,questions:[{id:"question-1",text:"What should change?",type:"text",required:true,options:[]}]});
+export const getReview=async({reviewId})=>({id:reviewId,org_id:reviewId==="review"?"other":"org",title:reviewId==="review"?"Demo review":"Draft review",description:"Share feedback",status:reviewId==="review"?"closed":"draft",creator_account_id:"acct",is_creator:true,revision:1,questions:[{id:"question-1",text:"What should change?",type:"text",required:true,options:[]}]});
 export const listResponses=async()=>({items:[{id:"r1",acceptedAt:"2026-01-01T00:00:00Z",status:"invalid",error:"RESPONSE_UNREADABLE",answers:[]}],next:null});
 `;
 
@@ -397,6 +399,74 @@ try {
   );
   await captures("members");
 
+  for (const id of ["pending-org", "revoked-org"]) {
+    const open = page.locator(`[data-org="${id}"]`);
+    assert.equal(await open.isVisible(), false, `${id} open action is hidden`);
+    await open.evaluate((button) => button.click());
+    assert.equal(
+      await page.locator(".workspace-label strong").textContent(),
+      "Demo workspace",
+    );
+  }
+  await page.locator('[data-org="respondent-org"]').click();
+  for (const orgId of ["respondent-org", "reviewer-org"]) {
+    await page.locator(`[data-org="${orgId}"]`).click();
+    assert.equal(
+      await page.locator("#member-area").count(),
+      0,
+      `${orgId} cannot see membership table`,
+    );
+    assert.equal(
+      await page.getByRole("heading", { name: / · members$/ }).count(),
+      0,
+      `${orgId} cannot see membership heading`,
+    );
+    assert.equal(
+      await page.evaluate(
+        async (id) => (await import("/app.js")).memberCalls.includes(id),
+        orgId,
+      ),
+      false,
+      `${orgId} must not request membership roster`,
+    );
+  }
+  await page.locator('[data-org="respondent-org"]').click();
+  assert.equal(
+    await page
+      .locator(
+        "#add-toggle,#invite-toggle,#member-area [data-role],#member-area [data-revoke]",
+      )
+      .count(),
+    0,
+    "respondents have no member management actions",
+  );
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "New review", exact: true }).count(),
+    0,
+    "respondents cannot create reviews",
+  );
+  assert.equal(
+    await page.locator(".stat-grid").count(),
+    0,
+    "respondents cannot see creator metrics",
+  );
+  await captures("respondent");
+  await page
+    .getByRole("link", { name: "Organizations", exact: true })
+    .first()
+    .click();
+  await page.locator('[data-org="org"]').click();
+  await page.getByRole("button", { name: "Add by email" }).waitFor();
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  await page.getByRole("link", { name: "New review", exact: true }).waitFor();
+  assert.equal(
+    await page.locator(".stat-grid").count(),
+    1,
+    "owner metrics return after switching back",
+  );
+
   await page.evaluate(async () => {
     (await import("/app.js")).setMockRole("admin");
     location.hash = "#/";
@@ -486,14 +556,28 @@ try {
       .evaluate((node) => getComputedStyle(node).backgroundColor),
     "closed badge text contrasts with fill",
   );
-  await page.getByRole("button", { name: "Share" }).click();
-  await page
-    .locator("#toast-region")
-    .getByText("Response link copied.")
-    .waitFor();
-  assert.match(
-    await page.evaluate(() => navigator.clipboard.readText()),
-    /#\/respond\/review$/,
+  await page.getByRole("link", { name: "Responses", exact: true }).waitFor();
+  await page.getByRole("link", { name: "Build", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Publish review", exact: true })
+      .count(),
+    0,
+    "published reviews cannot be published again",
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Share", exact: true }).count(),
+    0,
+    "member key delivery does not expose secret share links",
+  );
+  assert.equal(
+    await page
+      .locator(
+        'a[href*="question_key"],a[href*="content_key"],input[value*="question_key"],input[value*="content_key"]',
+      )
+      .count(),
+    0,
+    "review UI must not expose content keys in links",
   );
   await captures("results");
   await page.evaluate(() => {
@@ -520,8 +604,17 @@ try {
   await page.getByRole("heading", { name: "Demo review" }).waitFor();
   await page.getByLabel("What should change?").fill("Clearer guidance");
   await page.getByRole("button", { name: "Send response" }).click();
-  await page.getByText("Response accepted.").waitFor();
-  await page.getByRole("button", { name: "Copy receipt" }).waitFor();
+  await page
+    .getByRole("heading", { name: "Response accepted", exact: true })
+    .waitFor();
+  await page.getByText("Receipt signature verified", { exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Download receipt PNG", exact: true })
+    .waitFor();
+  await page.getByText("Technical details (JSON)", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Copy receipt data", exact: true })
+    .waitFor();
   assert.match(
     await page.locator(".receipt-data").textContent(),
     /mock-signed-receipt/,

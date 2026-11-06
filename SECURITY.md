@@ -42,4 +42,4 @@ Operators/issuers and server CA substitution are also trust boundaries. Public
 password-derived keys allow offline guessing. Phrase rotation does not invalidate
 old encrypted snapshots or rotate vault key V; report compromise accordingly.
 See [operations](docs/operations.md) for deployment/key handling and
-[verification](docs/verification.md) for evidence and unresolved release gates.
+[release gates](CONTRIBUTING.md#verification-and-release-gates) for required checks.

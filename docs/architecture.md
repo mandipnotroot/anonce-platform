@@ -2,7 +2,7 @@
 
 # Architecture and trust boundaries
 
-This document describes system boundaries, not evidence of completed verification. See [protocol.md](protocol.md) for cryptographic formats, [openapi.yaml](openapi.yaml) for HTTP contracts, and [verification.md](verification.md) for evidence requirements.
+This document describes system boundaries, not evidence of completed verification. See [protocol.md](protocol.md) for cryptographic formats, [openapi.yaml](openapi.yaml) for HTTP contracts, and [verification requirements](../CONTRIBUTING.md#verification-and-release-gates) for release checks.
 
 ## Boundaries
 
@@ -106,3 +106,11 @@ no named completion API or join between issuance and submissions.
 Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage. Older retained objects remain exposed to that linkage. Response lengths, timing and other deployment metadata remain observable. Before decrypting a reviewer result, the browser verifies a receipt binding the encrypted envelope to its deployment, review, descriptor, and issuer. This detects unsigned ciphertext replacement; it does not establish complete database integrity. A database-write attacker can delete or replay accepted records, roll back history, or remove spend state and reuse stored bearer authorizations through the honest signing endpoint. Acceptance also trusts database-held issuer context. Protect database integrity and retain independently trusted receipt public keys.
 
 This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution. Independent source-first security review is required, not an audit claim. Rotating a recovery phrase does not revoke compromised encrypted snapshots: full compromise repair requires a new vault key, object re-encryption and membership-key rotation.
+
+## Product limits
+
+Organization lists have no cursor; member lists return at most 100 entries.
+Review and submission lists return at most 50 entries per page using `after`,
+without a configurable `limit`. Registration, credential changes, and deletion
+are not universally retry-cached; issuance and spend idempotency do not imply a
+global retry guarantee. See [OpenAPI](openapi.yaml) for endpoint contracts.

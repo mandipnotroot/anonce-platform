@@ -2,8 +2,9 @@
 
 # Member content-key delivery contract
 
-Status: implementation contract; verification evidence is recorded separately in
-[verification.md](verification.md). This document is not proof of passed tests.
+Status: implementation contract, not proof of passed tests. Follow the
+[verification requirements](../CONTRIBUTING.md#verification-and-release-gates)
+and record run results in pull requests or CI artifacts.
 This replaces secret question-key links, not creator-only answer decryption.
 
 ## Access policy

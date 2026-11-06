@@ -13,7 +13,56 @@ let session = null,
   review = null,
   pendingResponses = [],
   reviewNext = null,
-  busy = false;
+  busy = false,
+  loadGeneration = 0;
+const canCreateReviews = (organization) =>
+  isApprovedOrganization(organization) &&
+  ["owner", "admin", "reviewer"].includes(organization?.role);
+const isApprovedOrganization = (organization) =>
+  String(organization?.status || "").toLowerCase() === "approved";
+const canManageMemberships = (organization) =>
+  isApprovedOrganization(organization) &&
+  ["owner", "admin"].includes(organization?.role);
+const loadMembersIfAllowed = (organization, load) => {
+  if (canManageMemberships(organization)) load();
+};
+const isWorkspaceRouteAllowed = (account, route) =>
+  account?.scope === "full" || ["account", "verify-receipt"].includes(route);
+const isPermissionError = (error) =>
+  error?.status === 403 ||
+  ["forbidden", "FORBIDDEN", "recovery_scope", "RECOVERY_SCOPE"].includes(
+    error?.code,
+  );
+const findApprovedOrganization = (memberships, id) =>
+  (id
+    ? memberships.find(
+        (organization) =>
+          organization.id === id && isApprovedOrganization(organization),
+      )
+    : memberships.find(isApprovedOrganization)) || null;
+const isCurrentLoad = ({
+  requestId,
+  requestedHash,
+  currentRequestId,
+  currentHash,
+  requestedOrgId,
+  currentOrgId,
+}) =>
+  requestId === currentRequestId &&
+  requestedHash === currentHash &&
+  (requestedOrgId === undefined || requestedOrgId === currentOrgId);
+const isCurrentLoadState = (requestId, requestedHash) =>
+  isCurrentLoad({
+    requestId,
+    requestedHash,
+    currentRequestId: loadGeneration,
+    currentHash: routeHash(),
+  });
+const resetOrganizationView = () => {
+  reviews = [];
+  pendingResponses = [];
+  reviewNext = null;
+};
 const esc = (s) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -173,6 +222,10 @@ function frame(body, title = "Workspace") {
       ? `<div class="workspace-label" aria-label="Current workspace: ${esc(currentOrg.name || "Organization")}"><span class="workspace-icon">${icon("building-2")}</span><strong>${esc(currentOrg.name || "Organization")}</strong></div>`
       : "";
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">A</span>Anonce</a>${workspaceLabel}<nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/verify-receipt" aria-label="Verify receipt" ${active === "verify-receipt" ? 'aria-current="page"' : ""} class="${active === "verify-receipt" ? "active" : ""}"><span class="nav-item">${icon("check-circle-2")}<span>Verify receipt</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.email || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content"><div class="route-context">Anonce <span aria-hidden="true">/</span> ${esc(title)}</div>${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p><a href="#/verify-receipt">Verify a receipt</a>${sourceLink}</footer></div>`;
+  if (session?.scope !== "full")
+    root
+      .querySelectorAll('.nav a[href="#/"], .nav a[href="#/orgs"]')
+      .forEach((link) => link.remove());
   renderButtonIcons();
   root.querySelector(".skip-link").addEventListener("click", (event) => {
     event.preventDefault();
@@ -285,6 +338,9 @@ function bind(form, fn) {
   });
 }
 async function load() {
+  const requestId = ++loadGeneration,
+    requestedHash = routeHash(),
+    isCurrentLoad = () => isCurrentLoadState(requestId, requestedHash);
   const route = path();
   const respondHash = routeHash();
   if (hasUnsupportedResponseRoute(route, respondHash)) {
@@ -308,8 +364,11 @@ async function load() {
     return await renderReceiptVerifier();
   }
   try {
-    session = await api.getSession();
+    const result = await api.getSession();
+    if (!isCurrentLoad()) return;
+    session = result;
   } catch {
+    if (!isCurrentLoad()) return;
     session = null;
   }
   if (!session && (route[0] === "respond" || route[0] === "invite"))
@@ -331,18 +390,35 @@ async function load() {
     );
     return;
   }
+  if (!isWorkspaceRouteAllowed(session, route[0])) {
+    frame(
+      emptyCard(
+        "Workspace unavailable",
+        "Your account is in recovery mode. Return to account settings to finish recovery.",
+        button("Account & recovery", "account"),
+      ),
+      "Workspace",
+    );
+    return;
+  }
   if (route[0] === "respond") {
     renderRespond(route[1]);
     return;
   }
   let organizationError = "";
   try {
-    orgs = (await api.listOrganizations()).items;
+    const result = await api.listOrganizations();
+    if (!isCurrentLoad()) return;
+    orgs = result.items;
   } catch (e) {
+    if (!isCurrentLoad()) return;
     orgs = [];
     organizationError = say(e);
   }
-  currentOrg = orgs.find((o) => o.id === currentOrg?.id) || orgs[0] || null;
+  if (!isCurrentLoad()) return;
+  currentOrg =
+    findApprovedOrganization(orgs, currentOrg?.id) ||
+    findApprovedOrganization(orgs);
   const p = path();
   if (p[0] === "invite" && p[1]) {
     frame(
@@ -362,7 +438,7 @@ async function load() {
   }
   if (p[0] === "account") return renderAccount();
   if (p[0] === "orgs") return renderOrgs();
-  if (p[0] === "review" && p[1]) return renderReview(p[1], p[2]);
+  if (p[0] === "review" && p[1]) return renderReview(p[1], p[2], isCurrentLoad);
   if (organizationError) {
     frame(
       `${head("Organizations unavailable", "We couldn’t load your organizations. Try again shortly.")}`,
@@ -372,24 +448,32 @@ async function load() {
     return;
   }
   if (!currentOrg) {
+    const hasMemberships = orgs.length > 0;
     frame(
-      `${head("A thoughtful space for feedback", "Start by creating an organization, then invite the people who can review responses.")}${emptyCard("No organization yet", "Create an organization to build your first anonymous review.", button("Create organization", "orgs"))}`,
+      hasMemberships
+        ? `${head("Organization access pending", "Your organizations appear here when membership is approved.")}${emptyCard("No approved organization yet", "Pending or revoked memberships cannot open workspaces. Check membership status or contact an organization owner.", button("View membership status", "orgs"))}`
+        : `${head("A thoughtful space for feedback", "Start by creating an organization, then invite the people who can review responses.")}${emptyCard("No organization yet", "Create an organization to build your first anonymous review.", button("Create organization", "orgs"))}`,
       "Overview",
     );
     return;
   }
+  const orgId = currentOrg.id;
   try {
-    const result = await api.listReviews({ orgId: currentOrg.id });
+    const result = await api.listReviews({ orgId });
+    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
     reviews = result.items;
     reviewNext = result.next;
     try {
       pendingResponses = (await api.listPendingResponses()).items;
     } catch (e) {
+      if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
       pendingResponses = null;
       toast(say(e));
     }
+    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
     renderHome();
   } catch (e) {
+    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
     frame(
       `${head("Reviews unavailable", "We couldn’t load reviews. Try again shortly.")}`,
       "Overview",
@@ -640,8 +724,9 @@ function emptyCard(t, d, act = "") {
 }
 function renderHome() {
   const creatorReviews = reviews.filter(isReviewOwner);
+  const canCreate = canCreateReviews(currentOrg);
   frame(
-    `${head("Overview", "Review activity and manage responses.", button("New review", "review/new"))}${renderPendingResponses()}<div class="stat-grid"><div class="card stat"><div class="stat-label">${reviewNext ? "Your reviews shown" : "Your reviews"}</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div><div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">Your reviews</h2><a class="top-link" href="#/orgs">Manage organization</a></div>${
+    `${head("Overview", "Review activity and manage responses.", canCreate ? button("New review", "review/new") : "")}${renderPendingResponses()}${canCreate ? `<div class="stat-grid"><div class="card stat"><div class="stat-label">Your reviews shown</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div>` : ""}<div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">${canCreate ? "Your reviews" : "Reviews to respond to"}</h2><a class="top-link" href="#/orgs">Organizations</a></div>${
       reviews.length
         ? `<div class="review-list">${reviews
             .map((r) => {
@@ -676,9 +761,11 @@ function renderHome() {
               "",
             )}</div>${reviewNext ? `<button class="button secondary load-more" id="load-more-reviews">Load more reviews</button>` : ""}`
         : emptyCard(
-            "Nothing here yet",
-            "Your reviews will appear here once you create one.",
-            button("Create your first review", "review/new"),
+            canCreate ? "Nothing here yet" : "No open reviews",
+            canCreate
+              ? "Your reviews will appear here once you create one."
+              : "Open reviews will appear here when your organization shares them.",
+            canCreate ? button("Create your first review", "review/new") : "",
           )
     }`,
     "Overview",
@@ -696,13 +783,26 @@ function renderHome() {
 }
 async function loadMoreReviews(event) {
   const button = event.currentTarget;
+  const orgId = currentOrg.id,
+    requestId = loadGeneration,
+    requestedHash = routeHash();
+  const isCurrent = () =>
+    isCurrentLoad({
+      requestId,
+      requestedHash,
+      currentRequestId: loadGeneration,
+      currentHash: routeHash(),
+      requestedOrgId: orgId,
+      currentOrgId: currentOrg?.id,
+    });
   button.disabled = true;
   setButtonText(button, "Loading…");
   try {
     const result = await api.listReviews({
-      orgId: currentOrg.id,
+      orgId,
       after: reviewNext,
     });
+    if (!isCurrent()) return;
     reviews = [...reviews, ...result.items];
     reviewNext = result.next;
     renderHome();
@@ -711,6 +811,7 @@ async function loadMoreReviews(event) {
       document.querySelector("#reviews-heading")
     )?.focus();
   } catch (error) {
+    if (!isCurrent()) return;
     toast(say(error));
     button.disabled = false;
     setButtonText(button, "Load more reviews");
@@ -832,13 +933,19 @@ function renderAuth(mode, intent = "") {
   });
 }
 function renderOrgs() {
-  const canManage = ["owner", "admin"].includes(currentOrg?.role);
+  const canManage = canManageMemberships(currentOrg);
   const roleOptions = (includeAdmin) =>
     `${includeAdmin ? '<option value="admin">Admin</option>' : ""}<option value="reviewer">Reviewer</option><option value="respondent">Respondent</option>`;
   frame(
-    `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card org-list">${orgs.length ? orgs.map((o) => `<div class="review-row org-row"><div class="avatar org-avatar">${icon("building-2")}</div><div class="review-info org-info"><strong>${esc(o.name)}</strong><div class="org-meta"><span class="org-role">${esc(o.role || "Member")}</span>${statusBadge(o.status || "active")}</div></div><button class="button secondary org-open" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg ? `<div class="section-row"><h2 class="section-title">${esc(currentOrg.name)} · members</h2>${canManage ? `<div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div>` : ""}</div>${canManage ? `<div class="member-help">Add existing accounts directly by email. For people without an account, create an invite link.</div><div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div>` : ""}<div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
+    `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card org-list">${orgs.length ? orgs.map((o) => `<div class="review-row org-row"><div class="avatar org-avatar">${icon("building-2")}</div><div class="review-info org-info"><strong>${esc(o.name)}</strong><div class="org-meta"><span class="org-role">${esc(o.role || "Member")}</span>${statusBadge(o.status || "active")}</div></div><button class="button secondary org-open" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg && canManage ? `<div class="section-row"><h2 class="section-title">${esc(currentOrg.name)} · members</h2><div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div></div><div class="member-help">Add existing accounts directly by email. For people without an account, create an invite link.</div><div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div><div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
     "Organizations",
   );
+  document.querySelectorAll("[data-org]").forEach((button) => {
+    if (
+      !isApprovedOrganization(orgs.find((org) => org.id === button.dataset.org))
+    )
+      button.hidden = true;
+  });
   document.querySelector("#new-org").onclick = () =>
     document.querySelector("#org-form").classList.toggle("hidden");
   document.querySelector("#create-org") &&
@@ -850,11 +957,14 @@ function renderOrgs() {
   document.querySelectorAll("[data-org]").forEach(
     (b) =>
       (b.onclick = () => {
-        currentOrg = orgs.find((o) => o.id === b.dataset.org);
+        const selected = orgs.find((o) => o.id === b.dataset.org);
+        if (!isApprovedOrganization(selected)) return;
+        currentOrg = selected;
+        resetOrganizationView();
         renderOrgs();
       }),
   );
-  if (currentOrg) {
+  if (currentOrg && canManage) {
     document
       .querySelector("#add-toggle")
       ?.addEventListener("click", () =>
@@ -892,15 +1002,18 @@ function renderOrgs() {
           "Invitation link",
         );
     });
-    loadMembers();
+    loadMembersIfAllowed(currentOrg, loadMembers);
   }
 }
 async function loadMembers() {
+  const organization = currentOrg,
+    orgId = organization.id;
   let box = document.querySelector("#member-area");
   try {
-    const rows = (await api.listMembers({ orgId: currentOrg.id })).items;
-    const owner = currentOrg.role === "owner";
-    const admin = currentOrg.role === "admin";
+    const rows = (await api.listMembers({ orgId })).items;
+    if (!box.isConnected || currentOrg?.id !== orgId) return;
+    const owner = organization.role === "owner";
+    const admin = organization.role === "admin";
     box.innerHTML = rows.length
       ? `<div class="table-wrap"><table class="simple-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th>${owner || admin ? "<th>Actions</th>" : ""}</tr></thead><tbody>${rows
           .map((m) => {
@@ -926,7 +1039,7 @@ async function loadMembers() {
       select.addEventListener("change", async () => {
         try {
           await api.changeMemberRole({
-            orgId: currentOrg.id,
+            orgId,
             memberId: select.dataset.role,
             role: select.value,
           });
@@ -943,7 +1056,7 @@ async function loadMembers() {
         (b.onclick = async () => {
           try {
             await api.approveMember({
-              orgId: currentOrg.id,
+              orgId,
               memberId: b.dataset.approve,
             });
             toast("Member approved.", "success");
@@ -959,7 +1072,7 @@ async function loadMembers() {
           if (confirm("Revoke this membership?"))
             try {
               await api.revokeMember({
-                orgId: currentOrg.id,
+                orgId,
                 memberId: b.dataset.revoke,
               });
               toast("Membership revoked.", "success");
@@ -970,6 +1083,7 @@ async function loadMembers() {
         }),
     );
   } catch (e) {
+    if (!box.isConnected || currentOrg?.id !== orgId) return;
     box.textContent = "Membership could not be loaded.";
     toast(say(e));
   }
@@ -1020,8 +1134,12 @@ async function renderAccount() {
     }
   };
 }
-async function renderReview(id, tab) {
+async function renderReview(id, tab, isCurrent = () => true) {
   if (id === "new") {
+    if (session?.scope !== "full" || !canCreateReviews(currentOrg)) {
+      go("/");
+      return;
+    }
     frame(
       `${head("Start a new review", "Set a title and response limit. Add questions before publishing.")}<section class="card form-card"><form id="new-review"><div class="field"><label>Review title</label><input name="title" required maxlength="160" placeholder="What would you like to learn?"></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="1" required></div><p class="form-error"></p><button class="button" type="submit">Create draft</button></form></section>`,
       "New review",
@@ -1038,39 +1156,44 @@ async function renderReview(id, tab) {
     return;
   }
   try {
-    review = await api.getReview({ reviewId: id });
+    const loadedReview = await api.getReview({ reviewId: id });
+    if (!isCurrent()) return;
+    review = loadedReview;
   } catch (e) {
+    if (!isCurrent()) return;
+    if (isPermissionError(e)) {
+      go("/");
+      return;
+    }
     frame(
       `${head("Encrypted review", "Review content is unavailable or cannot be decrypted.")}${button("Back to reviews", "", "secondary")}`,
       "Review",
     );
     return;
   }
+  if (!isCurrent()) return;
   if (review.contentState === "locked") {
-    frame(
-      emptyCard(
-        "Encrypted review",
-        "Review content is available only to its creator.",
-      ),
-      "Review",
-    );
+    go("/");
     return;
   }
   const reviewOrgId = review.org_id || review.orgId;
   currentOrg =
     orgs.find((organization) => organization.id === reviewOrgId) || null;
+  if (
+    !currentOrg ||
+    session?.scope !== "full" ||
+    !isApprovedOrganization(currentOrg)
+  ) {
+    go("/");
+    return;
+  }
   const canManage = isReviewOwner(review);
-  const canReviewResponses = canManage || currentOrg?.role === "reviewer";
+  const canReviewResponses = canManage;
   if (!canManage && !canReviewResponses) {
     if (review.status === "published" || review.status === "open") {
       go(`/respond/${encodeURIComponent(id)}`);
       renderRespond(id);
-    } else {
-      frame(
-        `${head("Review not available", "Only the person who created this draft can manage it.")}${button("Back to workspace", "", "secondary")}`,
-        "Review",
-      );
-    }
+    } else go("/");
     return;
   }
   let status = review.status || "draft";
@@ -1080,11 +1203,13 @@ async function renderReview(id, tab) {
     try {
       responseResult = await api.listResponses({ reviewId: id });
     } catch (e) {
+      if (!isCurrent()) return;
       responseError = say(e);
     }
   }
+  if (!isCurrent()) return;
   frame(
-    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}</div>`)}${canManage && status === "draft" ? '<p class="member-help">Publishing gives all currently approved organization members access to the questions. Members approved later need a future review.</p>' : ""}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
+    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}</div>`)}${canManage && status === "draft" ? '<p class="member-help">Publishing gives all currently approved organization members access to the questions. Members approved later need a future review.</p>' : ""}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : ""}`,
     "Review",
   );
   if (responseError) toast(responseError);
