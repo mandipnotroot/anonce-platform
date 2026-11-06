@@ -47,6 +47,8 @@ async function service(overrides = {}) {
     allEncrypted: overrides.allEncrypted || (async () => []),
     loadSealed: overrides.loadSealed,
     saveSealed: overrides.saveSealed || (async () => {}),
+    setCSRF: overrides.setCSRF || (() => {}),
+    deleteDeviceRecord: overrides.deleteDeviceRecord || (async () => {}),
   });
   vm.runInContext(
     source +
@@ -64,6 +66,382 @@ async function service(overrides = {}) {
   );
   return context;
 }
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+async function authService(overrides = {}) {
+  const context = await service(overrides);
+  vm.runInContext(
+    `initialize=async()=>({});
+    cacheState=async()=>{};
+    globalThis.auth={getSession,login,recover,logout,sessionStart,loginAfterCredentialChange};
+    globalThis.inspect=()=>({state,generation});`,
+    context,
+  );
+  return context;
+}
+
+test("stale session lookup cannot restore CSRF after logout", async () => {
+  const lookup = deferred(),
+    entered = deferred();
+  let csrf;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+    request: (path) => {
+      if (path === "/api/member/me") {
+        entered.resolve();
+        return lookup.promise;
+      }
+      return Promise.resolve();
+    },
+  });
+  context.setState(undefined);
+  const pending = context.auth.getSession();
+  await entered.promise;
+  await context.auth.logout();
+  lookup.resolve({ account_id: "YQ", csrf_token: "stale" });
+  assert.equal(await pending, null);
+  assert.equal(context.inspect().state, undefined);
+  assert.equal(csrf, undefined);
+});
+
+test("delayed logout keeps newer login state and CSRF", async () => {
+  const revocation = deferred(),
+    entered = deferred();
+  const deleted = [];
+  let csrf = "old",
+    revocationCSRF;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+    deleteDeviceRecord: async (key) => {
+      deleted.push(key);
+    },
+    request: () => {
+      revocationCSRF = csrf;
+      entered.resolve();
+      return revocation.promise;
+    },
+  });
+  vm.runInContext(`cookieCSRF='old';setSessionCSRF('old');`, context);
+  const old = context.inspect().state;
+  const pending = context.auth.logout();
+  assert.equal(context.inspect().state, undefined);
+  assert.equal(csrf, undefined);
+  await entered.promise;
+  assert.equal(revocationCSRF, "old");
+  assert.ok(old.masterKey.every((value) => value === 0));
+  vm.runInContext(
+    `generation++;state={accountId:'Yg'};setSessionCSRF('new');`,
+    context,
+  );
+  revocation.resolve();
+  await pending;
+  assert.equal(context.inspect().state.accountId, "Yg");
+  assert.equal(csrf, "new");
+  assert.deepEqual(deleted.sort(), ["cache:YQ", "key:YQ"]);
+});
+
+test("session POST waits for logout response and same-account cache cleanup", async () => {
+  const response = deferred(),
+    cleanup = deferred(),
+    deleting = deferred(),
+    post = deferred();
+  const events = [];
+  let cookie = "old",
+    csrf;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+    request: async () => {
+      events.push(["DELETE", cookie, csrf]);
+      await response.promise;
+      cookie = undefined;
+      events.push(["expired"]);
+    },
+    deleteDeviceRecord: async () => {
+      deleting.resolve();
+      await cleanup.promise;
+      events.push(["cleanup"]);
+    },
+  });
+  vm.runInContext(`cookieCSRF='old';setSessionCSRF('old');`, context);
+  context.setSigned(async () => {
+    events.push(["POST"]);
+    cookie = "new";
+    post.resolve();
+    return { account_id: "YQ", csrf_token: "new" };
+  });
+  const logout = context.auth.logout();
+  await deleting.promise;
+  const login = context.auth.sessionStart(
+    "YQ",
+    new Uint8Array(32),
+    "login-password",
+    1,
+  );
+  response.resolve();
+  await response.promise;
+  assert.equal(
+    events.some(([event]) => event === "POST"),
+    false,
+  );
+  cleanup.resolve();
+  await logout;
+  await post.promise;
+  await login;
+  assert.equal(cookie, "new");
+  assert.equal(csrf, "new");
+  assert.deepEqual(events[0], ["DELETE", "old", "old"]);
+  assert.deepEqual(events.at(-1), ["POST"]);
+  assert.equal(events.filter(([event]) => event === "cleanup").length, 2);
+});
+
+test("logout waits for in-flight POST and revokes its cookie with response CSRF", async () => {
+  const response = deferred(),
+    dispatched = deferred();
+  let cookie, csrf, revoked;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+    request: async () => {
+      revoked = { cookie, csrf };
+      cookie = undefined;
+    },
+  });
+  context.setSigned(async () => {
+    dispatched.resolve();
+    await response.promise;
+    cookie = "stale-login";
+    return { csrf_token: "stale-login-csrf" };
+  });
+  const login = context.auth.sessionStart(
+    "YQ",
+    new Uint8Array(32),
+    "login-password",
+    0,
+  );
+  const rejected = assert.rejects(login, { code: "SESSION_CHANGED" });
+  await dispatched.promise;
+  const logout = context.auth.logout();
+  assert.equal(revoked, undefined);
+  response.resolve();
+  await Promise.all([rejected, logout]);
+  assert.deepEqual(revoked, {
+    cookie: "stale-login",
+    csrf: "stale-login-csrf",
+  });
+  assert.equal(cookie, undefined);
+  assert.equal(csrf, undefined);
+  assert.equal(context.inspect().state, undefined);
+});
+
+test("rejected logout drains only after cleanup and permits later session POST", async () => {
+  const cleanup = deferred(),
+    deleting = deferred();
+  const context = await authService({
+    request: async () => {
+      throw Error("revocation failed");
+    },
+    deleteDeviceRecord: async () => {
+      deleting.resolve();
+      await cleanup.promise;
+    },
+  });
+  let posts = 0;
+  context.setSigned(async () => {
+    posts++;
+    return { csrf_token: "new" };
+  });
+  const logout = context.auth.logout();
+  const rejected = assert.rejects(logout, /revocation failed/);
+  await deleting.promise;
+  const login = context.auth.sessionStart(
+    "YQ",
+    new Uint8Array(32),
+    "login-password",
+    1,
+  );
+  assert.equal(posts, 0);
+  cleanup.resolve();
+  await rejected;
+  await login;
+  assert.equal(posts, 1);
+});
+
+test("queued canceled session POST never dispatches", async () => {
+  const response = deferred(),
+    entered = deferred();
+  const context = await authService({
+    request: () => {
+      entered.resolve();
+      return response.promise;
+    },
+  });
+  let posts = 0;
+  context.setSigned(async () => {
+    posts++;
+    return {};
+  });
+  const firstLogout = context.auth.logout();
+  await entered.promise;
+  const login = context.auth.sessionStart(
+    "YQ",
+    new Uint8Array(32),
+    "login-password",
+    1,
+  );
+  const rejected = assert.rejects(login, { code: "SESSION_CHANGED" });
+  const secondLogout = context.auth.logout();
+  response.resolve();
+  await Promise.all([firstLogout, rejected, secondLogout]);
+  assert.equal(posts, 0);
+});
+
+for (const operation of ["login", "recover"]) {
+  test(`${operation} cannot install stale keys after logout`, async () => {
+    const opened = deferred(),
+      entered = deferred();
+    const context = await authService({
+      C: {
+        derivePassword: async () => ({ authSeed: new Uint8Array(32) }),
+        deriveRecovery: async () => ({ authSeed: new Uint8Array(32) }),
+      },
+      request: async () => ({ account_id: "YQ", recovery_salt: "YQ" }),
+    });
+    context.opened = opened.promise;
+    context.entered = entered.resolve;
+    vm.runInContext(
+      `sessionStart=async()=>({account_id:'YQ'});
+      vaultOpen=()=>{entered();return opened;};`,
+      context,
+    );
+    const pending = context.auth[operation]({ email: "member@example.test" });
+    await entered.promise;
+    await context.auth.logout();
+    const masterKey = new Uint8Array(32).fill(7);
+    opened.resolve({ masterKey });
+    await assert.rejects(pending, { code: "SESSION_CHANGED" });
+    assert.equal(context.inspect().state, undefined);
+    assert.ok(masterKey.every((value) => value === 0));
+  });
+}
+
+test("stale session start cannot replace newer CSRF", async () => {
+  const result = deferred(),
+    entered = deferred();
+  let csrf;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+  });
+  context.setSigned(() => {
+    entered.resolve();
+    return result.promise;
+  });
+  const pending = context.auth.sessionStart(
+    "YQ",
+    new Uint8Array(32),
+    "login-password",
+    0,
+  );
+  await entered.promise;
+  vm.runInContext(`generation++;setCSRF('new');`, context);
+  result.resolve({ csrf_token: "stale" });
+  await assert.rejects(pending, { code: "SESSION_CHANGED" });
+  assert.equal(csrf, "new");
+});
+
+test("credential reauthentication failure cannot clear newer state", async () => {
+  const result = deferred();
+  const context = await authService();
+  context.result = result.promise;
+  vm.runInContext(`login=()=>{generation++;return result;};`, context);
+  const pending = context.auth.loginAfterCredentialChange({}, 0);
+  vm.runInContext(`generation++;state={accountId:'new'};`, context);
+  result.reject(Error("old login failed"));
+  assert.equal(await pending, null);
+  assert.equal(context.inspect().state.accountId, "new");
+});
+
+test("session restoration completing validation after logout stays detached", async () => {
+  const validation = deferred(),
+    entered = deferred();
+  let csrf;
+  const context = await authService({
+    setCSRF: (value) => {
+      csrf = value;
+    },
+    request: async () => ({
+      account_id: "YQ",
+      credential_epoch: "1",
+      csrf_token: "old",
+    }),
+    C: {
+      openDeviceCache: async () =>
+        new TextEncoder().encode(
+          JSON.stringify({
+            session: { credential_epoch: "1" },
+            masterKey: "YQ",
+            authSeed: "YQ",
+            membershipSeed: "YQ",
+            encryptionPrivateKey: "YQ",
+          }),
+        ),
+    },
+  });
+  context.validation = validation.promise;
+  context.entered = entered.resolve;
+  vm.runInContext(
+    `state=undefined;deviceKey=async()=>new Uint8Array(32);
+    globalThis.getDeviceRecord=async()=>({});
+    validateMemberKeys=()=>{entered();return validation;};`,
+    context,
+  );
+  const pending = context.auth.getSession();
+  await entered.promise;
+  await context.auth.logout();
+  validation.resolve();
+  assert.equal(await pending, null);
+  assert.equal(context.inspect().state, undefined);
+  assert.equal(csrf, undefined);
+});
+
+test("logout during recovery credential derivation prevents reset and auto-login", async () => {
+  const derived = deferred(),
+    entered = deferred();
+  const { context, mutations } = await credentialService();
+  context.derived = derived.promise;
+  context.entered = entered.resolve;
+  vm.runInContext(
+    `credentials=()=>{entered();return derived;};
+    globalThis.endSession=logout;
+    request=async()=>({account_id:'YQ',recovery_salt:'YQ'});`,
+    context,
+  );
+  const pending = context.credentialOperations.recover({
+    email: "member@example.test",
+  });
+  await entered.promise;
+  await context.endSession();
+  derived.resolve({});
+  await assert.rejects(pending, { code: "SESSION_CHANGED" });
+  assert.deepEqual(mutations, []);
+  assert.equal(context.hasActiveState(), false);
+});
 
 async function credentialService({ mutationFails = false, loginFailure } = {}) {
   const words = Array(12).fill("abandon");

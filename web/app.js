@@ -13,6 +13,18 @@ import {
 let state,
   config,
   generation = 0;
+let cookieMutations = Promise.resolve(),
+  cookieCSRF,
+  localCSRF;
+function setSessionCSRF(token) {
+  localCSRF = token;
+  setCSRF(token);
+}
+function queueCookieMutation(operation) {
+  const result = cookieMutations.then(operation);
+  cookieMutations = result.catch(() => {});
+  return result;
+}
 export function getReceiptTrust() {
   return C.getReceiptTrust();
 }
@@ -232,7 +244,30 @@ async function initialize() {
   }
   return config;
 }
-async function signed(path, action, payload, seeds, method = "POST") {
+function checkGeneration(expectedGeneration) {
+  if (generation !== expectedGeneration)
+    throw new APIError(
+      "SESSION_CHANGED",
+      "The session changed. Please sign in again.",
+    );
+}
+function wipeState(captured) {
+  for (const key of [
+    "masterKey",
+    "authSeed",
+    "membershipSeed",
+    "encryptionPrivateKey",
+  ])
+    captured?.[key]?.fill(0);
+}
+async function signed(
+  path,
+  action,
+  payload,
+  seeds,
+  method = "POST",
+  expectedGeneration = generation,
+) {
   await initialize();
   const accountId = payload.account_id || state?.accountId;
   const payloadBytes = jsonBytes(toWire(payload));
@@ -256,6 +291,7 @@ async function signed(path, action, payload, seeds, method = "POST") {
       seed,
     });
   }
+  checkGeneration(expectedGeneration);
   return request(path, {
     method,
     body: { payload: C.toBase64url(payloadBytes), proof },
@@ -272,17 +308,27 @@ const mutation = (path, action, payload = {}, method) =>
 function sessionView(s) {
   return { ...s, accountId: s.account_id, email: state?.email };
 }
-async function sessionStart(accountId, authSeed, method) {
-  const result = await signed(
-    "/api/member/session",
-    method,
-    { request_id: id(), account_id: accountId, method },
-    {
-      [method === "login-password" ? "password_sig" : "recovery_sig"]: authSeed,
-    },
-  );
-  const session = result.session || result;
-  setCSRF(session.csrf_token);
+async function sessionStart(accountId, authSeed, method, expectedGeneration) {
+  const session = await queueCookieMutation(async () => {
+    checkGeneration(expectedGeneration);
+    const result = await signed(
+      "/api/member/session",
+      method,
+      { request_id: id(), account_id: accountId, method },
+      {
+        [method === "login-password" ? "password_sig" : "recovery_sig"]:
+          authSeed,
+      },
+      "POST",
+      expectedGeneration,
+    );
+    const session = result.session || result;
+    // Even a canceled login may have installed an HttpOnly cookie.
+    cookieCSRF = session.csrf_token;
+    return session;
+  });
+  checkGeneration(expectedGeneration);
+  setSessionCSRF(session.csrf_token);
   return session;
 }
 async function vaultOpen(accountId, derived, kind) {
@@ -350,11 +396,16 @@ async function validateMemberKeys(s, vault) {
 }
 export async function getSession() {
   if (state) return sessionView(state.session);
+  const expectedGeneration = ++generation;
   try {
     await initialize();
+    await cookieMutations;
+    checkGeneration(expectedGeneration);
     const result = await request("/api/member/me"),
       s = result.session || result;
-    setCSRF(s.csrf_token);
+    checkGeneration(expectedGeneration);
+    cookieCSRF = s.csrf_token;
+    setSessionCSRF(s.csrf_token);
     const key = await deviceKey(s.account_id),
       object = await getDeviceRecord("cache:" + s.account_id);
     if (!key || !object) return null;
@@ -378,12 +429,17 @@ export async function getSession() {
         session: s,
       };
       await validateMemberKeys(restored, await request("/api/member/vault"));
+      if (generation !== expectedGeneration) {
+        wipeState(restored);
+        return null;
+      }
       state = restored;
       return sessionView(s);
     } finally {
       key.fill(0);
     }
   } catch (e) {
+    if (generation !== expectedGeneration) return null;
     if (e.code === "unauthenticated" || e.code === "UNAUTHENTICATED")
       return null;
     throw e;
@@ -391,7 +447,7 @@ export async function getSession() {
   return null;
 }
 export async function login({ email, password }) {
-  const expectedGeneration = generation;
+  const expectedGeneration = ++generation;
   await initialize();
   const params = await request("/api/member/auth/params", {
     method: "POST",
@@ -406,14 +462,14 @@ export async function login({ email, password }) {
     params.account_id,
     derived.authSeed,
     "login-password",
+    expectedGeneration,
   );
   session = { ...session, ...(await request("/api/member/me")) };
   const unlocked = await vaultOpen(params.account_id, derived, "password");
-  if (generation !== expectedGeneration)
-    throw new APIError(
-      "SESSION_CHANGED",
-      "The session changed. Please sign in again.",
-    );
+  if (generation !== expectedGeneration) {
+    wipeState({ ...unlocked, authSeed: derived.authSeed });
+    checkGeneration(expectedGeneration);
+  }
   state = {
     ...unlocked,
     accountId: params.account_id,
@@ -423,6 +479,7 @@ export async function login({ email, password }) {
     params,
   };
   await cacheState();
+  checkGeneration(expectedGeneration);
   return sessionView(session);
 }
 function kdf() {
@@ -532,20 +589,35 @@ export async function register({ email, password }) {
 export async function logout() {
   generation++;
   pendingCreates.clear();
-  try {
-    await request("/api/member/session", { method: "DELETE" });
-  } finally {
-    if (state) {
-      await deleteDeviceRecord("key:" + state.accountId);
-      await deleteDeviceRecord("cache:" + state.accountId);
-      state.masterKey.fill(0);
-      state.authSeed.fill(0);
-      state.membershipSeed.fill(0);
-      state.encryptionPrivateKey?.fill(0);
-    }
-    state = undefined;
-    setCSRF(undefined);
-  }
+  const captured = state;
+  state = undefined;
+  setSessionCSRF(undefined);
+  wipeState(captured);
+  await queueCookieMutation(async () => {
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => {
+        // request captures CSRF synchronously; do not expose cookie-only CSRF to UI work.
+        setCSRF(cookieCSRF);
+        try {
+          return request("/api/member/session", { method: "DELETE" });
+        } finally {
+          setCSRF(localCSRF);
+        }
+      }),
+      Promise.resolve().then(async () => {
+        if (!captured) return;
+        const cleanup = await Promise.allSettled([
+          deleteDeviceRecord("key:" + captured.accountId),
+          deleteDeviceRecord("cache:" + captured.accountId),
+        ]);
+        const failure = cleanup.find((result) => result.status === "rejected");
+        if (failure) throw failure.reason;
+      }),
+    ]);
+    if (results[0].status === "fulfilled") cookieCSRF = undefined;
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
+  });
 }
 const normalizeQuestion = (q) => ({
   id: q.id,
@@ -935,7 +1007,8 @@ async function credentialChange({
   recoveryOnly = false,
 }) {
   const s = active(),
-    accountId = s.accountId;
+    accountId = s.accountId,
+    expectedGeneration = generation;
   const old = await C.derivePassword({
     password: currentPassword,
     accountId: bytes(accountId),
@@ -996,11 +1069,13 @@ async function credentialChange({
     recoveryOnly ? "recovery-rotate" : "password-change",
     payload,
     proofs,
+    "POST",
+    expectedGeneration,
   );
-  const session = await loginAfterCredentialChange({
-    email: s.email,
-    password: newPassword || currentPassword,
-  });
+  const session = await loginAfterCredentialChange(
+    { email: s.email, password: newPassword || currentPassword },
+    expectedGeneration,
+  );
   if (!session)
     return recoveryOnly
       ? {
@@ -1016,17 +1091,26 @@ async function credentialChange({
 export const changePassword = (options) => credentialChange(options);
 export const rotateRecovery = (options) =>
   credentialChange({ ...options, recoveryOnly: true });
-async function loginAfterCredentialChange(options) {
+async function loginAfterCredentialChange(options, expectedGeneration) {
+  if (generation !== expectedGeneration) return null;
+  wipeState(state);
   state = undefined;
+  setSessionCSRF(undefined);
+  const loginGeneration = generation + 1;
   try {
     return await login(options);
   } catch {
     // Login may set state before device-cache persistence fails.
-    state = undefined;
+    if (generation === loginGeneration) {
+      wipeState(state);
+      state = undefined;
+      setSessionCSRF(undefined);
+    }
     return null;
   }
 }
 export async function recover({ email, words, newPassword }) {
+  const expectedGeneration = ++generation;
   await initialize();
   const params = await request("/api/member/auth/params", {
       method: "POST",
@@ -1038,8 +1122,17 @@ export async function recover({ email, words, newPassword }) {
     accountId: bytes(accountId),
     recoverySalt: bytes(params.recovery_salt),
   });
-  const session = await sessionStart(accountId, old.authSeed, "login-recovery");
+  const session = await sessionStart(
+    accountId,
+    old.authSeed,
+    "login-recovery",
+    expectedGeneration,
+  );
   const unlocked = await vaultOpen(accountId, old, "recovery");
+  if (generation !== expectedGeneration) {
+    wipeState({ ...unlocked, authSeed: old.authSeed });
+    checkGeneration(expectedGeneration);
+  }
   state = {
     ...unlocked,
     accountId,
@@ -1049,6 +1142,7 @@ export async function recover({ email, words, newPassword }) {
     authSeed: old.authSeed,
   };
   const cr = await credentials(accountId, newPassword);
+  checkGeneration(expectedGeneration);
   await signed(
     "/api/member/credentials/reset",
     "credential-reset",
@@ -1084,11 +1178,13 @@ export async function recover({ email, words, newPassword }) {
       new_password_sig: cr.p.authSeed,
       new_recovery_sig: cr.r.authSeed,
     },
+    "POST",
+    expectedGeneration,
   );
-  const nextSession = await loginAfterCredentialChange({
-    email,
-    password: newPassword,
-  });
+  const nextSession = await loginAfterCredentialChange(
+    { email, password: newPassword },
+    expectedGeneration,
+  );
   return {
     session: nextSession,
     recoveryWords: cr.recovery.words.split(" "),

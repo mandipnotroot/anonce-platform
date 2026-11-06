@@ -3,6 +3,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"github.com/jackc/pgx/v5"
@@ -23,13 +24,31 @@ type session struct {
 	Hash, Password, Recovery, Membership []byte
 }
 
+type sessionCacheKey struct{}
+type sessionLookup struct {
+	value *session
+	err   error
+}
+
 func (s *Server) session(r *http.Request) (*session, error) {
+	if cached, ok := r.Context().Value(sessionCacheKey{}).(*sessionLookup); ok {
+		return cached.value, cached.err
+	}
+	a, err := s.lookupSession(r)
+	*r = *r.WithContext(context.WithValue(r.Context(), sessionCacheKey{}, &sessionLookup{a, err}))
+	return a, err
+}
+
+func (s *Server) lookupSession(r *http.Request) (*session, error) {
 	c, e := r.Cookie(cookieName)
 	if e != nil {
 		return nil, problem{401, "unauthenticated"}
 	}
 	b, e := protocol.Decode(c.Value, 32)
 	if e != nil {
+		return nil, problem{401, "unauthenticated"}
+	}
+	if s.member == nil {
 		return nil, problem{401, "unauthenticated"}
 	}
 	a := &session{Hash: protocol.Hash(b)}

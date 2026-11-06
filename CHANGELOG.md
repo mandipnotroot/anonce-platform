@@ -119,6 +119,13 @@ No version has been released.
 
 ### Fixed
 
+- Isolate established-member API request capacity from public and anonymous
+  traffic with independently bounded request windows. Validate sessions before
+  selecting member capacity, including session-bound challenge requests, without
+  adding identifying tracking to anonymous endpoints.
+- Prevent stale asynchronous session restoration and recovery from unlocking the
+  browser workspace after logout. Keep delayed logout cleanup from clearing a
+  newer session's state.
 - Fix CI workflow validation by setting the disposable container-build key path
   at step runtime instead of using the unavailable job-level `runner` context.
 - Enforce review creation roles on the server under the organization lock,

@@ -29,8 +29,16 @@ info:
     no-referrer and redirect: error. No anonymity against malicious served code
     or network/timing correlation is promised.
 
-    All responses set Cache-Control: no-store. API middleware allows 1200 requests
-    per process per one-minute window, then returns 429 rate_limited. Errors from
+    All responses set Cache-Control: no-store. API rate limits use two independent
+    per-process one-minute windows, each allowing 1200 requests before returning
+    429 rate_limited. Public, anonymous, unknown, and preauthentication requests
+    use the public window. Known member operations use the session window only
+    after server-side session validation; missing or invalid sessions use the
+    public window. Registration and login challenges always use the public
+    window; established-session challenges use the session window after validation.
+    Public and anonymous requests never consult identifying sessions. The session
+    window remains shared across authenticated accounts; these limits do not
+    isolate CPU, database connections, or network capacity. Errors from
     handlers use Error; method mismatches and static-file handling need not use
     that JSON shape. GET routes also accept HEAD through Go ServeMux.
     Static web assets and SPA fallback are served by GET/HEAD outside /api/;

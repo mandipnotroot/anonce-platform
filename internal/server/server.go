@@ -30,8 +30,62 @@ type Server struct {
 	ca, receipt                          ed25519.PrivateKey
 	receiptTrust                         protocol.ReceiptTrust
 	mu                                   sync.Mutex
-	requests                             int
-	window                               time.Time
+	publicRate, sessionRate              rateWindow
+}
+
+type rateWindow struct {
+	requests int
+	start    time.Time
+}
+
+func (s *Server) allowRequest(verified bool, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := &s.publicRate
+	if verified {
+		w = &s.sessionRate
+	}
+	if now.Sub(w.start) > time.Minute {
+		w.requests, w.start = 0, now
+	}
+	if w.requests >= 1200 {
+		return false
+	}
+	w.requests++
+	return true
+}
+
+// Only registered member operations may spend verified-session capacity.
+func memberRateRoute(pattern string) bool {
+	switch pattern {
+	case "DELETE /api/member/session", "GET /api/member/me", "GET /api/member/vault",
+		"PUT /api/member/vault/objects/{id}", "POST /api/member/credentials/password",
+		"POST /api/member/credentials/recovery", "POST /api/member/credentials/reset",
+		"GET /api/member/orgs", "POST /api/member/orgs",
+		"GET /api/member/orgs/{org}/members", "POST /api/member/orgs/{org}/members",
+		"POST /api/member/orgs/{org}/members/{member}/role", "POST /api/member/orgs/{org}/invites",
+		"POST /api/member/invites/accept", "POST /api/member/orgs/{org}/members/{member}/approve",
+		"POST /api/member/orgs/{org}/members/{member}/revoke", "GET /api/member/orgs/{org}/certificate",
+		"POST /api/member/orgs/{org}/certificate/renew", "GET /api/member/orgs/{org}/reviews",
+		"POST /api/member/orgs/{org}/reviews", "GET /api/member/reviews/{id}",
+		"GET /api/member/reviews/{id}/content-recipients", "PUT /api/member/reviews/{id}",
+		"DELETE /api/member/reviews/{id}", "POST /api/member/reviews/{id}/publish",
+		"POST /api/member/reviews/{id}/close", "POST /api/member/reviews/{id}/issuances",
+		"GET /api/member/reviews/{id}/issuances/{request}", "GET /api/member/reviews/{id}/submissions":
+		return true
+	}
+	return false
+}
+
+func sessionChallenge(action string) bool {
+	switch action {
+	case "vault-write", "password-change", "recovery-rotate", "credential-reset",
+		"org-create", "member-add", "member-role", "invite-create", "invite-accept",
+		"member-approve", "member-revoke", "certificate-renew", "review-create",
+		"review-update", "review-delete", "review-publish", "review-close", "issue":
+		return true
+	}
+	return false
 }
 
 func New(ctx context.Context, c Config) (*Server, error) {
@@ -196,17 +250,12 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			s.mu.Lock()
-			if time.Since(s.window) > time.Minute {
-				s.requests = 0
-				s.window = time.Now()
-			}
-			s.requests++
-			limited := s.requests > 1200
-			s.mu.Unlock()
-			if limited {
-				fail(w, problem{429, "rate_limited"})
-				return
+			// Gate failures spend public capacity without inspecting credentials.
+			reject := func(e error) {
+				if !s.allowRequest(false, time.Now()) {
+					e = problem{429, "rate_limited"}
+				}
+				fail(w, e)
 			}
 			limit := int64(512 * 1024)
 			if strings.HasPrefix(r.URL.Path, "/api/member/") {
@@ -215,20 +264,55 @@ func (s *Server) Handler() http.Handler {
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			if strings.HasPrefix(r.URL.Path, "/api/anon/") || strings.HasPrefix(r.URL.Path, "/api/public/") {
 				if r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" {
-					fail(w, problem{400, "credentials_forbidden"})
+					reject(problem{400, "credentials_forbidden"})
 					return
 				}
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
 				if r.Header.Get("Origin") != s.cfg.Origin {
-					fail(w, problem{403, "origin_required"})
+					reject(problem{403, "origin_required"})
 					return
 				}
 				media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 				if err != nil || media != "application/json" {
-					fail(w, problem{415, "json_required"})
+					reject(problem{415, "json_required"})
 					return
 				}
+			}
+			_, pattern := m.Handler(r)
+			eligible := memberRateRoute(pattern)
+			if pattern == "POST /api/member/challenges" {
+				// Parse only the bounded body, then restore it for the existing handler.
+				b, e := io.ReadAll(r.Body)
+				if e != nil {
+					var max *http.MaxBytesError
+					if errors.As(e, &max) {
+						reject(problem{413, "body_too_large"})
+					} else {
+						reject(bad("invalid_body"))
+					}
+					return
+				}
+				var p struct {
+					Account string `json:"account_id"`
+					Action  string `json:"action"`
+					Hash    string `json:"payload_hash"`
+				}
+				if e = protocol.StrictJSON(b, &p); e != nil {
+					reject(bad("invalid_json"))
+					return
+				}
+				r.Body = ioBody(b)
+				eligible = sessionChallenge(p.Action)
+			}
+			verified := false
+			if eligible {
+				_, e := s.session(r)
+				verified = e == nil
+			}
+			if !s.allowRequest(verified, time.Now()) {
+				fail(w, problem{429, "rate_limited"})
+				return
 			}
 		}
 		m.ServeHTTP(w, r)
