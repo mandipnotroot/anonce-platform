@@ -38,6 +38,15 @@ No version has been released.
 
 ### Changed
 
+- Replace secret review-content links with per-member HPKE key envelopes for all
+  approved organization memberships at publication. Later-approved members do
+  not receive historical keys. Answer decryption stays creator-only; dashboard
+  completion is browser-local, not server-tracked participation. New account key
+  bindings require fresh registration/schema initialization; no upgrade path is
+  supplied. Live-browser verification remains a release gate.
+- Standardize contributor formatting guidance by language, with tracked-file
+  Go formatting checks in CI and exact-pinned, explicit-file Prettier commands.
+  Existing source formatting and E2EE behavior are unchanged.
 - Minimize review metadata disclosure: descriptor v3 omits account IDs, quotas,
   and schedules. Member responses use a creator flag and restrict review settings
   and activity counters to creators. Server-side quota/schedule enforcement remains

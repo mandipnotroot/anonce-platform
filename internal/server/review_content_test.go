@@ -129,7 +129,7 @@ func TestDescriptorFraming(t *testing.T) {
 
 func TestReviewViewFieldAllowlist(t *testing.T) {
 	v := &review{ID: "review", Org: "org", Account: "creator", Membership: "member", Content: fakeContent(), Max: 7, Revision: 3, Issued: 4, Accepted: 2, Opens: new(int64(100)), Closes: new(int64(200)), Descriptor: []byte("descriptor"), Signature: []byte("signature")}
-	common := []string{"id", "org_id", "is_creator", "encrypted_content", "state", "issuer_public_key", "issuer_key_id"}
+	common := []string{"id", "org_id", "is_creator", "encrypted_content", "content_key_envelope", "state", "issuer_public_key", "issuer_key_id"}
 	for _, account := range []string{"creator", "other"} {
 		t.Run(account, func(t *testing.T) {
 			view := v.view(account)

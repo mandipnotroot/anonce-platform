@@ -25,13 +25,8 @@ const esc = (s) =>
 const routeHash = () => location.hash.replace(/^#/, "");
 const path = () =>
   routeHash().replace(/^\/?/, "").split(/[?]/, 1)[0].split("/").filter(Boolean);
-function responseInvitation() {
-  try {
-    return api.parseResponseInvitation(location.hash);
-  } catch {
-    return { invalid: true, missingKey: !location.hash.includes("?") };
-  }
-}
+const hasUnsupportedResponseRoute = (route, hash) =>
+  route[0] === "respond" && (hash.includes("?") || route.length !== 2);
 function authHref(mode) {
   return returnRoute
     ? `#/${mode}?next=${encodeURIComponent(returnRoute)}`
@@ -291,6 +286,17 @@ function bind(form, fn) {
 }
 async function load() {
   const route = path();
+  const respondHash = routeHash();
+  if (hasUnsupportedResponseRoute(route, respondHash)) {
+    frame(
+      emptyCard(
+        "Unsupported response link",
+        "Open this review from your signed-in dashboard instead.",
+      ),
+      "Respond",
+    );
+    return;
+  }
   const hashParams = new URLSearchParams(routeHash().split("?")[1] || "");
   if (
     ["login", "register", "recover"].includes(route[0]) &&
@@ -326,7 +332,7 @@ async function load() {
     return;
   }
   if (route[0] === "respond") {
-    renderRespond(responseInvitation(), route[1]);
+    renderRespond(route[1]);
     return;
   }
   let organizationError = "";
@@ -644,7 +650,27 @@ function renderHome() {
                 mine && r.contentState !== "locked"
                   ? ` · <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> · <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>`
                   : "";
-              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${metrics}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : r.status === "published" && r.contentState !== "locked" ? button("Respond", `respond/${encodeURIComponent(r.id)}`, "secondary small") : ""}</article>`;
+              const completion =
+                r.completedOnThisBrowser === true
+                  ? "Completed on this browser"
+                  : "No completion recorded here";
+              const detail =
+                r.contentState === "locked"
+                  ? "Review content is unavailable on this browser."
+                  : r.contentState === "corrupt"
+                    ? "Review content could not be verified."
+                    : completion;
+              const respond =
+                r.status === "published" &&
+                r.contentState !== "locked" &&
+                r.contentState !== "corrupt"
+                  ? button(
+                      "Respond",
+                      `respond/${encodeURIComponent(r.id)}`,
+                      "secondary small",
+                    )
+                  : "";
+              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" || r.contentState === "corrupt" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${mine ? metrics : ""} · ${esc(detail)}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : ""}${respond}</article>`;
             })
             .join(
               "",
@@ -1058,7 +1084,7 @@ async function renderReview(id, tab) {
     }
   }
   frame(
-    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}${canManage ? '<button class="button secondary" id="share">Share</button>' : ""}</div>`)}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
+    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}</div>`)}${canManage && status === "draft" ? '<p class="member-help">Publishing gives all currently approved organization members access to the questions. Members approved later need a future review.</p>' : ""}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : `<section class="card empty"><strong>Not authorized</strong>Your organization role does not allow response review.</section>`}`,
     "Review",
   );
   if (responseError) toast(responseError);
@@ -1117,16 +1143,6 @@ async function renderReview(id, tab) {
       } catch (e) {
         toast(say(e));
       }
-  });
-  document.querySelector("#share")?.addEventListener("click", async () => {
-    try {
-      await copyText(
-        await api.getInvitationURL({ reviewId: id }),
-        "Secret response link",
-      );
-    } catch (e) {
-      toast(say(e));
-    }
   });
   bind("#edit-review", async (fd) => {
     const questions = [...document.querySelectorAll(".question")].map((q) => ({
@@ -1253,44 +1269,10 @@ function dt(v) {
         .toISOString()
         .slice(0, 16);
 }
-async function renderRespond(invitation, routedId) {
-  if (invitation?.invalid && invitation.missingKey) {
-    frame(
-      emptyCard(
-        "Complete invitation link required.",
-        "Ask the person who shared this review for its complete secret link.",
-      ),
-      "Respond",
-    );
-    return;
-  }
-  if ((!invitation || invitation.invalid) && routedId) {
-    frame(
-      emptyCard(
-        "This invitation could not be read",
-        "Check that you have the complete, unchanged invitation link.",
-      ),
-      "Respond",
-    );
-    return;
-  }
-  const id = invitation?.reviewId;
-  if (!id || invitation.invalid || !invitation.contentKey) {
-    frame(
-      emptyCard(
-        "Complete invitation link required.",
-        "Ask the person who shared this review for its complete secret link.",
-      ),
-      "Respond",
-    );
-    return;
-  }
+async function renderRespond(id) {
   let r;
   try {
-    r = await api.getReview({
-      reviewId: id,
-      contentKey: invitation.contentKey,
-    });
+    r = await api.getReview({ reviewId: id });
   } catch (e) {
     frame(
       `${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`,
@@ -1303,7 +1285,7 @@ async function renderRespond(invitation, routedId) {
     frame(
       emptyCard(
         "This invitation could not be read",
-        "Check that you have the complete, unchanged invitation link.",
+        "This review’s content is locked or could not be verified for this membership.",
       ),
       "Respond",
     );
@@ -1350,7 +1332,6 @@ async function renderRespond(invitation, routedId) {
     }));
     let p = await api.prepareResponse({
       reviewId: id,
-      contentKey: invitation.contentKey,
       answers,
     });
     let result = await api.submitResponse({ pendingId: p.pendingId });

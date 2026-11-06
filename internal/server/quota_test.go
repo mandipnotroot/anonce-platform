@@ -59,7 +59,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 			t.Fatalf("review list length %d", len(items))
 		}
 		for _, view := range []map[string]any{get, items[0].(map[string]any)} {
-			want := []string{"id", "org_id", "is_creator", "encrypted_content", "state", "issuer_public_key", "issuer_key_id"}
+			want := []string{"id", "org_id", "is_creator", "encrypted_content", "content_key_envelope", "state", "issuer_public_key", "issuer_key_id"}
 			if actor == u {
 				want = append(want, "revision", "max_responses", "opens_at", "closes_at", "issued_count", "accepted_count")
 			}

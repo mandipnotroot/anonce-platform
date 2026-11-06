@@ -37,6 +37,18 @@ contribution process. Nested guidance may add requirements for its directory.
 - This is unreleased: target the current stack only; do not add legacy support
   or upgrade migrations. Keep schema initialization and versioning as needed.
 
+## Code formatting
+
+- Follow the language/tool table in [CONTRIBUTING.md#formatting](CONTRIBUTING.md#formatting).
+  Use `gofmt` for Go and the exact-pinned local Prettier for supported web,
+  configuration, and documentation files. Do not use global formatter versions.
+- Format changed files before checking them. Keep unrelated formatting out of
+  functional changes; do not rewrite the repository to establish a baseline.
+- Do not format generated bundles, vendored files, lockfiles, secrets, or local
+  environment files. Preserve SPDX notices and third-party attribution.
+- Run `make fmt-check` and explicit-file Prettier checks as applicable. Formatting
+  does not replace syntax checks, tests, or security review.
+
 ## Architecture
 
 - Build a Go standard-library-first modular monolith with explicit boundaries.

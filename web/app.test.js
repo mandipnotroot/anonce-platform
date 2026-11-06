@@ -44,13 +44,18 @@ async function service(overrides = {}) {
       (() => {
         throw Error("Unexpected request");
       }),
+    allEncrypted: overrides.allEncrypted || (async () => []),
     loadSealed: overrides.loadSealed,
     saveSealed: overrides.saveSealed || (async () => {}),
   });
   vm.runInContext(
     source +
       `;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,parseResponseInvitation,reviewKeys,listReviews};
+    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
+    globalThis.setState=value=>{state=value;};
+    globalThis.setLogin=value=>{login=value;};
+    globalThis.setCredentials=value=>{credentials=value;};
+    globalThis.setPublishBuilder=value=>{publishWithRosterRetry=value;};
     globalThis.setReviewKeys=value=>{reviewKeys=value;};
     globalThis.lifecycle={createReview,updateReview,publishReview,deleteReview};
     globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'member',certificate:'certificate'});};
@@ -614,29 +619,11 @@ test("reviewer rejects receipt and identifier mismatches before decrypting", asy
     assert.equal(result.items[0].answers.length, 0);
   }
 });
-test("secret invitation parser accepts canonical fragment only", async () => {
-  const context = await service(),
-    reviewId = Buffer.alloc(16, 1).toString("base64url"),
-    key = Buffer.alloc(32, 2).toString("base64url");
-  const fragment = `#/respond/${reviewId}?v=1&k=${key}`;
-  const parsed = context.service.parseResponseInvitation(fragment);
-  assert.equal(parsed.reviewId, reviewId);
-  assert.equal(Buffer.from(parsed.contentKey).toString("base64url"), key);
-  for (const value of [
-    fragment + "&v=1",
-    fragment + "&x=1",
-    fragment + "#extra",
-    fragment.replace("?v=1", "/extra?v=1"),
-    fragment.replace("v=1", "v=2"),
-    fragment.replace(key, key + "="),
-    fragment.replace(reviewId, "YQ"),
-    `https://example.test/${fragment}`,
-  ])
-    assert.throws(
-      () => context.service.parseResponseInvitation(value),
-      (e) => e.code === "INVALID_INVITATION" && !e.message.includes(key),
-    );
+test("secret-link service exports are removed", () => {
+  assert.equal(app.parseResponseInvitation, undefined);
+  assert.equal(app.getInvitationURL, undefined);
 });
+
 test("review keys require authoritative vault and exact review binding", async () => {
   const reviewId = Buffer.alloc(16, 1).toString("base64url"),
     key = Buffer.alloc(32, 2).toString("base64url");
@@ -723,7 +710,7 @@ test("noncreator review list stays locked without vault reads or private metadat
   });
   const result = await context.service.listReviews({ orgId: "org" }),
     item = result.items[0];
-  assert.equal(requests, 1);
+  assert.equal(requests, 2);
   assert.equal(item.contentState, "locked");
   assert.equal(item.content, undefined);
   assert.equal(item.questions.length, 0);
@@ -782,6 +769,8 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
   });
   const context = await service({
     request: async (path) => {
+      if (path.includes("/content-recipients"))
+        return { items: [], next: null };
       if (path === "/api/member/vault")
         return { objects: [stored.vault_write.object] };
       return serverReview();
@@ -946,6 +935,7 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
       "expected_revision",
       "descriptor",
       "descriptor_signature",
+      "content_key_envelopes",
     ].sort(),
   );
   assert.equal(recipientCalls, 1);
@@ -961,4 +951,332 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
       keys.recipient_private_key,
     ])
       assert.ok(!JSON.stringify(payload).includes(secret));
+});
+
+test("recipient directory fetches all pages and rejects duplicate IDs and repeated cursors", async () => {
+  const first = Buffer.alloc(16, 1).toString("base64url");
+  const second = Buffer.alloc(16, 2).toString("base64url");
+  const paths = [];
+  const context = await service({
+    request: async (path) => {
+      paths.push(path);
+      return paths.length === 1
+        ? { items: [{ membership_id: first }], next: first }
+        : { items: [{ membership_id: second }], next: null };
+    },
+    C: { verifyContentRecipient: async ({ recipient }) => recipient },
+  });
+  assert.equal(
+    (await context.service.contentRecipients("review", "YQ")).length,
+    2,
+  );
+  assert.ok(paths[1].endsWith("?after=" + first));
+  for (const page of [
+    { items: [{ membership_id: first }, { membership_id: first }], next: null },
+    { items: [{ membership_id: first }], next: "bad" },
+  ]) {
+    const invalid = await service({
+      request: async () => page,
+      C: { verifyContentRecipient: async ({ recipient }) => recipient },
+    });
+    await assert.rejects(invalid.service.contentRecipients("review", "YQ"), {
+      code: "KEY_UNAVAILABLE",
+    });
+  }
+});
+test("completion ignores issuance and invalid local receipts", async () => {
+  const records = [
+    { reviewId: "review", pendingId: "pending", authorization: {} },
+    { reviewId: "review", receipt: {}, submission: {}, encrypted: {} },
+  ];
+  const context = await service({
+    allEncrypted: async () => records,
+    C: {
+      openVaultObject: async ({ object }) =>
+        new TextEncoder().encode(JSON.stringify(object)),
+      verifyDescriptor: async () => {
+        throw Error("invalid signature");
+      },
+    },
+  });
+  assert.equal(await context.service.completedHere("review"), false);
+});
+
+test("publication allows one roster rebuild, clears conflicts, and preserves uncertain payloads", async () => {
+  const context = await service();
+  context.configureLifecycle();
+  const payload = { request_id: "first", expected_revision: "2" };
+  const next = { request_id: "second", expected_revision: "2" };
+  const state = { pendingReviewPublishes: { review: payload } };
+  context.setState(state);
+  const sent = [];
+  context.setSigned(async (_path, _action, body) => {
+    sent.push(body);
+    throw Object.assign(Error("roster"), { code: "recipient_set_conflict" });
+  });
+  context.setPublishBuilder(async (reviewId, revision, allowed) => {
+    assert.equal(allowed, false);
+    assert.equal(revision, "2");
+    state.pendingReviewPublishes[reviewId] = next;
+    return context.service.sendPublication(reviewId, next, allowed);
+  });
+  await assert.rejects(
+    context.service.sendPublication("review", payload, true),
+    { code: "recipient_set_conflict" },
+  );
+  assert.deepEqual(sent, [payload, next]);
+  assert.equal(state.pendingReviewPublishes.review, undefined);
+  state.pendingReviewPublishes.review = payload;
+  context.setSigned(async (_path, _action, body) => {
+    assert.equal(body, payload);
+    throw Object.assign(Error("network"), { code: "NETWORK_ERROR" });
+  });
+  await assert.rejects(
+    context.service.sendPublication("review", payload, true),
+    { code: "NETWORK_ERROR" },
+  );
+  assert.equal(state.pendingReviewPublishes.review, payload);
+});
+test("vault keys verify derived identity binding and reject registered encryption mismatch", async () => {
+  let verified = 0;
+  const publicKey = new Uint8Array(32).fill(4);
+  const context = await service({
+    C: {
+      membershipPublicKey: async () => new Uint8Array(32).fill(3),
+      memberEncryptionPublicKey: async () => publicKey,
+      verifyMemberEncryptionKeyBinding: async (args) => {
+        verified++;
+        assert.deepEqual(
+          Buffer.from(args.encryptionPublicKey),
+          Buffer.from(publicKey),
+        );
+      },
+    },
+  });
+  context.configureLifecycle();
+  const state = {
+    accountId: "YQ",
+    membershipSeed: new Uint8Array(32),
+    encryptionPrivateKey: new Uint8Array(32),
+  };
+  const vault = {
+    encryption_public_key: Buffer.from(publicKey).toString("base64url"),
+    encryption_key_signature: "YQ",
+  };
+  await context.service.validateMemberKeys(state, vault);
+  assert.equal(verified, 1);
+  await assert.rejects(
+    context.service.validateMemberKeys(state, {
+      ...vault,
+      encryption_public_key: "wrong",
+    }),
+    { code: "KEY_UNAVAILABLE" },
+  );
+  assert.equal(verified, 1);
+});
+test("member envelope opens with own membership and local completion verifies without network or uploads", async () => {
+  let opens = 0,
+    receipts = 0;
+  const descriptor = {
+    deployment_id: "YQ",
+    review_id: "Yg",
+    issuer_key_id: "Yw",
+  };
+  const record = {
+    reviewId: "Yg",
+    descriptor: "ZA",
+    descriptorSignature: "ZQ",
+    receipt: {},
+    encrypted: { enc: "Zg", ciphertext: "Zw" },
+    submission: {
+      review_id: "Yg",
+      issuer_key_id: "Yw",
+      enc: "Zg",
+      ciphertext: "Zw",
+    },
+  };
+  const context = await service({
+    allEncrypted: async () => [record],
+    C: {
+      openReviewContentKey: async (args) => {
+        opens++;
+        assert.equal(
+          Buffer.from(args.membershipId).toString("base64url"),
+          "bQ",
+        );
+        return new Uint8Array(32);
+      },
+      openVaultObject: async ({ object }) =>
+        new TextEncoder().encode(JSON.stringify(object)),
+      verifyDescriptor: async () => descriptor,
+      hashBytes: async () => new Uint8Array(32),
+      responseHash: async () => new Uint8Array(32),
+      getReceiptTrust: () => ({}),
+      verifyReceipt: async () => {
+        receipts++;
+        return {};
+      },
+    },
+  });
+  context.setState({
+    accountId: "YQ",
+    masterKey: new Uint8Array(32),
+    encryptionPrivateKey: new Uint8Array(32),
+    session: { memberships: [{ org_id: "org", id: "bQ" }] },
+  });
+  const review = {
+    org_id: "org",
+    content_key_envelope: { membership_id: "bQ" },
+  };
+  assert.equal(
+    (
+      await context.service.memberContentKey(review, {
+        descriptor,
+        descriptorBytes: new Uint8Array(),
+      })
+    ).length,
+    32,
+  );
+  assert.equal(opens, 1);
+  await assert.rejects(
+    context.service.memberContentKey(
+      { ...review, content_key_envelope: { membership_id: "other" } },
+      {},
+    ),
+    { code: "KEY_UNAVAILABLE" },
+  );
+  assert.equal(await context.service.completedHere("Yg"), true);
+  assert.equal(receipts, 1);
+});
+
+test("registration sends independent encryption key binding and versioned membership vault", async () => {
+  const membership = {
+    seed: new Uint8Array(32).fill(1),
+    publicKey: new Uint8Array(32).fill(2),
+  };
+  const encryption = {
+    privateKey: new Uint8Array(32).fill(3),
+    publicKey: new Uint8Array(32).fill(4),
+  };
+  const signature = new Uint8Array(64).fill(5);
+  let plaintext, binding, payload;
+  const context = await service({
+    C: {
+      generateMembershipKey: async () => membership,
+      generateMemberEncryptionKeyPair: async () => encryption,
+      sealVaultObject: async (args) => {
+        plaintext = JSON.parse(new TextDecoder().decode(args.plaintext));
+        return {};
+      },
+      authenticationPublicKey: async () => new Uint8Array(32),
+      signMemberEncryptionKeyBinding: async (args) => {
+        binding = args;
+        return signature;
+      },
+      passwordMetadataHash: async () => new Uint8Array(32),
+      recoveryMetadataHash: async () => new Uint8Array(32),
+      wrapVaultMaster: async () => ({}),
+    },
+  });
+  context.configureLifecycle();
+  context.setCredentials(async () => ({
+    passwordKdf: {},
+    recoverySalt: new Uint8Array(32),
+    recovery: { words: "word word" },
+    p: {},
+    r: {},
+  }));
+  context.setSigned(async (_path, action, value) => {
+    assert.equal(action, "register");
+    payload = value;
+  });
+  context.setLogin(async () => ({}));
+  await context.service.register({
+    email: "member@example.test",
+    password: "password",
+  });
+  assert.equal(payload.encryption_public_key, encryption.publicKey);
+  assert.equal(payload.encryption_key_signature, signature);
+  assert.equal(binding.membershipSeed, membership.seed);
+  assert.equal(binding.membershipPublicKey, membership.publicKey);
+  assert.equal(binding.encryptionPublicKey, encryption.publicKey);
+  assert.equal(
+    Buffer.from(binding.accountId).toString("base64url"),
+    payload.account_id,
+  );
+  assert.deepEqual(plaintext, {
+    v: 1,
+    kind: "membership",
+    encryption_private_key: Buffer.from(encryption.privateKey).toString(
+      "base64url",
+    ),
+    seed: Buffer.from(membership.seed).toString("base64url"),
+  });
+  assert.equal(Object.hasOwn(payload, "encryption_private_key"), false);
+});
+
+test("rejected publication rebuilds corrected revision while unknown outcomes retry exact bytes", async () => {
+  const context = await service({
+    request: async (path) =>
+      path.includes("content-recipients")
+        ? { items: [], next: null }
+        : {
+            org_id: "YQ",
+            encrypted_content: {},
+            issuer_key_id: "issuer",
+            issuer_public_key: "public",
+          },
+    C: {
+      openDraftContent: async () => ({}),
+      validateReviewContent: () => {},
+      recipientPublicKey: async () => new Uint8Array(32),
+      signDescriptor: async () => new Uint8Array(64),
+    },
+  });
+  context.configureLifecycle();
+  context.setReviewKeys(async () => ({
+    contentKey: new Uint8Array(32),
+    privateKey: new Uint8Array(32),
+  }));
+  const state = { accountId: "YQ", membershipSeed: new Uint8Array(32) };
+  context.setState(state);
+  const sent = [];
+  let error = Object.assign(Error("revision"), {
+    code: "REVISION_CONFLICT",
+    status: 409,
+  });
+  context.setSigned(async (_path, _action, payload) => {
+    sent.push(payload);
+    if (error) throw error;
+    return {};
+  });
+  await assert.rejects(
+    context.lifecycle.publishReview({ reviewId: "Yg", expectedRevision: "1" }),
+    { status: 409 },
+  );
+  assert.equal(state.pendingReviewPublishes.Yg, undefined);
+  error = Object.assign(Error("unknown"), {
+    code: "REQUEST_FAILED",
+    status: 503,
+  });
+  await assert.rejects(
+    context.lifecycle.publishReview({ reviewId: "Yg", expectedRevision: "2" }),
+    { status: 503 },
+  );
+  assert.equal(sent[1].expected_revision, "2");
+  assert.notEqual(sent[0].request_id, sent[1].request_id);
+  assert.equal(state.pendingReviewPublishes.Yg, sent[1]);
+  error = Object.assign(Error("reply"), { code: "INVALID_RESPONSE" });
+  await assert.rejects(
+    context.lifecycle.publishReview({ reviewId: "Yg", expectedRevision: "3" }),
+    { code: "INVALID_RESPONSE" },
+  );
+  assert.equal(sent[2], sent[1]);
+  error = undefined;
+  await context.lifecycle.publishReview({
+    reviewId: "Yg",
+    expectedRevision: "3",
+  });
+  assert.equal(sent[3], sent[1]);
+  assert.equal(state.pendingReviewPublishes.Yg, undefined);
 });

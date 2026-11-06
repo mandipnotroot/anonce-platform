@@ -298,7 +298,7 @@ async function vaultOpen(accountId, derived, kind) {
     wrapKey: derived.wrapKey,
     wrapper: vault[kind + "_wrap"],
   });
-  let membershipSeed;
+  let membershipSeed, encryptionPrivateKey;
   for (const object of vault.vault_objects || vault.objects || []) {
     const raw = await C.openVaultObject({
       accountId: bytes(accountId),
@@ -306,14 +306,47 @@ async function vaultOpen(accountId, derived, kind) {
       object,
     });
     const value = JSON.parse(new TextDecoder().decode(raw));
-    if (value.kind === "membership") membershipSeed = bytes(value.seed);
+    if (value.kind === "membership") {
+      if (
+        membershipSeed ||
+        value.v !== 1 ||
+        Object.keys(value).sort().join(",") !==
+          "encryption_private_key,kind,seed,v" ||
+        !canonical(value.seed, 32) ||
+        !canonical(value.encryption_private_key, 32)
+      )
+        throw keyUnavailable();
+      membershipSeed = bytes(value.seed);
+      encryptionPrivateKey = bytes(value.encryption_private_key);
+    }
   }
   if (!membershipSeed)
     throw new APIError(
       "VAULT_INVALID",
       "The encrypted membership key is unavailable.",
     );
-  return { masterKey, membershipSeed, vault };
+  await validateMemberKeys(
+    { accountId, membershipSeed, encryptionPrivateKey },
+    vault,
+  );
+  return { masterKey, membershipSeed, encryptionPrivateKey, vault };
+}
+async function validateMemberKeys(s, vault) {
+  const membershipPublicKey = await C.membershipPublicKey({
+    seed: s.membershipSeed,
+  });
+  const encryptionPublicKey = await C.memberEncryptionPublicKey({
+    privateKey: s.encryptionPrivateKey,
+  });
+  if (C.toBase64url(encryptionPublicKey) !== vault.encryption_public_key)
+    throw keyUnavailable();
+  await C.verifyMemberEncryptionKeyBinding({
+    deploymentId: bytes(config.deployment_id),
+    accountId: bytes(s.accountId),
+    membershipPublicKey,
+    encryptionPublicKey,
+    signature: bytes(vault.encryption_key_signature),
+  });
 }
 export async function getSession() {
   if (state) return sessionView(state.session);
@@ -336,13 +369,16 @@ export async function getSession() {
         ),
       );
       if (cached.session.credential_epoch !== s.credential_epoch) return null;
-      state = {
+      const restored = {
         ...cached,
         masterKey: bytes(cached.masterKey),
         authSeed: bytes(cached.authSeed),
         membershipSeed: bytes(cached.membershipSeed),
+        encryptionPrivateKey: bytes(cached.encryptionPrivateKey),
         session: s,
       };
+      await validateMemberKeys(restored, await request("/api/member/vault"));
+      state = restored;
       return sessionView(s);
     } finally {
       key.fill(0);
@@ -429,7 +465,8 @@ export async function register({ email, password }) {
   await initialize();
   const accountId = id(),
     masterKey = random(32),
-    membership = await C.generateMembershipKey();
+    membership = await C.generateMembershipKey(),
+    encryption = await C.generateMemberEncryptionKeyPair();
   const cr = await credentials(accountId, password);
   const object = await C.sealVaultObject({
     accountId: bytes(accountId),
@@ -437,7 +474,9 @@ export async function register({ email, password }) {
     objectId: random(16),
     revision: "1",
     plaintext: jsonBytes({
+      v: 1,
       kind: "membership",
+      encryption_private_key: C.toBase64url(encryption.privateKey),
       seed: C.toBase64url(membership.seed),
     }),
   });
@@ -457,6 +496,14 @@ export async function register({ email, password }) {
         authSeed: cr.r.authSeed,
       }),
       membership_public_key: membership.publicKey,
+      encryption_public_key: encryption.publicKey,
+      encryption_key_signature: await C.signMemberEncryptionKeyBinding({
+        deploymentId: bytes(config.deployment_id),
+        accountId: bytes(accountId),
+        membershipPublicKey: membership.publicKey,
+        encryptionPublicKey: encryption.publicKey,
+        membershipSeed: membership.seed,
+      }),
       password_wrap: await wrapper(
         accountId,
         "password",
@@ -494,6 +541,7 @@ export async function logout() {
       state.masterKey.fill(0);
       state.authSeed.fill(0);
       state.membershipSeed.fill(0);
+      state.encryptionPrivateKey?.fill(0);
     }
     state = undefined;
     setCSRF(undefined);
@@ -512,6 +560,7 @@ function reviewView(r, content) {
     ...content,
     content,
     contentState: content ? "open" : "locked",
+    completedOnThisBrowser: false,
     id: r.id || r.review_id,
     status: r.status || r.state,
     questions: content?.questions.map(normalizeQuestion) || [],
@@ -580,52 +629,97 @@ async function reviewKeys(reviewId) {
     throw keyUnavailable();
   }
 }
-export function parseResponseInvitation(fragment) {
-  const match =
-    typeof fragment === "string" &&
-    /^#\/respond\/([A-Za-z0-9_-]+)\?([^#]+)$/.exec(fragment);
-  const invalid = () => {
-    throw new APIError("INVALID_INVITATION", "Invalid secret invitation link.");
-  };
-  if (!match || !canonical(match[1], 16)) invalid();
-  const params = new URLSearchParams(match[2]);
-  if (
-    [...params].length !== 2 ||
-    params.getAll("v").length !== 1 ||
-    params.getAll("k").length !== 1 ||
-    params.get("v") !== "1" ||
-    !canonical(params.get("k"), 32) ||
-    ![`v=1&k=${params.get("k")}`, `k=${params.get("k")}&v=1`].includes(match[2])
-  )
-    invalid();
-  return { reviewId: match[1], contentKey: bytes(params.get("k")) };
-}
 function validateContent(content) {
   return C.validateReviewContent(content);
 }
+async function memberContentKey(r, p) {
+  if (r.is_creator === true)
+    return (await reviewKeys(r.review_id || r.id)).contentKey;
+  const s = active();
+  if (!r.content_key_envelope || !s.encryptionPrivateKey)
+    throw keyUnavailable();
+  const membership = s.session.memberships?.find((m) => m.org_id === r.org_id);
+  const membershipId = membership?.membership_id || membership?.id;
+  if (!membershipId || r.content_key_envelope.membership_id !== membershipId)
+    throw keyUnavailable();
+  return C.openReviewContentKey({
+    descriptor: p.descriptor,
+    descriptorBytes: p.descriptorBytes,
+    membershipId: bytes(membershipId),
+    encryptionPrivateKey: s.encryptionPrivateKey,
+    envelope: r.content_key_envelope,
+  });
+}
+async function completedHere(reviewId) {
+  const s = active();
+  for (const object of await allEncrypted()) {
+    try {
+      const p = JSON.parse(
+        new TextDecoder().decode(
+          await C.openVaultObject({
+            accountId: bytes(s.accountId),
+            masterKey: s.masterKey,
+            object,
+          }),
+        ),
+      );
+      if (
+        p.reviewId !== reviewId ||
+        !p.receipt ||
+        !p.submission ||
+        p.submission.enc !== p.encrypted.enc ||
+        p.submission.ciphertext !== p.encrypted.ciphertext ||
+        p.submission.review_id !== reviewId
+      )
+        continue;
+      const descriptorBytes = bytes(p.descriptor);
+      const descriptor = await C.verifyDescriptor({
+        descriptorBytes,
+        signature: bytes(p.descriptorSignature),
+        expectedReviewId: bytes(reviewId),
+      });
+      if (p.submission.issuer_key_id !== descriptor.issuer_key_id) continue;
+      await verifyEnvelopeReceipt(
+        { descriptorBytes, descriptor },
+        p.submission,
+        p.receipt,
+      );
+      return true;
+    } catch {
+      /* Invalid local records are not evidence of completion. */
+    }
+  }
+  return false;
+}
 async function openedReview(r, contentKey) {
   const reviewId = r.review_id || r.id;
-  if (!contentKey) {
-    if (r.is_creator !== true) return reviewView(r);
-    contentKey = (await reviewKeys(reviewId)).contentKey;
+  let view;
+  try {
+    if ((r.state || r.status) !== "draft") {
+      const p = await publicDescriptor(reviewId);
+      contentKey ||= await memberContentKey(r, p);
+      view = reviewView(
+        { ...r, descriptor: p.descriptor },
+        await C.openDescriptorContent({ descriptor: p.descriptor, contentKey }),
+      );
+    } else {
+      if (r.is_creator !== true) throw keyUnavailable();
+      contentKey ||= (await reviewKeys(reviewId)).contentKey;
+      view = reviewView(
+        r,
+        await C.openDraftContent({
+          reviewId: bytes(reviewId),
+          orgId: bytes(r.org_id),
+          contentKey,
+          encryptedContent: r.encrypted_content,
+        }),
+      );
+    }
+  } catch {
+    view = reviewView(r);
   }
-  if ((r.state || r.status) !== "draft") {
-    const p = await publicDescriptor(reviewId),
-      content = await C.openDescriptorContent({
-        descriptor: p.descriptor,
-        contentKey,
-      });
-    return reviewView({ ...r, descriptor: p.descriptor }, content);
-  }
-  return reviewView(
-    r,
-    await C.openDraftContent({
-      reviewId: bytes(reviewId),
-      orgId: bytes(r.org_id),
-      contentKey,
-      encryptedContent: r.encrypted_content,
-    }),
-  );
+  view.completedOnThisBrowser = await completedHere(reviewId);
+  return view;
 }
 const list = (r, fn = (x) => x) => ({
   items: (r.items || []).map(fn),
@@ -667,30 +761,9 @@ export const listReviews = async ({ orgId, after }) => {
     next: r.next ?? null,
   };
 };
-export async function getReview({ reviewId, contentKey }) {
+export async function getReview({ reviewId }) {
   await initialize();
-  try {
-    return await openedReview(
-      await request(`/api/member/reviews/${reviewId}`),
-      contentKey,
-    );
-  } catch (e) {
-    if (
-      ![
-        "UNAUTHENTICATED",
-        "unauthenticated",
-        "FORBIDDEN",
-        "forbidden",
-      ].includes(e.code)
-    )
-      throw e;
-  }
-  const p = await publicDescriptor(reviewId);
-  if (!contentKey) throw keyUnavailable();
-  return reviewView(
-    { ...p.descriptor, descriptor: p.descriptor, status: p.state },
-    await C.openDescriptorContent({ descriptor: p.descriptor, contentKey }),
-  );
+  return openedReview(await request(`/api/member/reviews/${reviewId}`));
 }
 const pendingCreates = new Map();
 export async function createReview({ orgId, title, maxResponses = 1 }) {
@@ -843,16 +916,6 @@ export async function deleteReview({ reviewId, expectedRevision }) {
         delete state.pendingReviewCreates[orgId];
   if (state) await cacheState();
   return result;
-}
-export async function getInvitationURL({ reviewId }) {
-  const r = await request(`/api/member/reviews/${reviewId}`);
-  if (!["published", "closed"].includes(r.state || r.status))
-    throw new APIError(
-      "INVALID_STATE",
-      "Publish the review before sharing an invitation.",
-    );
-  const keys = await reviewKeys(reviewId);
-  return `${location.origin}/#/respond/${reviewId}?v=1&k=${C.toBase64url(keys.contentKey)}`;
 }
 async function publicDescriptor(reviewId) {
   const p = await request(`/api/public/reviews/${reviewId}`, {
@@ -1113,9 +1176,55 @@ export async function listPendingResponses() {
     next: null,
   };
 }
+async function contentRecipients(reviewId, orgId) {
+  const recipients = [],
+    ids = new Set(),
+    cursors = new Set();
+  let after;
+  let previous;
+  do {
+    const page = await request(
+      `/api/member/reviews/${reviewId}/content-recipients${after ? "?after=" + encodeURIComponent(after) : ""}`,
+    );
+    if (!Array.isArray(page.items)) throw keyUnavailable();
+    for (const recipient of page.items) {
+      if (
+        !canonical(recipient.membership_id, 16) ||
+        ids.has(recipient.membership_id) ||
+        (previous !== undefined && recipient.membership_id <= previous)
+      )
+        throw keyUnavailable();
+      previous = recipient.membership_id;
+      ids.add(recipient.membership_id);
+      recipients.push(
+        await C.verifyContentRecipient({ orgId: bytes(orgId), recipient }),
+      );
+    }
+    const next = page.next;
+    if (
+      next != null &&
+      (!page.items.length ||
+        next !== page.items.at(-1).membership_id ||
+        cursors.has(next))
+    )
+      throw keyUnavailable();
+    if (next != null) cursors.add(next);
+    after = next;
+  } while (after != null);
+  return recipients;
+}
 export async function publishReview({ reviewId, expectedRevision }) {
-  const s = active(),
-    r = await request(`/api/member/reviews/${reviewId}`),
+  return publishWithRosterRetry(reviewId, expectedRevision, true);
+}
+async function publishWithRosterRetry(
+  reviewId,
+  expectedRevision,
+  rebuildAllowed,
+) {
+  const s = active();
+  const existing = s.pendingReviewPublishes?.[reviewId];
+  if (existing) return sendPublication(reviewId, existing, rebuildAllowed);
+  const r = await request(`/api/member/reviews/${reviewId}`),
     cert = await ensureCertificate(r.org_id);
   const keys = await reviewKeys(reviewId);
   const content = await C.openDraftContent({
@@ -1144,15 +1253,67 @@ export async function publishReview({ reviewId, expectedRevision }) {
   const descriptorBytes = jsonBytes(descriptor);
   if (descriptorBytes.length > 65536)
     throw new APIError("INVALID_CONTENT", "Review descriptor is too large.");
-  return mutation(`/reviews/${reviewId}/publish`, "review-publish", {
+  const content_key_envelopes = [];
+  for (const recipient of await contentRecipients(reviewId, r.org_id)) {
+    content_key_envelopes.push(
+      await C.sealReviewContentKey({
+        descriptorBytes,
+        orgId: bytes(r.org_id),
+        reviewId: bytes(reviewId),
+        membershipId: recipient.membershipId,
+        encryptionPublicKey: recipient.encryptionPublicKey,
+        contentKey: keys.contentKey,
+      }),
+    );
+  }
+  const payload = toWire({
+    request_id: id(),
     expected_revision: String(expectedRevision),
     descriptor: descriptorBytes,
     descriptor_signature: await C.signDescriptor({
       descriptorBytes,
       membershipSeed: s.membershipSeed,
     }),
+    content_key_envelopes,
   });
+  if (jsonBytes(payload).length > 1536 * 1024)
+    throw new APIError("INVALID_CONTENT", "Publication payload is too large.");
+  (s.pendingReviewPublishes ||= {})[reviewId] = payload;
+  await cacheState();
+  return sendPublication(reviewId, payload, rebuildAllowed);
 }
+async function sendPublication(reviewId, payload, rebuildAllowed) {
+  const s = active();
+  try {
+    const result = await signed(
+      `/api/member/reviews/${reviewId}/publish`,
+      "review-publish",
+      payload,
+    );
+    delete s.pendingReviewPublishes[reviewId];
+    await cacheState();
+    return result;
+  } catch (e) {
+    const status = e.status ?? e.statusCode;
+    // Unknown outcomes keep the exact request, including malformed success replies.
+    if (status >= 500) throw e;
+    if (["recipient_set_conflict", "RECIPIENT_SET_CONFLICT"].includes(e.code)) {
+      delete s.pendingReviewPublishes[reviewId];
+      await cacheState();
+      if (rebuildAllowed)
+        return publishWithRosterRetry(
+          reviewId,
+          payload.expected_revision,
+          false,
+        );
+    } else if (status >= 400 && status < 500) {
+      delete s.pendingReviewPublishes[reviewId];
+      await cacheState();
+    }
+    throw e;
+  }
+}
+
 async function pendingSave(p) {
   await seal(p.pendingId, p, String(p.revision || 1));
 }
@@ -1176,10 +1337,11 @@ async function sealIssuancePending(p) {
     plaintext: padded,
   });
 }
-export async function prepareResponse({ reviewId, contentKey, answers }) {
+export async function prepareResponse({ reviewId, answers }) {
   active();
   const p = await publicDescriptor(reviewId);
-  if (!contentKey) throw keyUnavailable();
+  const review = await request(`/api/member/reviews/${reviewId}`);
+  const contentKey = await memberContentKey(review, p);
   const content = await C.openDescriptorContent({
     descriptor: p.descriptor,
     contentKey,

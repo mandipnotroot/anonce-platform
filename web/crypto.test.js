@@ -158,6 +158,185 @@ const descriptor = await c.verifyDescriptor({
 });
 await c.openDescriptorContent({ descriptor, contentKey });
 
+test("member encryption binding and historical recipient certificate fail closed", async () => {
+  const pair = await c.generateMemberEncryptionKeyPair();
+  assert.deepEqual(await c.memberEncryptionPublicKey(pair), pair.publicKey);
+  assert.deepEqual(
+    await c.membershipPublicKey(membership),
+    membership.publicKey,
+  );
+  const fields = {
+    deploymentId,
+    accountId,
+    membershipPublicKey: membership.publicKey,
+    encryptionPublicKey: pair.publicKey,
+  };
+  const signature = await c.signMemberEncryptionKeyBinding({
+    ...fields,
+    membershipSeed: membership.seed,
+  });
+  assert.deepEqual(
+    c.memberEncryptionKeyBinding(fields),
+    c.encodeContext("member-encryption-key", [
+      deploymentId,
+      accountId,
+      membership.publicKey,
+      pair.publicKey,
+      c.u64be(1),
+    ]),
+  );
+  assert.equal(
+    await c.verifyMemberEncryptionKeyBinding({ ...fields, signature }),
+    true,
+  );
+  for (const field of Object.keys(fields)) {
+    const changed = fields[field].slice();
+    changed[0] ^= 1;
+    await assert.rejects(
+      c.verifyMemberEncryptionKeyBinding({
+        ...fields,
+        [field]: changed,
+        signature,
+      }),
+    );
+  }
+  await assert.rejects(
+    c.verifyMemberEncryptionKeyBinding({
+      ...fields,
+      encryptionPublicKey: bytes(32, 0),
+      signature,
+    }),
+  );
+  const recipient = {
+    membership_id: b64(accountId),
+    account_id: b64(accountId),
+    certificate: b64(new Uint8Array(certificate.rawData)),
+    encryption_public_key: b64(pair.publicKey),
+    encryption_key_signature: b64(signature),
+  };
+  const verified = await c.verifyContentRecipient({
+    orgId: accountId,
+    recipient,
+  });
+  assert.deepEqual(verified.encryptionKeyId, sha256(pair.publicKey));
+  for (const field of [
+    "membership_id",
+    "account_id",
+    "encryption_public_key",
+    "encryption_key_signature",
+  ]) {
+    await assert.rejects(
+      c.verifyContentRecipient({
+        orgId: accountId,
+        recipient: {
+          ...recipient,
+          [field]: b64(bytes(fromBase64url(recipient[field]).length, 9)),
+        },
+      }),
+    );
+  }
+  await assert.rejects(
+    c.verifyContentRecipient({ orgId: bytes(16, 9), recipient }),
+  );
+  await assert.rejects(
+    c.verifyContentRecipient({
+      orgId: accountId,
+      recipient: {
+        ...recipient,
+        encryption_public_key: recipient.encryption_public_key + "=",
+      },
+    }),
+  );
+});
+
+test("member content HPKE rejects tampering, transplantation and noncanonical envelopes", async () => {
+  const pair = await c.generateMemberEncryptionKeyPair();
+  const args = {
+    descriptorBytes,
+    orgId: accountId,
+    reviewId,
+    membershipId: accountId,
+    encryptionPublicKey: pair.publicKey,
+    contentKey,
+  };
+  const envelope = await c.sealReviewContentKey(args);
+  const open = {
+    descriptor,
+    descriptorBytes,
+    membershipId: accountId,
+    encryptionPrivateKey: pair.privateKey,
+    envelope,
+  };
+  assert.deepEqual(await c.openReviewContentKey(open), contentKey);
+  await assert.rejects(
+    c.openReviewContentKey({
+      ...open,
+      descriptor: structuredClone(descriptor),
+    }),
+  );
+  await assert.rejects(
+    c.openReviewContentKey({ ...open, encryptionPrivateKey: bytes(32, 8) }),
+  );
+  for (const field of [
+    "membership_id",
+    "encryption_key_id",
+    "enc",
+    "ciphertext",
+  ]) {
+    const changed = fromBase64url(envelope[field]);
+    changed[0] ^= 1;
+    await assert.rejects(
+      c.openReviewContentKey({
+        ...open,
+        envelope: { ...envelope, [field]: b64(changed) },
+      }),
+    );
+    await assert.rejects(
+      c.openReviewContentKey({
+        ...open,
+        envelope: { ...envelope, [field]: envelope[field] + "=" },
+      }),
+    );
+  }
+  for (const invalid of [
+    { ...envelope, v: 2 },
+    { ...envelope, extra: 1 },
+    { ...envelope, ciphertext: b64(bytes(47)) },
+  ]) {
+    await assert.rejects(
+      c.openReviewContentKey({ ...open, envelope: invalid }),
+    );
+  }
+  for (const field of [
+    "descriptorBytes",
+    "orgId",
+    "reviewId",
+    "membershipId",
+  ]) {
+    const changed = args[field].slice();
+    changed[0] ^= 1;
+    const transplanted = await c.sealReviewContentKey({
+      ...args,
+      [field]: changed,
+    });
+    await assert.rejects(
+      c.openReviewContentKey({ ...open, envelope: transplanted }),
+    );
+  }
+  const wrongContent = await c.sealReviewContentKey({
+    ...args,
+    contentKey: bytes(32, 8),
+  });
+  await assert.rejects(
+    c.openReviewContentKey({ ...open, envelope: wrongContent }),
+  );
+  // Independent module instance changes only deployment context.
+  const other = await import("./crypto.js?member-envelope-deployment");
+  await other.initCrypto({ ...init, deploymentId: bytes(32, 9) });
+  const foreign = await other.sealReviewContentKey(args);
+  await assert.rejects(c.openReviewContentKey({ ...open, envelope: foreign }));
+});
+
 test("base64url is unpadded and canonical", () => {
   const bytes = new Uint8Array([0, 255, 254, 128]);
   assert.equal(toBase64url(bytes), "AP_-gA");

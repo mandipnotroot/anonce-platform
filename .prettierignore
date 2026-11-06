@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Dependencies and npm-owned lockfile.
+node_modules/
+/package-lock.json
+
+# Generated browser bundles and esbuild legal notices.
+/web/crypto.bundle.js
+/web/crypto.bundle.js.map
+/web/crypto.bundle.js.LEGAL.txt
+/web/receipt-qr.bundle.js
+/web/receipt-qr.bundle.js.map
+/web/receipt-qr.bundle.js.LEGAL.txt
+
+# Build artifacts and local caches.
+/bin/
+/build/
+/dist/
+*.test
+*.out
+coverage/
+coverage.*
+.cache/
+.npm/
+.slim/deepwork/
+
+# Local secrets and environment files; retain the tracked example.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/

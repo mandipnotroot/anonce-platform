@@ -246,11 +246,7 @@ try {
   } finally {
     await draftContext.close();
   }
-  const invitation = await reviewer.evaluate(
-    async (reviewId) =>
-      (await import("/app.js")).getInvitationURL({ reviewId }),
-    reviewId,
-  );
+  const invitation = `${origin}/#/respond/${reviewId}`;
   const invitationURL = new URL(invitation);
   const createRequest = traffic.find(
     (item) =>
@@ -292,18 +288,12 @@ try {
   assert.equal(invitationURL.origin, new URL(origin).origin);
   assert.equal(invitationURL.pathname, "/");
   assert.equal(invitationURL.search, "");
-  assert.match(
-    invitationURL.hash,
-    new RegExp(`^#/respond/${reviewId}\\?v=1&k=[A-Za-z0-9_-]{43}$`),
-  );
-  const contentKey = new URLSearchParams(invitationURL.hash.split("?")[1]).get(
-    "k",
-  );
+  assert.equal(invitationURL.hash, `#/respond/${reviewId}`);
+  assert.equal(publishPayload.content_key_envelopes.length, 2);
   await reviewer.evaluate(
     async ({ reviewId, invitation }) => {
-      const a = await import("/app.js"),
-        parsed = a.parseResponseInvitation(new URL(invitation).hash);
-      const r = await a.getReview({ reviewId, contentKey: parsed.contentKey });
+      const a = await import("/app.js");
+      const r = await a.getReview({ reviewId });
       if (
         r.contentState !== "open" ||
         r.title !== "E2E anonymous feedback" ||
@@ -329,80 +319,31 @@ try {
     { reviewId, invitation },
   );
   await respondent.evaluate(
-    async ({ reviewId, invitation, orgId }) => {
+    async ({ reviewId, orgId }) => {
       const a = await import("/app.js");
-      const listed = (await a.listReviews({ orgId })).items.find(
+      const r = (await a.listReviews({ orgId })).items.find(
         (r) => r.id === reviewId,
       );
       if (
-        !listed ||
-        listed.is_creator !== false ||
-        listed.contentState !== "locked"
+        !r ||
+        r.is_creator !== false ||
+        r.contentState !== "open" ||
+        r.completedOnThisBrowser !== false
       )
-        throw Error("Noncreator list must stay locked");
-      if (
-        [
-          "creator_account_id",
-          "reviewer_account_id",
-          "reviewer_membership_id",
-          "descriptor",
-          "descriptor_signature",
-          "revision",
-          "max_responses",
-          "opens_at",
-          "closes_at",
-          "issued_count",
-          "accepted_count",
-          "maxResponses",
-          "opensAt",
-          "closesAt",
-        ].some((key) => Object.hasOwn(listed, key))
-      )
-        throw Error("Noncreator list exposed private metadata");
-      for (const fragment of [
-        `#/respond/${reviewId}`,
-        new URL(invitation).hash.replace("v=1", "v=2"),
-      ]) {
-        let rejected = false;
-        try {
-          a.parseResponseInvitation(fragment);
-        } catch {
-          rejected = true;
-        }
-        if (!rejected) throw Error("Malformed invitation accepted");
-      }
-      let rejected = false,
-        locked;
+        throw Error("Approved member did not unlock published content");
+      if ("getInvitationURL" in a || "parseResponseInvitation" in a)
+        throw Error("Secret-link API remains");
+      let rejected = false;
       try {
-        locked = await a.getReview({ reviewId });
+        await a.listResponses({ reviewId });
       } catch {
         rejected = true;
       }
-      if (
-        !rejected &&
-        (locked.contentState !== "locked" ||
-          locked.title ||
-          locked.description ||
-          locked.content ||
-          !Array.isArray(locked.questions) ||
-          locked.questions.length !== 0)
-      )
-        throw Error("Missing content key exposed plaintext content");
-      const { contentKey } = a.parseResponseInvitation(
-        new URL(invitation).hash,
-      );
-      contentKey[0] ^= 1;
-      rejected = false;
-      try {
-        await a.getReview({ reviewId, contentKey });
-      } catch {
-        rejected = true;
-      }
-      if (!rejected) throw Error("Wrong content key accepted");
+      if (!rejected) throw Error("Member obtained creator-only answer access");
     },
-    { reviewId, invitation, orgId },
+    { reviewId, orgId },
   );
-  // Preserve the fragment-held secret through the real sign-in continuation.
+  // Preserve ordinary response navigation through sign-in.
   await respondent.evaluate(async () => {
     await (await import("/app.js")).logout();
   });
@@ -418,7 +359,7 @@ try {
   assert.equal(
     new URL(respondent.url()).hash,
     invitationURL.hash,
-    "sign-in preserves the full secret invitation",
+    "sign-in preserves ordinary response navigation",
   );
   let issuanceCount = 0;
   const sent = [];
@@ -523,8 +464,6 @@ try {
     "Choose one",
     "Choose several",
     "Private browser response",
-    contentKey,
-    Buffer.from(contentKey, "base64url").toString("base64"),
   ];
   for (const { path, text } of traffic)
     for (const decoded of decodedTexts(text))
@@ -535,7 +474,7 @@ try {
           `Plaintext or content key leaked over HTTP at ${path}`,
         );
   console.log(
-    "PASS: encrypted content/descriptor, secret invitations, missing/wrong keys, sign-in continuation, HTTP secrecy, two-context membership, lost-reply exact retry, receipt, plaintext/export, reload unlock and cross-device recovery",
+    "PASS: encrypted content/descriptor, member envelopes, creator-only answer keys, sign-in continuation, HTTP secrecy, two-context membership, lost-reply exact retry, receipt, plaintext/export, reload unlock and cross-device recovery",
   );
 } finally {
   await browser.close();

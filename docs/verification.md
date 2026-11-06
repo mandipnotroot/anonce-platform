@@ -4,7 +4,7 @@
 
 **No security audit or production approval is claimed.** Required coverage,
 configured automation, and recorded results are different evidence. Historical
-results below do not validate the encrypted-review-content change.
+results below do not validate subsequent member key-delivery changes.
 
 ## Reproduce the gates
 
@@ -28,10 +28,64 @@ Self-signed E2E bypass is restricted to `localhost`, `127.0.0.1`, and `[::1]`.
 ### CI configuration
 
 [CI](../.github/workflows/ci.yml) exists and runs on pushes/pull requests, with
-a 20-minute Ubuntu job. It pins Go 1.27.3 and Node.js 26.12.1 and runs race
+a 20-minute Ubuntu job. It pins Go 1.27.3 and Node.js 26.12.1 and runs Go formatting, race
 tests, vet, dependency installation, build, module tests, and interop. It defines
 no PostgreSQL service/test URLs or live HTTPS E2E step. Workflow configuration
 does not establish a successful run or database coverage.
+
+## Member key delivery checks — 2026-11-06
+
+The implementation replaces question-key URLs with per-member HPKE envelopes
+for the approved membership snapshot at publication. Answer keys remain
+creator-only. Dashboard completion derives from locally verified receipts and
+does not create a named completion endpoint. Formats and limitations are in
+[member-key-delivery.md](member-key-delivery.md).
+
+Final checks used Go 1.27.3 and Node.js 26.12.1 from locally cached toolchains.
+Ordinary build/unit/static checks used an empty allowlisted environment but did
+not enforce host filesystem or network isolation. Database execution used an
+isolated PostgreSQL 18.6 container with synthetic restricted roles, tmpfs data,
+no external network, read-only source/test binary, dropped capabilities, and
+no-new-privileges. Compilation itself was not container-isolated. No existing
+database, application, secrets, or deployment configuration was used or reset.
+
+| Command                                                                                                                                                | Exit/result                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make fmt-check`                                                                                                                                       | 0                                                                                                                                                                   |
+| `node node_modules/prettier/bin/prettier.cjs --check <changed supported files>`                                                                        | 0; 22 files, explicit paths recorded in evidence                                                                                                                    |
+| `npm run build`                                                                                                                                        | 0                                                                                                                                                                   |
+| `npm test`                                                                                                                                             | 0; 92 passed                                                                                                                                                        |
+| `npm run test:interop`                                                                                                                                 | 0; seven groups                                                                                                                                                     |
+| `go test -race -p=1 ./...`                                                                                                                             | 0; database tests opt-in, separate results below                                                                                                                    |
+| `go vet ./...`                                                                                                                                         | 0                                                                                                                                                                   |
+| `node --check scripts/e2e.mjs`                                                                                                                         | 0; syntax only                                                                                                                                                      |
+| `git diff --check`                                                                                                                                     | 0                                                                                                                                                                   |
+| `go test -race -c -o <scratch>/server.test ./internal/server`, then isolated `/test -test.v -test.timeout=180s`                                        | Compilation 0; initial database run 1 because a quota test's field allowlist omitted the new envelope field. Seven integration tests passed.                        |
+| Refreshed race-enabled server test binary, then isolated `/test -test.v -test.run '^TestIntegrationQuotaPerMemberTwoAndCloseRace$' -test.timeout=180s` | 0; affected integration test passed after the test-only allowlist fix. Reconciled evidence: eight integration tests passed across two runs, not a fresh full rerun. |
+
+Database checks include member key delivery, recipient pagination beyond 100,
+roster conflicts and locking, own-envelope access, later approval/revocation,
+whole-flow concurrency, quotas/closure races, credential and membership controls,
+and restricted anonymous-role access. Browser module checks include binding and
+HPKE tampering, vault mismatches, local completion, publication retries, and
+obsolete-link rejection. Passing module/database checks are not real-browser E2E
+or an independent security audit.
+
+Initial empty-environment Go/interop attempts failed because the host binary was
+Go 1.27.2; corrected runs explicitly used the cached Go 1.27.3 toolchain. Mock
+browser checks (`node scripts/ui-check.mjs`, `node scripts/ui-responsive.mjs`)
+were blocked by sandbox mount setup (exit 125), not UI assertion failures. Live
+HTTPS E2E was not run because a separate disposable HTTPS deployment was not
+provisioned. Responsive, keyboard, accessibility, and real-browser multiaccount
+behavior therefore remain unverified. Existing initialized databases require an
+explicitly approved fresh-schema deployment; these changes do not upgrade them.
+
+Evidence directory: `/tmp/opencode/final-validation-UmZMoL/`, including
+`status.tsv`, command files, `npm-test.log`, `final-go-race.log`,
+`final-go-vet.log`, `final-interop.log`, `integration.log`,
+`quota-integration.log`, and `reconciled-counts.json`. Test-only allowlist edits
+also passed `gofmt -l` and scoped `git diff --check`. Disposable containers were
+cleaned up; no commits or deployment were performed.
 
 ## Metadata minimization checks — 2026-11-05
 
@@ -146,21 +200,22 @@ another machine retains them.
 
 ## Required coverage
 
-| Area                 | Positive and negative cases required                                                                                                                                                                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Authentication       | Registration key proofs; password/recovery; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, duplicate/unknown fields, body limits, CSRF                                                                                                               |
-| Vault/credentials    | Revision/epoch CAS races; nonce/AAD tampering; recovery scope; session/challenge revocation; old/new proofs; unchanged vault after rewrap; logout prevents pending writes restoring capabilities                                                                                                                      |
-| Membership           | Normalized email uniqueness/invalid addresses; owner/admin/member/pending/revoked boundaries; direct addition/retry; owner-only admin appointment; escalation/cross-account/org denial; certificate proof/renewal is not database authorization                                                                       |
-| Review content       | Atomic encrypted draft/key creation; title/description/full question confidentiality in API/storage/operation caches; independent content/answer keys; authenticated deployment/org/review context; strict schemas and UTF-8 bounds; fresh nonces; descriptor v3 saved-envelope comparison; creator vault restoration |
-| Review metadata      | Exact descriptor-v3 allowlist; reject prior versions and removed account/quota/schedule fields; session-derived creator flag; exact creator/noncreator member response allowlists; no other-member activity/configuration disclosure; retain server-side quota and window enforcement                                 |
-| Invitations          | Fragment-only canonical secret links; missing/wrong/duplicate keys fail closed; login/register/recovery/refresh preserve full fragment; keyless members see locked metadata; link holders cannot decrypt answers; captured HTTP and decoded signed payloads contain no plaintext content or raw key                   |
-| Publication/issuance | Encrypted draft/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count                                                                                              |
-| Anonymous acceptance | Cookie/Authorization rejection and proxy stripping; no identifying fields/logs/joins; concurrent spends, closure races, lost replies/exact retries; spend/ciphertext/receipt/counter commit or roll back together; lookup returns original verifiable receipt                                                         |
-| Cryptography         | Shared framing/JSON hashes/KDF/wrapper/vault vectors; decimal U64/canonical base64url; prescribed Argon2id, 12-English-word BIP-39, Ed25519, RFC 9474/RFC 9180; wrong key/context/nonce/tag/hash/signature rejection                                                                                                  |
-| Receipt v2           | Go/browser `testdata/receipt-v2.json` transcripts, hash/key ID/signature; reject changed context/envelope, noncanonical timestamp/encoding, unknown/duplicate fields; maximum U64; explicit historical trust and removed/substituted-key rejection                                                                    |
-| Browser journeys     | Registration/phrase confirmation, login, organization membership/approval, publication, multiple authorizations, response, creator-only decrypt/export, recovery/reset; preserve exact pending bytes across crashes/retries                                                                                           |
-| Browser receipt use  | Verify submitted/looked-up/cached acceptance against saved envelope/verified descriptor before decryption; ignore unsigned timestamps; isolate invalid records; public offline verifier requires explicit trust, 64 KiB limits, stale-read guards and escaped values                                                  |
-| Operations           | Compose health/readiness, role grants, migration rollback, HTTPS/cookies/CSP/Origin, local dependencies, logging leakage, encrypted restore and signing-key continuity                                                                                                                                                |
+| Area                 | Positive and negative cases required                                                                                                                                                                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication       | Registration key proofs; password/recovery; challenge origin/action/hash/epoch/session binding, expiry, replay and concurrent consumption; strict decoding, duplicate/unknown fields, body limits, CSRF                                                                                                                                                 |
+| Vault/credentials    | Revision/epoch CAS races; nonce/AAD tampering; recovery scope; session/challenge revocation; old/new proofs; unchanged vault after rewrap; logout prevents pending writes restoring capabilities                                                                                                                                                        |
+| Membership           | Normalized email uniqueness/invalid addresses; owner/admin/member/pending/revoked boundaries; direct addition/retry; owner-only admin appointment; escalation/cross-account/org denial; certificate proof/renewal is not database authorization                                                                                                         |
+| Review content       | Atomic encrypted draft/key creation; title/description/full question confidentiality in API/storage/operation caches; independent content/answer keys; authenticated deployment/org/review context; strict schemas and UTF-8 bounds; fresh nonces; descriptor v3 saved-envelope comparison; creator vault restoration                                   |
+| Review metadata      | Exact descriptor-v3 allowlist; reject prior versions and removed account/quota/schedule fields; session-derived creator flag; exact creator/noncreator member response allowlists; no other-member activity/configuration disclosure; retain server-side quota and window enforcement                                                                   |
+| Member key delivery  | Signed independent account encryption-key binding; vault mismatch rejection; recipient pagination beyond 100; exact approved roster including creator; atomic roster races/rollback/retries; caller-only envelopes; later-approved/revoked access; HPKE context transplantation and malformed-input rejection; no secret URLs or legacy link acceptance |
+| Local completion     | Only verified local acceptance records count; no completion upload or issuance inference; browser-local labels and response action remain available; missing/corrupt key locks one review only                                                                                                                                                          |
+| Publication/issuance | Encrypted draft/vault atomicity; draft revisions/immutable publication; independent per-member quotas greater than one; request-ID/hash conflicts; concurrent slots/uniqueness; issued count differs from accepted count                                                                                                                                |
+| Anonymous acceptance | Cookie/Authorization rejection and proxy stripping; no identifying fields/logs/joins; concurrent spends, closure races, lost replies/exact retries; spend/ciphertext/receipt/counter commit or roll back together; lookup returns original verifiable receipt                                                                                           |
+| Cryptography         | Shared framing/JSON hashes/KDF/wrapper/vault vectors; decimal U64/canonical base64url; prescribed Argon2id, 12-English-word BIP-39, Ed25519, RFC 9474/RFC 9180; wrong key/context/nonce/tag/hash/signature rejection                                                                                                                                    |
+| Receipt v2           | Go/browser `testdata/receipt-v2.json` transcripts, hash/key ID/signature; reject changed context/envelope, noncanonical timestamp/encoding, unknown/duplicate fields; maximum U64; explicit historical trust and removed/substituted-key rejection                                                                                                      |
+| Browser journeys     | Registration/phrase confirmation, login, organization membership/approval, publication, multiple authorizations, response, creator-only decrypt/export, recovery/reset; preserve exact pending bytes across crashes/retries                                                                                                                             |
+| Browser receipt use  | Verify submitted/looked-up/cached acceptance against saved envelope/verified descriptor before decryption; ignore unsigned timestamps; isolate invalid records; public offline verifier requires explicit trust, 64 KiB limits, stale-read guards and escaped values                                                                                    |
+| Operations           | Compose health/readiness, role grants, migration rollback, HTTPS/cookies/CSP/Origin, local dependencies, logging leakage, encrypted restore and signing-key continuity                                                                                                                                                                                  |
 
 Anonymous browser requests must omit credentials/referrer, reject redirects, and
 retry identical ciphertext. Check the 256 KiB ciphertext boundary using serialized

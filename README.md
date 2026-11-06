@@ -15,7 +15,7 @@ See [verification evidence and remaining gates](docs/verification.md).
 - Register, unlock an encrypted vault, and save a 12-word recovery phrase.
 - Create or join organizations; owners and admins manage membership.
 - Encrypt review titles, descriptions, and questions, including drafts; publish
-  signed encrypted reviews and share secret response links.
+  signed encrypted reviews for every approved organization member's dashboard.
 - Obtain blind response authorizations through approved membership.
 - Submit encrypted answers anonymously; recipients decrypt and export responses.
 - Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
@@ -40,10 +40,12 @@ Client private keys, review content keys, vault keys, password/recovery material
 remain browser-only. Membership CA, blind issuer, and receipt signing keys are
 distinct server-only keys. Anonymous requests omit credentials.
 
-Anyone holding a secret response link can read its review content. The key stays
-in the URL fragment, not HTTP requests. It does not decrypt submitted answers or
-grant membership. Keep links private; browser history and sharing tools may retain
-them. Operational metadata and ciphertext lengths remain visible to the server.
+Publication encrypts the question-content key separately for every currently
+approved member, including the creator. Ordinary review links contain no keys.
+Later-approved members receive no historical keys. Only the creator holds answer
+decryption keys. Dashboard completion means “Completed on this browser,” not
+server-tracked participation. Operational metadata and ciphertext lengths remain
+visible to the server. See the [key-delivery contract](docs/member-key-delivery.md).
 
 Browser-delivered code must be trusted. Anonce does not protect anonymity against
 malicious served code, operators/issuers, or network/timing correlation. Public

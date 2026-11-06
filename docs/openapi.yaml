@@ -933,13 +933,44 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/content-recipients:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    get:
+      operationId: listContentRecipients
+      summary: Page approved memberships and authenticated encryption keys
+      description: Full session, approved organization member, and review creator only. Pages contain at most 100 memberships, including creator, ordered bytewise by canonical membership ID. next is the last returned ID or null. Browser verifies certificates and signed key bindings before wrapping content keys. Publication rechecks the complete current roster atomically.
+      parameters:
+        - name: after
+          in: query
+          schema: { $ref: "#/components/schemas/ID" }
+      responses:
+        "200":
+          description: Recipient directory page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: "#/components/schemas/ContentRecipient" }
+                  next:
+                    oneOf:
+                      - { $ref: "#/components/schemas/ID" }
+                      - { type: "null" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        <<: *AuthorizedReadErrors
   /api/member/reviews/{id}/publish:
     parameters: [{ $ref: "#/components/parameters/ID" }]
     post:
       operationId: publishReview
-      summary: Freeze signed descriptor and atomically save encrypted recipient secret
-      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v3 matches saved encrypted content, deployment, reviewer membership, current certificate, and issuer. Creator association and quota/schedule enforcement remain internal. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor with review revision CAS. No vault write at publication; server cannot validate encrypted question semantics.'
+      summary: Freeze signed descriptor and atomically save member content-key envelopes
+      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v3 matches saved encrypted content, deployment, reviewer membership, current certificate, and issuer. Creator association and quota/schedule enforcement remain internal. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor and persists exactly one content-key envelope per currently approved membership under the organization lock and review revision CAS. Roster/key mismatch returns 409 recipient_set_conflict. No vault write at publication; server cannot validate encrypted question semantics or prove wrapped keys are correct.'
       x-challenge-action: review-publish
+      x-content-key-contract: member-key-delivery.md
       x-payload-schema: "#/components/schemas/ReviewPublish"
       parameters:
         [
@@ -1495,6 +1526,8 @@ components:
           password_wrap,
           recovery_wrap,
           membership_public_key,
+          encryption_public_key,
+          encryption_key_signature,
         ]
       properties:
         request_id: { $ref: "#/components/schemas/ID" }
@@ -1507,6 +1540,8 @@ components:
         password_wrap: { $ref: "#/components/schemas/Wrapper" }
         recovery_wrap: { $ref: "#/components/schemas/Wrapper" }
         membership_public_key: { $ref: "#/components/schemas/Bytes32" }
+        encryption_public_key: { $ref: "#/components/schemas/Bytes32" }
+        encryption_key_signature: { $ref: "#/components/schemas/Signature" }
         vault_objects:
           {
             type: [array, "null"],
@@ -1553,7 +1588,15 @@ components:
       type: object
       additionalProperties: false
       required:
-        [password_wrap, recovery_wrap, objects, password_kdf, recovery_salt]
+        [
+          password_wrap,
+          recovery_wrap,
+          objects,
+          password_kdf,
+          recovery_salt,
+          encryption_public_key,
+          encryption_key_signature,
+        ]
       properties:
         password_wrap: { $ref: "#/components/schemas/Wrapper" }
         recovery_wrap: { $ref: "#/components/schemas/Wrapper" }
@@ -1561,6 +1604,8 @@ components:
           { type: array, items: { $ref: "#/components/schemas/VaultObject" } }
         password_kdf: { $ref: "#/components/schemas/KDF" }
         recovery_salt: { $ref: "#/components/schemas/Bytes32" }
+        encryption_public_key: { $ref: "#/components/schemas/Bytes32" }
+        encryption_key_signature: { $ref: "#/components/schemas/Signature" }
     PasswordChange:
       type: object
       additionalProperties: false
@@ -1931,11 +1976,47 @@ components:
             $ref: "#/components/schemas/Binary",
             description: DER SubjectPublicKeyInfo RSA-3072 key.,
           }
+    ContentRecipient:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          membership_id,
+          account_id,
+          certificate,
+          encryption_public_key,
+          encryption_key_signature,
+        ]
+      properties:
+        membership_id: { $ref: "#/components/schemas/ID" }
+        account_id: { $ref: "#/components/schemas/ID" }
+        certificate: { $ref: "#/components/schemas/Binary" }
+        encryption_public_key: { $ref: "#/components/schemas/Bytes32" }
+        encryption_key_signature: { $ref: "#/components/schemas/Signature" }
+    ContentKeyEnvelope:
+      type: object
+      additionalProperties: false
+      description: Per-member RFC 9180 HPKE ciphertext. Context binds deployment, organization, review, exact descriptor hash, membership, and encryption-key ID; plaintext is only the 32-byte question-content key. See member-key-delivery.md.
+      required: [v, membership_id, encryption_key_id, enc, ciphertext]
+      properties:
+        v: { const: 1 }
+        membership_id: { $ref: "#/components/schemas/ID" }
+        encryption_key_id: { $ref: "#/components/schemas/Bytes32" }
+        enc: { $ref: "#/components/schemas/Bytes32" }
+        ciphertext:
+          $ref: "#/components/schemas/Binary"
+          description: Exactly 48 decoded bytes including authentication tag.
     ReviewPublish:
       type: object
       additionalProperties: false
       required:
-        [request_id, expected_revision, descriptor, descriptor_signature]
+        [
+          request_id,
+          expected_revision,
+          descriptor,
+          descriptor_signature,
+          content_key_envelopes,
+        ]
       properties:
         request_id: { $ref: "#/components/schemas/ID" }
         expected_revision: { $ref: "#/components/schemas/Decimal" }
@@ -1946,6 +2027,11 @@ components:
             x-decoded-schema: "#/components/schemas/Descriptor",
           }
         descriptor_signature: { $ref: "#/components/schemas/Signature" }
+        content_key_envelopes:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ContentKeyEnvelope" }
+          description: Exactly one envelope for every currently approved membership, including creator. Roster/key mismatch returns 409 recipient_set_conflict; rebuild with a new request ID. Exact network retries reuse unchanged payload bytes.
     Review:
       type: object
       additionalProperties: false
@@ -1956,6 +2042,7 @@ components:
           org_id,
           is_creator,
           encrypted_content,
+          content_key_envelope,
           state,
           issuer_public_key,
           issuer_key_id,
@@ -1964,6 +2051,11 @@ components:
         id: { $ref: "#/components/schemas/ID" }
         org_id: { $ref: "#/components/schemas/ID" }
         is_creator: { type: boolean }
+        content_key_envelope:
+          oneOf:
+            - { $ref: "#/components/schemas/ContentKeyEnvelope" }
+            - { type: "null" }
+          description: Only authenticated caller's envelope; null for drafts or members approved after publication. Never exposes other members' envelopes.
         encrypted_content:
           { $ref: "#/components/schemas/EncryptedReviewContent" }
         max_responses: { type: integer, minimum: 1, maximum: 100 }

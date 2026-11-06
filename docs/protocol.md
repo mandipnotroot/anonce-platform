@@ -66,6 +66,11 @@ Generate random 32-byte master key `V`; wrap it independently for password and r
 | Contents                        | Membership seed, review content and recipient keys, pending issuance state, tokens, and exact pending submissions; plaintext never reaches the server |
 
 - Same-device automatic unlock persists a nonextractable HKDF CryptoKey in IndexedDB and derives an in-memory ChaCha cache key for encrypted V/private state.
+- Membership vault plaintext is exactly
+  `{v:1,kind:'membership',seed,encryption_private_key}`; both private fields encode
+  32 bytes. Registration binds the independent account X25519 public key with
+  the membership Ed25519 key. See [member key delivery](member-key-delivery.md)
+  for the binding transcript, unlock checks, and encrypted device-cache state.
 - This trusted-origin capability is not password-gated defense against malicious served code, XSS, or profile backups.
 - Logout deletes capability/cache and guards pending writes, but cannot revoke copies.
 - Password/phrase changes preserve V/data through wrapping; they do not repair old snapshot compromise.
@@ -127,6 +132,7 @@ disclosure without changing server enforcement. No encrypted duplicate is used
 to imply confidentiality from the server.
 
 Member review responses contain `id`, `org_id`, `is_creator`, `encrypted_content`,
+`content_key_envelope` (caller's own envelope or `null`),
 `state`, `issuer_public_key`, and `issuer_key_id`. Only the creator also receives
 `revision`, `max_responses`, `opens_at`, `closes_at`, `issued_count`, and
 `accepted_count`. Creator association stays internal; responses do not expose
@@ -135,23 +141,21 @@ Published descriptors and signatures are fetched from the public endpoint,
 not repeated in member responses. `is_creator` is computed from the authenticated
 session, not supplied by the browser.
 
-### Invitation links
+### Member content-key delivery
 
-Respondent links have this exact shape:
-`https://<origin>/#/respond/<review_id>?v=1&k=<content_key>`.
-The review ID and key are canonical unpadded base64url encodings of 16 and
-32 bytes respectively. Require exactly one `v=1` and one `k`, with no unknown
-parameters or extra path components. The query-like portion is inside the URL
-fragment, not the HTTP query. Preserve the complete fragment through sign-in,
-registration, and recovery; never put its key in requests, challenges, or logs.
+Respondent navigation is `https://<origin>/#/respond/<review_id>`, with a
+canonical 16-byte base64url review ID and no secret parameters. Old secret-link
+forms are unsupported. Authenticated review access obtains only the caller's
+HPKE envelope; anonymous submission remains credential-free.
 
-Anyone holding the link can read the review content. The link grants neither
-membership nor response authorization and cannot decrypt submitted answers.
-Creator vault keys restore drafts and links after sign-in. Other organization
-members see only locked review metadata unless given a link. Missing keys fail
-closed rather than producing empty questions. There is no content-key rotation
-or reviewer key-distribution mechanism in this contract. Deleting a draft removes
-its creator vault object, not copies, historical snapshots, or operation caches.
+The [member key-delivery contract](member-key-delivery.md) defines normative
+account bindings, paginated recipient discovery, HPKE transcripts, atomic
+publication coverage, and browser-local completion. Publication includes all
+currently approved memberships. Later approvals have no historical key. Missing
+or corrupt keys lock only the affected review. Content-key access never grants
+answer decryption or response authorization. Published content is immutable;
+there is no key rotation. Deleting a draft removes its creator vault object, not
+copies, historical snapshots, or operation caches.
 
 | Verification                 | Scope and limit                                                                                                        |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |

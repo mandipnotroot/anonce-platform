@@ -205,42 +205,51 @@ test("registration and account rotation share recovery controls", () => {
   assert.match(source, /This response could not be decrypted or validated\./);
 });
 
-test("response invitation routes use strict app parser and fail closed", () => {
+test("responses use ordinary review routes without secret-link APIs", () => {
   const routeSource = source.slice(
     source.indexOf("const routeHash"),
     source.indexOf("const go ="),
   );
-  const parser = source.slice(
-    source.indexOf("function responseInvitation()"),
+  assert.doesNotMatch(
+    source,
+    /parseResponseInvitation|getInvitationURL|contentKey: invitation/,
+  );
+  assert.match(source, /async function renderRespond\(id\)/);
+  assert.match(source, /contentState === "locked"/);
+  assert.match(
+    source,
+    /api\.prepareResponse\(\{\s*reviewId: id,\s*answers,?\s*\}\)/,
+  );
+});
+
+test("response routes reject secret query and extra-path forms before auth or review fetch", () => {
+  const helper = source.slice(
+    source.indexOf("const hasUnsupportedResponseRoute"),
     source.indexOf("function authHref("),
   );
-  const api = {
-    parseResponseInvitation(fragment) {
-      if (fragment.includes("duplicate")) throw Error("invalid");
-      return { reviewId: "canonical", contentKey: new Uint8Array(32) };
-    },
-  };
-  const parse = vm.runInNewContext(
-    `${routeSource}\n${parser}\nresponseInvitation`,
-    { api, location: { hash: "#/respond/id?v=1&k=duplicate" } },
+  const unsupported = vm.runInNewContext(
+    `${helper}\nhasUnsupportedResponseRoute`,
+    {},
   );
-  assert.equal(parse().invalid, true);
-  const valid = vm.runInNewContext(
-    `${routeSource}\n${parser}\nresponseInvitation`,
-    { api, location: { hash: "#/respond/id?v=1&k=canonical" } },
+  assert.equal(unsupported(["respond", "review"], "/respond/review"), false);
+  assert.equal(
+    unsupported(["respond", "review"], "/respond/review?v=1&k=secret"),
+    true,
   );
-  assert.equal(valid().reviewId, "canonical");
-  assert.match(source, /This invitation could not be read/);
-  assert.match(source, /contentState === "locked"/);
-  assert.match(source, /Encrypted review/);
-  assert.match(
-    source,
-    /api\.getReview\(\{\s*reviewId: id,\s*contentKey: invitation\.contentKey,?\s*\}\)/,
+  assert.equal(
+    unsupported(["respond", "review", "extra"], "/respond/review/extra"),
+    true,
+  );
+  const guard = source.slice(
+    source.indexOf("async function load()"),
+    source.indexOf("const hashParams", source.indexOf("async function load()")),
   );
   assert.match(
-    source,
-    /api\.prepareResponse\(\{\s*reviewId: id,\s*contentKey: invitation\.contentKey,\s*answers,?\s*\}\)/,
+    guard,
+    /hasUnsupportedResponseRoute\(route, respondHash\)[\s\S]*?Unsupported response link/,
   );
+  assert.doesNotMatch(guard, /getSession|returnRoute\s*=/);
+  assert.doesNotMatch(guard, /secret/);
 });
 
 test("auth continuation preserves full invitation fragment through refresh and auth switches", () => {
@@ -288,20 +297,10 @@ test("same-hash auth continuation reloads route without waiting for hashchange",
   assert.equal(loads, 1);
 });
 
-test("creator share copies app-produced secret invitation URL", () => {
-  assert.match(source, /api\.getInvitationURL\(\{ reviewId: id \}\)/);
-  assert.match(source, /copyText\(\s*await api\.getInvitationURL/);
+test("secret review-link UI is absent", () => {
   assert.doesNotMatch(
     source,
-    /Anyone with this link can read the review title and questions/,
-  );
-  assert.doesNotMatch(
-    source,
-    /does not grant response authorization or let its holder decrypt answers/,
-  );
-  assert.doesNotMatch(
-    source,
-    /Browsers and link-sharing tools may retain fragments/,
+    /getInvitationURL|id="share"|Secret response link|secret link/i,
   );
 });
 
@@ -369,6 +368,25 @@ test("review dashboard hides locked member metadata and aggregates creator-owned
   assert.doesNotMatch(rendered, /Secret title|Unavailable accepted|0 accepted/);
   assert.match(source, /return r\.is_creator === true/);
   assert.doesNotMatch(source, /Anyone with this link/);
+});
+
+test("dashboard exposes local completion and response action for creators and members", () => {
+  assert.match(source, /Completed on this browser/);
+  assert.match(source, /No completion recorded here/);
+  assert.match(source, /completedOnThisBrowser === true/);
+  assert.match(source, /const respond =\s*r\.status === "published"/);
+  assert.match(source, /\$\{mine \? button\("Manage"[\s\S]*?\$\{respond\}/);
+  assert.match(
+    source,
+    /small>\$\{statusBadge\(r\.status\)\}\$\{mine \? metrics : ""\} · \$\{esc\(detail\)\}/,
+  );
+  assert.match(source, /Review content could not be verified/);
+  assert.match(
+    source,
+    /currently approved organization members access to the questions/,
+  );
+  assert.match(source, /Members approved later need a future review/);
+  assert.doesNotMatch(source, /pending globally|not submitted/i);
 });
 
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {

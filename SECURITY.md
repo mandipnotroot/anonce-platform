@@ -26,10 +26,14 @@ must remain browser-only. Anonymous requests must omit credentials; submissions
 must not acquire identifying fields or logs. Distinct server-only membership CA,
 blind issuer, and receipt signing keys require protection at rest.
 
-Secret response links grant review-content access to anyone holding the link.
-Their fragment keys must never enter HTTP requests or logs. They do not decrypt
-answers or grant response authorization. Browser history and copied links can
-retain keys; this version does not provide content-key rotation or link revocation.
+Question-content keys are delivered in per-member HPKE envelopes to approved
+members at publication. Ordinary review links contain no keys. These content keys
+cannot decrypt answers; creator-only answer private keys remain in the vault.
+Later approvals do not grant historical keys. Revocation blocks future envelope
+reads, not content or keys already copied. No content-key rotation is provided.
+Signed encryption-key bindings do not defeat a malicious server replacing both
+the signing identity and its CA-issued certificate. Dashboard completion stays
+browser-local; never send named completion flags or receipts to member APIs.
 
 Browser-delivered code must be trusted. Anonce does not promise anonymity
 against malicious served code or network/timing correlation. Cryptographic

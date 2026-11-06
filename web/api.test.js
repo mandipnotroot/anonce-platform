@@ -148,3 +148,33 @@ test("remote error envelopes give safe specific context and HTTP fallback", asyn
       !e.message.includes("not JSON"),
   );
 });
+
+test("HTTP rejection status survives valid and malformed error bodies", async () => {
+  for (const status of [400, 401, 409, 422, 503]) {
+    for (const malformed of [false, true]) {
+      globalThis.fetch = async () => ({
+        status,
+        ok: false,
+        json: async () => {
+          if (malformed) throw Error("invalid JSON");
+          return { error: { code: "REVISION_CONFLICT" } };
+        },
+      });
+      await assert.rejects(
+        request("/api/member/reviews/review/publish"),
+        (error) => error.status === status,
+      );
+    }
+  }
+  globalThis.fetch = async () => ({
+    status: 200,
+    ok: true,
+    json: async () => {
+      throw Error("invalid JSON");
+    },
+  });
+  await assert.rejects(
+    request("/api/member/me"),
+    (error) => error.code === "INVALID_RESPONSE" && error.status === undefined,
+  );
+});

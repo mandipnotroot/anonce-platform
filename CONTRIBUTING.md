@@ -21,6 +21,43 @@ for local checks; these do not start the application. Follow
 [operations](docs/operations.md) for a disposable HTTPS environment.
 Use only synthetic test data. Never commit local environment files or keys.
 
+## Formatting
+
+Use the Go toolchain declared in `go.mod`. Run `npm ci` to install the exact-pinned
+local Prettier version from `package-lock.json`; do not use a global installation.
+The repository Prettier configuration is authoritative for supported files.
+Prettier is a development-only dependency that provides consistent formatting
+across supported languages without adding runtime browser or server dependencies.
+
+| Files                                  | Formatter and policy                                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Go (`.go`)                             | `gofmt`, through `make fmt` and `make fmt-check`.                                                                      |
+| JavaScript (`.js`, `.mjs`), HTML, CSS  | Local Prettier, with explicit file paths.                                                                              |
+| JSON, YAML (`.yaml`, `.yml`), Markdown | Local Prettier, with explicit file paths.                                                                              |
+| PostgreSQL (`.sql`)                    | No automated formatter configured. Preserve surrounding SQL style and transactional migration boundaries.              |
+| Shell (`.sh`)                          | No automated formatter configured. Preserve surrounding shell style; validate syntax with `bash -n path/to/script.sh`. |
+| `Caddyfile`, `Caddyfile.local`         | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing these files.                          |
+| `Dockerfile`, `Makefile`, ignore files | Preserve surrounding style; keep required Make recipe tabs. No automated formatter configured.                         |
+
+Format only the files you change. For example:
+
+```sh
+make fmt
+make fmt-check
+npm run format -- web/app.js docs/protocol.md
+npm run format:check -- web/app.js docs/protocol.md
+```
+
+The Go targets cover tracked Go files; avoid committing unrelated changes if the
+baseline becomes unformatted. Prettier commands require explicit paths. Do not
+run repository-wide formatting as part of a functional change. Generated bundles,
+dependencies, npm-managed lockfiles, secrets, and local environment files are not
+formatter inputs. Change source files and regenerate outputs with their build tools.
+
+CI enforces Go formatting. Prettier checks are explicit-file contributor checks;
+CI does not yet enforce a repository-wide Prettier baseline. Formatting is separate
+from syntax validation, tests, and cryptographic verification.
+
 ## Pull requests
 
 Keep each pull request focused. Describe the problem, the change, and any known

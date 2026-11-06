@@ -341,6 +341,194 @@ export async function authenticationPublicKey({ authSeed }) {
   return guard(() => ed25519.getPublicKey(requireBytes(authSeed, 32)));
 }
 
+export async function generateMemberEncryptionKeyPair() {
+  return generateRecipientKey();
+}
+export async function memberEncryptionPublicKey({ privateKey }) {
+  return recipientPublicKey({ privateKey });
+}
+export async function membershipPublicKey({ seed }) {
+  return guard(() => ed25519.getPublicKey(requireBytes(seed, 32)));
+}
+export async function signMemberEncryptionKeyBinding({
+  membershipSeed,
+  ...fields
+}) {
+  return guard(() => {
+    check(
+      equal(
+        ed25519.getPublicKey(requireBytes(membershipSeed, 32)),
+        requireBytes(fields.membershipPublicKey, 32),
+      ),
+      "MEMBERSHIP_MISMATCH",
+    );
+    return ed25519.sign(memberEncryptionKeyBinding(fields), membershipSeed);
+  });
+}
+export function memberEncryptionKeyBinding({
+  deploymentId,
+  accountId,
+  membershipPublicKey,
+  encryptionPublicKey,
+}) {
+  return encodeContext("member-encryption-key", [
+    requireBytes(deploymentId, 32),
+    requireBytes(accountId, 16),
+    requireBytes(membershipPublicKey, 32),
+    requireBytes(encryptionPublicKey, 32),
+    u64be(1),
+  ]);
+}
+export async function verifyMemberEncryptionKeyBinding(args) {
+  return guard(() => {
+    // Reject unusable X25519 inputs, including low-order points.
+    x25519.getSharedSecret(
+      new Uint8Array(32).fill(1),
+      requireBytes(args.encryptionPublicKey, 32),
+    );
+    check(
+      ed25519.verify(
+        requireBytes(args.signature, 64),
+        memberEncryptionKeyBinding(args),
+        requireBytes(args.membershipPublicKey, 32),
+        { zip215: false },
+      ),
+      "INVALID_ENCRYPTION_KEY_BINDING",
+    );
+    return true;
+  });
+}
+
+export async function verifyContentRecipient({ orgId, recipient }) {
+  return guard(async () => {
+    exactKeys(recipient, [
+      "membership_id",
+      "account_id",
+      "certificate",
+      "encryption_public_key",
+      "encryption_key_signature",
+    ]);
+    const membershipId = decode(recipient.membership_id, 16);
+    const accountId = decode(recipient.account_id, 16);
+    const encryptionPublicKey = decode(recipient.encryption_public_key, 32);
+    const membershipPublicKey = await verifyMembershipCertificate({
+      certificate: decode(recipient.certificate),
+      orgId,
+      membershipId,
+    });
+    await verifyMemberEncryptionKeyBinding({
+      deploymentId: deployment(),
+      accountId,
+      membershipPublicKey,
+      encryptionPublicKey,
+      signature: decode(recipient.encryption_key_signature, 64),
+    });
+    return {
+      membershipId,
+      accountId,
+      encryptionPublicKey,
+      encryptionKeyId: sha256(encryptionPublicKey),
+    };
+  });
+}
+
+function contentKeyContext(
+  label,
+  { descriptorBytes, orgId, reviewId, membershipId, encryptionKeyId },
+) {
+  return encodeContext(label, [
+    deployment(),
+    requireBytes(orgId, 16),
+    requireBytes(reviewId, 16),
+    sha256(requireBytes(descriptorBytes)),
+    requireBytes(membershipId, 16),
+    requireBytes(encryptionKeyId, 32),
+  ]);
+}
+export async function sealReviewContentKey(args) {
+  return guard(async () => {
+    const encryptionPublicKey = requireBytes(args.encryptionPublicKey, 32);
+    const encryptionKeyId = sha256(encryptionPublicKey);
+    const context = { ...args, encryptionKeyId };
+    const sender = await suite.createSenderContext({
+      recipientPublicKey:
+        await suite.kem.deserializePublicKey(encryptionPublicKey),
+      info: contentKeyContext("review-content-key-hpke", context),
+    });
+    const ciphertext = new Uint8Array(
+      await sender.seal(
+        requireBytes(args.contentKey, 32),
+        contentKeyContext("review-content-key-aad", context),
+      ),
+    );
+    return {
+      v: 1,
+      membership_id: toBase64url(args.membershipId),
+      encryption_key_id: toBase64url(encryptionKeyId),
+      enc: toBase64url(requireBytes(new Uint8Array(sender.enc), 32)),
+      ciphertext: toBase64url(requireBytes(ciphertext, 48)),
+    };
+  });
+}
+export async function openReviewContentKey({
+  descriptor,
+  descriptorBytes,
+  membershipId,
+  encryptionPrivateKey,
+  envelope,
+}) {
+  return guard(async () => {
+    const state = trustedDescriptor(descriptor, descriptorBytes);
+    exactKeys(envelope, [
+      "v",
+      "membership_id",
+      "encryption_key_id",
+      "enc",
+      "ciphertext",
+    ]);
+    check(envelope.v === 1, "INVALID_VERSION");
+    check(
+      equal(decode(envelope.membership_id, 16), requireBytes(membershipId, 16)),
+      "MEMBERSHIP_MISMATCH",
+    );
+    const encryptionKeyId = sha256(
+      x25519.getPublicKey(requireBytes(encryptionPrivateKey, 32)),
+    );
+    check(
+      equal(decode(envelope.encryption_key_id, 32), encryptionKeyId),
+      "RECIPIENT_KEY_MISMATCH",
+    );
+    const context = {
+      descriptorBytes: state.bytes,
+      orgId: decode(descriptor.org_id, 16),
+      reviewId: decode(descriptor.review_id, 16),
+      membershipId,
+      encryptionKeyId,
+    };
+    const recipient = await suite.createRecipientContext({
+      recipientKey: await suite.kem.deserializePrivateKey(encryptionPrivateKey),
+      enc: decode(envelope.enc, 32),
+      info: contentKeyContext("review-content-key-hpke", context),
+    });
+    const key = requireBytes(
+      new Uint8Array(
+        await recipient.open(
+          decode(envelope.ciphertext, 48),
+          contentKeyContext("review-content-key-aad", context),
+        ),
+      ),
+      32,
+    );
+    try {
+      await openDescriptorContent({ descriptor, contentKey: key });
+      return key;
+    } catch (error) {
+      key.fill(0);
+      throw error;
+    }
+  });
+}
+
 function wrapAAD(accountId, kind, wrapperId, metadataHash) {
   check(kind === "password" || kind === "recovery", "INVALID_WRAPPER_KIND");
   return encodeContext("vault-wrap", [
@@ -742,6 +930,54 @@ async function issuerKey(d) {
   );
   return key;
 }
+async function verifyMembershipCertificate({
+  certificate,
+  orgId,
+  membershipId,
+}) {
+  check(config, "NOT_INITIALIZED");
+  const cert = new X509Certificate(requireBytes(certificate));
+  check(
+    cert.publicKey.algorithm.name === "Ed25519" &&
+      cert.signatureAlgorithm.name === "Ed25519",
+    "INVALID_CERTIFICATE",
+  );
+  check(
+    cert.issuer === config.ca.subject &&
+      cert.getExtension(BasicConstraintsExtension)?.ca === false,
+    "INVALID_CERTIFICATE",
+  );
+  check(
+    cert.getExtension(KeyUsagesExtension)?.usages === 1,
+    "INVALID_CERTIFICATE",
+  );
+  const allowedCritical = new Set(["2.5.29.19", "2.5.29.15", "2.5.29.17"]);
+  check(
+    cert.extensions.every((e) => !e.critical || allowedCritical.has(e.type)),
+    "INVALID_CERTIFICATE",
+  );
+  check(
+    new Set(cert.extensions.map((e) => e.type)).size === cert.extensions.length,
+    "INVALID_CERTIFICATE",
+  );
+  check(
+    (await config.ca.verify({ signatureOnly: true }, crypto)) &&
+      (await cert.verify(
+        { publicKey: config.ca.publicKey, signatureOnly: true },
+        crypto,
+      )),
+    "INVALID_CERTIFICATE",
+  );
+  const san = cert.getExtension(SubjectAlternativeNameExtension)?.names.items;
+  const expectedSAN = `urn:anonce:deployment:${toBase64url(deployment())}:org:${toBase64url(requireBytes(orgId, 16))}:member:${toBase64url(requireBytes(membershipId, 16))}`;
+  check(
+    san?.length === 1 && san[0].type === "url" && san[0].value === expectedSAN,
+    "MEMBERSHIP_MISMATCH",
+  );
+  const pub = await cert.publicKey.export(crypto);
+  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pub));
+  return raw;
+}
 export async function verifyDescriptor({
   descriptorBytes,
   signature,
@@ -765,49 +1001,11 @@ export async function verifyDescriptor({
     decode(d.recipient_public_key, 32);
     validateContentEnvelope(d.encrypted_content);
     await issuerKey(d);
-    const cert = new X509Certificate(decode(d.reviewer_certificate));
-    check(
-      cert.publicKey.algorithm.name === "Ed25519" &&
-        cert.signatureAlgorithm.name === "Ed25519",
-      "INVALID_CERTIFICATE",
-    );
-    check(
-      cert.issuer === config.ca.subject &&
-        cert.getExtension(BasicConstraintsExtension)?.ca === false,
-      "INVALID_CERTIFICATE",
-    );
-    check(
-      cert.getExtension(KeyUsagesExtension)?.usages === 1,
-      "INVALID_CERTIFICATE",
-    );
-    const allowedCritical = new Set(["2.5.29.19", "2.5.29.15", "2.5.29.17"]);
-    check(
-      cert.extensions.every((e) => !e.critical || allowedCritical.has(e.type)),
-      "INVALID_CERTIFICATE",
-    );
-    check(
-      new Set(cert.extensions.map((e) => e.type)).size ===
-        cert.extensions.length,
-      "INVALID_CERTIFICATE",
-    );
-    check(
-      (await config.ca.verify({ signatureOnly: true }, crypto)) &&
-        (await cert.verify(
-          { publicKey: config.ca.publicKey, signatureOnly: true },
-          crypto,
-        )),
-      "INVALID_CERTIFICATE",
-    );
-    const san = cert.getExtension(SubjectAlternativeNameExtension)?.names.items;
-    const expectedSAN = `urn:anonce:deployment:${d.deployment_id}:org:${d.org_id}:member:${d.reviewer_membership_id}`;
-    check(
-      san?.length === 1 &&
-        san[0].type === "url" &&
-        san[0].value === expectedSAN,
-      "MEMBERSHIP_MISMATCH",
-    );
-    const pub = await cert.publicKey.export(crypto);
-    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pub));
+    const raw = await verifyMembershipCertificate({
+      certificate: decode(d.reviewer_certificate),
+      orgId: decode(d.org_id, 16),
+      membershipId: decode(d.reviewer_membership_id, 16),
+    });
     check(
       ed25519.verify(
         requireBytes(signature, 64),

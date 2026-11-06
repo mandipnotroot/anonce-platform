@@ -35,6 +35,7 @@ func TestIntegrationMemberManagement(t *testing.T) {
 	}
 	duplicate := &testUser{id: protocol.ID(), pw: owner.pw, re: owner.re, member: owner.member}
 	p := registration{Request: protocol.ID(), Account: duplicate.id, Email: " " + strings.ToUpper(email) + " ", KDF: kdf{19, protocol.B64(protocol.Random(16)), 65536, 3, 1, 32}, Password: protocol.B64(owner.pw.Public().(ed25519.PublicKey)), RecoverySalt: protocol.B64(protocol.Random(32)), Recovery: protocol.B64(owner.re.Public().(ed25519.PublicKey)), Membership: protocol.B64(owner.member.Public().(ed25519.PublicKey)), PasswordWrap: fakeWrapper(), RecoveryWrap: fakeWrapper()}
+	bindRegistration(t, s, duplicate, &p)
 	v := result(t, request(h, "POST", "/api/member/register", signed(t, s, h, duplicate, "register", p, true), nil), 409)
 	if v["error"].(map[string]any)["code"] != "email_exists" {
 		t.Fatal(v)

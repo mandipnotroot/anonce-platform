@@ -37,11 +37,12 @@ export function decodeObject(value) {
 }
 
 export class APIError extends Error {
-  constructor(code, message, fields) {
+  constructor(code, message, fields, status) {
     super(message);
     this.name = "APIError";
     this.code = code;
     if (fields) this.fields = fields;
+    if (status !== undefined) this.status = status;
   }
 }
 
@@ -148,7 +149,7 @@ export async function request(
         ? "Service is temporarily unavailable. Try again shortly."
         : statusMessages[response.status] ||
           `The request failed (${response.status}). Try again.`);
-    throw new APIError(safeCode, message);
+    throw new APIError(safeCode, message, undefined, response.status);
   }
   return result;
 }

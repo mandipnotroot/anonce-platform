@@ -25,11 +25,12 @@ flowchart LR
 
 The browser encrypts review titles, descriptions, and complete questions before
 draft creation. Signed descriptors contain encrypted content, not plaintext
-questions. Respondents decrypt with an invitation-link secret in the URL
-fragment. Anyone holding that link can read the content, but still needs the
-existing membership and issuance authorization to respond. The separate X25519
-recipient private key stays in the creator's encrypted vault; the invitation
-key cannot decrypt answers. Anonymous transport remains separate from
+questions. Publication snapshots all approved memberships and encrypts the content
+key separately to each account's independent X25519 encryption key. Dashboard
+access unwraps only the caller's envelope; ordinary links contain no secret.
+Later approvals receive no historical envelopes. The separate X25519 answer
+recipient private key stays in the creator's encrypted vault; content keys
+cannot decrypt answers. Anonymous transport remains separate from
 authenticated issuance, not proof against traffic correlation.
 
 ## State and transactions
@@ -44,6 +45,9 @@ authenticated issuance, not proof against traffic correlation.
 | Recovery session    | Allows only vault reads/writes, credential reset, and logout.                                    |
 
 - Membership signing keys are separate from password/recovery authentication keys. The browser proves possession directly, without a CSR.
+- Account X25519 encryption keys are independent of membership signing keys. A
+  deployment/account-bound Ed25519 signature authenticates their binding. Private
+  keys remain inside browser-encrypted vault and device-cache state.
 - The server issues Ed25519 X.509 leaves from its Ed25519 CA: DigitalSignature only, CA=false, and bounded validity.
 - URI SAN: `urn:anonce:deployment:<deployment>:org:<org>:member:<membership>`.
 - Database roles, approval, and revocation remain authoritative. A certificate alone is not sufficient authorization.
@@ -78,10 +82,10 @@ Same-device automatic unlock trusts the origin; it does not protect against mali
 
 ## Privacy boundary
 
-Invitation fragments are not sent in HTTP requests. Sharing a link shares its
-content key; browser history, extensions, copied links, and malicious served
-code can expose it. There is no link revocation or content-key rotation in this
-version. Review content is not padded: ciphertext lengths remain visible.
+Review links contain no content keys. The server stores per-member encrypted key
+envelopes and can observe recipient/access metadata, not their plaintext keys.
+Revocation cannot erase previously obtained content or keys. This version has no
+content-key rotation. Review content is not padded: ciphertext lengths remain visible.
 Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions,
 and counts remain server-visible. Quotas and schedules remain plaintext because
 the server enforces them; they are no longer public descriptor fields.
@@ -93,6 +97,11 @@ against the server. Existing plaintext data or copied snapshots
 are not retroactively protected; this unreleased format has no upgrade migration.
 
 Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`. The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them. Logs, telemetry and errors must not recreate an identifying submission trail.
+
+Dashboard completion derives only from locally encrypted records with verified
+acceptance receipts. “No completion recorded here” does not mean no submission
+exists. Another browser or cleared local state may show no completion. There is
+no named completion API or join between issuance and submissions.
 
 Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage. Older retained objects remain exposed to that linkage. Response lengths, timing and other deployment metadata remain observable. Before decrypting a reviewer result, the browser verifies a receipt binding the encrypted envelope to its deployment, review, descriptor, and issuer. This detects unsigned ciphertext replacement; it does not establish complete database integrity. A database-write attacker can delete or replay accepted records, roll back history, or remove spend state and reuse stored bearer authorizations through the honest signing endpoint. Acceptance also trusts database-held issuer context. Protect database integrity and retain independently trusted receipt public keys.
 

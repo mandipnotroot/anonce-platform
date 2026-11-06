@@ -27,6 +27,7 @@ func (c encryptedContent) valid() bool {
 }
 
 type review struct {
+	Envelope                                    *contentKeyEnvelope
 	ID, Org, Account, Membership, Issuer, State string
 	Content                                     encryptedContent
 	Revision, Max, Issued, Accepted             int64
@@ -44,6 +45,10 @@ func scanReview(row pgx.Row) (*review, error) {
 func (v *review) view(account string) map[string]any {
 	creator := v.Account == account
 	result := map[string]any{"id": v.ID, "org_id": v.Org, "is_creator": creator, "encrypted_content": v.Content, "state": v.State, "issuer_public_key": protocol.B64(v.Public), "issuer_key_id": v.Issuer}
+	result["content_key_envelope"] = nil
+	if v.Envelope != nil {
+		result["content_key_envelope"] = v.Envelope
+	}
 	if creator {
 		result["revision"] = format(v.Revision)
 		result["max_responses"] = v.Max
@@ -58,6 +63,7 @@ func (s *Server) reviewRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/member/orgs/{org}/reviews", s.listReviews)
 	m.HandleFunc("POST /api/member/orgs/{org}/reviews", s.createReview)
 	m.HandleFunc("GET /api/member/reviews/{id}", s.getReview)
+	m.HandleFunc("GET /api/member/reviews/{id}/content-recipients", s.contentRecipients)
 	m.HandleFunc("PUT /api/member/reviews/{id}", s.updateReview)
 	m.HandleFunc("DELETE /api/member/reviews/{id}", s.deleteReview)
 	m.HandleFunc("POST /api/member/reviews/{id}/publish", s.publish)
@@ -90,7 +96,12 @@ func (s *Server) getReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	write(w, 200, v.view(a.Account))
+	view, e := s.reviewView(r, v, a.Account)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	write(w, 200, view)
 }
 func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 	a, e := s.session(r)
@@ -109,6 +120,7 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	items := []map[string]any{}
+	reviews := []*review{}
 	var next any
 	for rows.Next() {
 		v, e := scanReview(rows)
@@ -120,7 +132,21 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 			next = items[49]["id"]
 			break
 		}
+		reviews = append(reviews, v)
 		items = append(items, v.view(a.Account))
+	}
+	if e = rows.Err(); e != nil {
+		fail(w, e)
+		return
+	}
+	rows.Close()
+	for i, v := range reviews {
+		view, err := s.reviewView(r, v, a.Account)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		items[i] = view
 	}
 	write(w, 200, map[string]any{"items": items, "next": next})
 }
@@ -360,10 +386,11 @@ func decodeDescriptor(b []byte) (descriptor, error) {
 
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Request    string `json:"request_id"`
-		Expected   string `json:"expected_revision"`
-		Descriptor string `json:"descriptor"`
-		Signature  string `json:"descriptor_signature"`
+		Request    string               `json:"request_id"`
+		Expected   string               `json:"expected_revision"`
+		Descriptor string               `json:"descriptor"`
+		Signature  string               `json:"descriptor_signature"`
+		Envelopes  []contentKeyEnvelope `json:"content_key_envelopes"`
 	}
 	x, e := s.verify(r, "review-publish", &p, false)
 	if e != nil {
@@ -421,6 +448,14 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		fail(w, bad("descriptor_mismatch"))
 		return
 	}
+	if v.State != "draft" || v.Revision != rev {
+		fail(w, problem{409, "revision_conflict"})
+		return
+	}
+	if e = saveContentKeys(r, tx, v, p.Envelopes); e != nil {
+		fail(w, e)
+		return
+	}
 	tag, e := tx.Exec(r.Context(), "UPDATE member.reviews SET state='published',revision=revision+1,descriptor=$1,descriptor_signature=$2 WHERE id=$3 AND revision=$4 AND state='draft'", b, sig, v.ID, rev)
 	if e == nil && tag.RowsAffected() != 1 {
 		e = problem{409, "revision_conflict"}
@@ -429,6 +464,12 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		_, e = tx.Exec(r.Context(), "INSERT INTO anon.reviews(id,issuer_key_id,issuer_public,descriptor,descriptor_hash,descriptor_signature,state,opens_at,closes_at) VALUES($1,$2,$3,$4,$5,$6,'published',$7,$8)", v.ID, v.Issuer, v.Public, b, protocol.Hash(b), sig, v.Opens, v.Closes)
 	}
 	v.State, v.Revision, v.Descriptor, v.Signature = "published", rev+1, b, sig
+	for _, envelope := range p.Envelopes {
+		if envelope.Membership == v.Membership {
+			v.Envelope = &envelope
+			break
+		}
+	}
 	if e == nil {
 		e = cache(r, tx, x, p.Request, v.view(x.Session.Account))
 	}

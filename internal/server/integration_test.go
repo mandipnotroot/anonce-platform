@@ -77,6 +77,7 @@ func newUser(t *testing.T, s *Server, h http.Handler) *testUser {
 	_, mp, _ := ed25519.GenerateKey(rand.Reader)
 	u := &testUser{id: protocol.ID(), pw: pw, re: re, member: mp}
 	p := registration{Request: protocol.ID(), Account: u.id, Email: "user-" + u.id + "@example.test", KDF: kdf{19, protocol.B64(protocol.Random(16)), 65536, 3, 1, 32}, Password: protocol.B64(pw.Public().(ed25519.PublicKey)), RecoverySalt: protocol.B64(protocol.Random(32)), Recovery: protocol.B64(re.Public().(ed25519.PublicKey)), PasswordWrap: fakeWrapper(), RecoveryWrap: fakeWrapper(), Membership: protocol.B64(mp.Public().(ed25519.PublicKey)), Objects: []object{fakeObject()}}
+	bindRegistration(t, s, u, &p)
 	env := signed(t, s, h, u, "register", p, true)
 	result(t, request(h, "POST", "/api/member/register", env, nil), 201)
 	loginUser(t, s, h, u, "login-password")
@@ -169,6 +170,7 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	d := descriptor{V: 3, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Content: content, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string)}
 	desc, _ := json.Marshal(d)
 	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc)))}
+	publish["content_key_envelopes"] = testContentEnvelopes(t, h, u, id)
 	// A correctly signed descriptor cannot substitute a different encrypted envelope.
 	mismatch := d
 	mismatch.Content = fakeContent()

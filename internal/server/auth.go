@@ -285,17 +285,19 @@ func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
 }
 
 type registration struct {
-	Request      string   `json:"request_id"`
-	Account      string   `json:"account_id"`
-	Email        string   `json:"email"`
-	KDF          kdf      `json:"password_kdf"`
-	Password     string   `json:"password_auth_public_key"`
-	RecoverySalt string   `json:"recovery_salt"`
-	Recovery     string   `json:"recovery_auth_public_key"`
-	PasswordWrap wrapper  `json:"password_wrap"`
-	RecoveryWrap wrapper  `json:"recovery_wrap"`
-	Membership   string   `json:"membership_public_key"`
-	Objects      []object `json:"vault_objects"`
+	Request             string   `json:"request_id"`
+	Account             string   `json:"account_id"`
+	Email               string   `json:"email"`
+	KDF                 kdf      `json:"password_kdf"`
+	Password            string   `json:"password_auth_public_key"`
+	RecoverySalt        string   `json:"recovery_salt"`
+	Recovery            string   `json:"recovery_auth_public_key"`
+	PasswordWrap        wrapper  `json:"password_wrap"`
+	RecoveryWrap        wrapper  `json:"recovery_wrap"`
+	Membership          string   `json:"membership_public_key"`
+	Encryption          string   `json:"encryption_public_key"`
+	EncryptionSignature string   `json:"encryption_key_signature"`
+	Objects             []object `json:"vault_objects"`
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +316,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	pw, a := protocol.Decode(p.Password, 32)
 	re, b := protocol.Decode(p.Recovery, 32)
 	mp, c := protocol.Decode(p.Membership, 32)
+	ep, bindingErr := s.registrationEncryption(p, mp)
+	if bindingErr != nil {
+		fail(w, bindingErr)
+		return
+	}
 	_, d := protocol.Decode(p.RecoverySalt, 32)
 	_, f := protocol.Decode(p.Account, 16)
 	if a != nil || b != nil || c != nil || d != nil || f != nil || !p.KDF.valid() || !p.PasswordWrap.valid() || !p.RecoveryWrap.valid() || emailErr != nil || !checkSig(pw, x.Proof.Password, x.Transcript) || !checkSig(re, x.Proof.Recovery, x.Transcript) || !checkSig(mp, x.Proof.Membership, x.Transcript) {
@@ -336,7 +343,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	kd, _ := json.Marshal(p.KDF)
 	wraps, _ := json.Marshal(map[string]any{"password_wrap": p.PasswordWrap, "recovery_wrap": p.RecoveryWrap})
-	_, e = tx.Exec(r.Context(), "INSERT INTO member.accounts(id,email,password_public,recovery_public,membership_public,password_kdf,recovery_salt,vault) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", p.Account, p.Email, pw, re, mp, kd, p.RecoverySalt, wraps)
+	_, e = tx.Exec(r.Context(), "INSERT INTO member.accounts(id,email,password_public,recovery_public,membership_public,password_kdf,recovery_salt,vault,encryption_public,encryption_key_signature) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", p.Account, p.Email, pw, re, mp, kd, p.RecoverySalt, wraps, ep, mustDecode(p.EncryptionSignature))
 	if e == nil {
 		for _, o := range p.Objects {
 			if e = saveObject(r, tx, p.Account, vaultWrite{"0", o}); e != nil {
@@ -480,7 +487,8 @@ func (s *Server) vault(w http.ResponseWriter, r *http.Request) {
 	var wraps map[string]any
 	var kd json.RawMessage
 	var salt string
-	if e = s.member.QueryRow(r.Context(), "SELECT vault,password_kdf,recovery_salt FROM member.accounts WHERE id=$1", a.Account).Scan(&wraps, &kd, &salt); e != nil {
+	var encryption, binding []byte
+	if e = s.member.QueryRow(r.Context(), "SELECT vault,password_kdf,recovery_salt,encryption_public,encryption_key_signature FROM member.accounts WHERE id=$1", a.Account).Scan(&wraps, &kd, &salt, &encryption, &binding); e != nil {
 		fail(w, e)
 		return
 	}
@@ -500,6 +508,7 @@ func (s *Server) vault(w http.ResponseWriter, r *http.Request) {
 		objects = append(objects, o)
 	}
 	wraps["objects"], wraps["password_kdf"], wraps["recovery_salt"] = objects, kd, salt
+	wraps["encryption_public_key"], wraps["encryption_key_signature"] = protocol.B64(encryption), protocol.B64(binding)
 	write(w, 200, wraps)
 }
 func (s *Server) putObject(w http.ResponseWriter, r *http.Request) {
