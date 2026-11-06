@@ -38,6 +38,11 @@ No version has been released.
 
 ### Changed
 
+- Align organization-table selects with shared form controls, reuse theme-aware
+  success colors, and standardize recovery-word and icon-button shapes and sizes.
+- Extend mock browser screenshots to cover review creation and editing, response
+  submission, receipts, overview, and the account page at desktop and mobile sizes.
+- Remove redundant toolbar spacing declarations without changing toolbar layout.
 - Replace generic documentation diagrams with browser/deployment trust boundaries
   and the publication, member key-delivery, blind-authorization, anonymous
   submission, and creator-only decryption flow.

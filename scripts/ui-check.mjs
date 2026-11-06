@@ -104,7 +104,10 @@ try {
   page.on("request", (request) =>
     requestPayloads.push(`${request.url()} ${request.postData() || ""}`),
   );
-  const captures = async (name) => {
+  const captures = async (name, capturePage = page) => {
+    await capturePage
+      .locator("#toast-region button")
+      .evaluateAll((buttons) => buttons.forEach((button) => button.click()));
     for (const viewport of [
       { width: 1365, height: 900 },
       { width: 768, height: 1024 },
@@ -112,12 +115,12 @@ try {
       { width: 375, height: 812 },
       { width: 320, height: 720 },
     ]) {
-      await page.setViewportSize(viewport);
+      await capturePage.setViewportSize(viewport);
       for (const colorScheme of ["light", "dark"]) {
-        await page.emulateMedia({ colorScheme });
-        await page.evaluate(() => window.scrollTo(0, 0));
+        await capturePage.emulateMedia({ colorScheme });
+        await capturePage.evaluate(() => window.scrollTo(0, 0));
         assert.equal(
-          await page.evaluate(
+          await capturePage.evaluate(
             () =>
               Math.abs(
                 document.querySelector("main").getBoundingClientRect().left -
@@ -128,7 +131,7 @@ try {
           `${name} main offset suggests phantom sidebar at ${viewport.width}px`,
         );
         assert.equal(
-          await page.evaluate(() => {
+          await capturePage.evaluate(() => {
             const nav = document
               .querySelector(".site-header nav")
               .getBoundingClientRect();
@@ -143,7 +146,7 @@ try {
           `${name} navigation exceeds its responsive viewport at ${viewport.width}px`,
         );
         assert.equal(
-          await page.evaluate(
+          await capturePage.evaluate(
             () =>
               document.documentElement.scrollWidth <=
               document.documentElement.clientWidth,
@@ -152,7 +155,7 @@ try {
           `${name} overflow at ${viewport.width}px`,
         );
         assert.equal(
-          await page.evaluate(() =>
+          await capturePage.evaluate(() =>
             [...document.querySelectorAll(".button")].every(
               (button) =>
                 button.getAttribute("aria-label") || button.textContent.trim(),
@@ -162,7 +165,7 @@ try {
           `${name} button accessible name missing`,
         );
         assert.equal(
-          await page.evaluate(() =>
+          await capturePage.evaluate(() =>
             [...document.querySelectorAll(".button .icon")].every(
               (icon) => icon.complete && icon.naturalWidth > 0,
             ),
@@ -171,7 +174,7 @@ try {
           `${name} action icon failed to load`,
         );
         assert.equal(
-          await page.evaluate(() =>
+          await capturePage.evaluate(() =>
             [...document.querySelectorAll(".button")].every((button) =>
               button.querySelector(".icon"),
             ),
@@ -181,7 +184,7 @@ try {
         );
         if (name === "recovery")
           assert.equal(
-            await page.evaluate(() => {
+            await capturePage.evaluate(() => {
               const alert = document
                 .querySelector(".auth-card .alert")
                 .getBoundingClientRect();
@@ -194,7 +197,7 @@ try {
             `recovery warning touches word grid at ${viewport.width}px`,
           );
         if (name === "results") {
-          const contrast = await page.evaluate(() => {
+          const contrast = await capturePage.evaluate(() => {
             const luminance = (color) =>
               color
                 .match(/[\d.]+/g)
@@ -263,7 +266,7 @@ try {
             );
           }
         }
-        await page.screenshot({
+        await capturePage.screenshot({
           path: join(
             artifactDir,
             `anonce-${name}-${viewport.width}-${colorScheme}.png`,
@@ -466,6 +469,7 @@ try {
     1,
     "owner metrics return after switching back",
   );
+  await captures("overview");
 
   await page.evaluate(async () => {
     (await import("/app.js")).setMockRole("admin");
@@ -584,9 +588,11 @@ try {
     location.hash = "#/review/new/edit";
   });
   await page.getByRole("heading", { name: "Start a new review" }).waitFor();
+  await captures("review-create");
   await page.getByLabel("Review title").fill("New journey review");
   await page.getByRole("button", { name: "Create draft" }).click();
   await page.getByRole("heading", { name: "Draft review" }).waitFor();
+  await captures("review-edit");
   await page.getByRole("button", { name: "Add question" }).click();
   await page.locator('[name="qtext"]').last().fill("What would help?");
   await page.getByRole("button", { name: "Preview" }).click();
@@ -602,11 +608,13 @@ try {
     location.hash = "#/respond/review";
   });
   await page.getByRole("heading", { name: "Demo review" }).waitFor();
+  await captures("response-form");
   await page.getByLabel("What should change?").fill("Clearer guidance");
   await page.getByRole("button", { name: "Send response" }).click();
   await page
     .getByRole("heading", { name: "Response accepted", exact: true })
     .waitFor();
+  await captures("receipt");
   await page.getByText("Receipt signature verified", { exact: true }).waitFor();
   await page
     .getByRole("button", { name: "Download receipt PNG", exact: true })
@@ -800,6 +808,7 @@ try {
   await recoveryPage
     .getByRole("heading", { name: "Recovery phrase" })
     .waitFor();
+  await captures("account", recoveryPage);
   await recoveryPage
     .locator('input[name="currentPassword"]')
     .last()

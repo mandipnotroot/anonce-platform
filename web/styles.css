@@ -452,6 +452,7 @@ a {
 .field input,
 .field textarea,
 .field select,
+.table-wrap select,
 .answer-group textarea {
   width: 100%;
   min-width: 0;
@@ -493,7 +494,7 @@ textarea {
   margin-bottom: 14px;
 }
 .notice {
-  border-left-color: #337750;
+  border-left-color: var(--status-positive-line);
 }
 .receipt-notice {
   margin-top: 18px;
@@ -506,7 +507,7 @@ textarea {
 }
 .receipt-status {
   font-weight: 700;
-  color: var(--green, #337750);
+  color: var(--status-positive-ink);
 }
 .receipt-actions {
   display: flex;
@@ -708,7 +709,7 @@ textarea {
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   box-shadow: 0 2px 5px #172a3a0a;
 }
@@ -746,9 +747,6 @@ textarea {
     background: var(--blue);
     color: var(--button-ink);
   }
-}
-.toolbar {
-  gap: var(--space-3);
 }
 .inline {
   gap: var(--space-4);
@@ -936,9 +934,6 @@ textarea {
 .receipt-actions .button {
   flex: 1 1 180px;
 }
-.toolbar {
-  gap: var(--space-3);
-}
 .stat {
   min-width: 0;
   padding: var(--space-5);
@@ -983,10 +978,10 @@ textarea {
   gap: 12px;
 }
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
@@ -1224,7 +1219,7 @@ textarea {
 }
 .table-wrap select {
   max-width: 100%;
-  padding: 7px 28px 7px 9px;
+  padding: 8px 28px 8px 11px;
 }
 .site-footer {
   display: flex;
