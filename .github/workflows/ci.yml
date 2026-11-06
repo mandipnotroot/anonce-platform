@@ -74,12 +74,13 @@ jobs:
       ANON_DATABASE_URL: postgres://anonce_anon:ci-anonymous-only@db:5432/anonce?sslmode=disable
       ANONCE_DOMAIN: anonce.invalid
       ANONCE_SOURCE_URL: https://github.com/mandipnotroot/anonce-platform
-      ANONCE_SERVER_KEY_FILE: ${{ runner.temp }}/anonce-ci-server-key
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Create disposable dummy key file
         run: |
           umask 077
+          export ANONCE_SERVER_KEY_FILE="$RUNNER_TEMP/anonce-ci-server-key"
+          printf 'ANONCE_SERVER_KEY_FILE=%s\n' "$ANONCE_SERVER_KEY_FILE" >> "$GITHUB_ENV"
           printf '%s' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' > "$ANONCE_SERVER_KEY_FILE"
       - name: Validate base Compose configuration
         run: docker compose -f compose.yaml config --quiet

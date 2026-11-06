@@ -119,6 +119,8 @@ No version has been released.
 
 ### Fixed
 
+- Fix CI workflow validation by setting the disposable container-build key path
+  at step runtime instead of using the unavailable job-level `runner` context.
 - Enforce review creation roles on the server under the organization lock,
   including retries after demotion. Respondents retain response authorization
   access; existing creators retain access to their reviews.
