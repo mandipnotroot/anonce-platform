@@ -42,6 +42,10 @@ No version has been released.
 
 ### Changed
 
+- Reuse one fresh, lazy vault download within each review-list request for
+  creator-owned reviews instead of downloading the vault for every review.
+  Separate list loads and standalone key lookups still fetch independently;
+  no cross-page key or plaintext cache is added.
 - Show immediate, accessible loading feedback when opening Overview and fetch
   reviews and pending responses concurrently after loading organizations. Keep
   fresh data without adding a cache, and test delayed requests, failures, and

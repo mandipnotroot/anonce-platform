@@ -670,9 +670,12 @@ function canonical(value, length) {
 }
 const keyUnavailable = () =>
   new APIError("KEY_UNAVAILABLE", "The encrypted review keys are unavailable.");
-async function reviewKeys(reviewId) {
+async function reviewKeys(
+  reviewId,
+  getVault = () => request("/api/member/vault"),
+) {
   const s = active(),
-    vault = await request("/api/member/vault");
+    vault = await getVault();
   const object = (vault.vault_objects || vault.objects || []).find(
     (o) => o.id === reviewId,
   );
@@ -717,9 +720,9 @@ async function reviewKeys(reviewId) {
 function validateContent(content) {
   return C.validateReviewContent(content);
 }
-async function memberContentKey(r, p) {
+async function memberContentKey(r, p, getVault) {
   if (r.is_creator === true)
-    return (await reviewKeys(r.review_id || r.id)).contentKey;
+    return (await reviewKeys(r.review_id || r.id, getVault)).contentKey;
   const s = active();
   if (!r.content_key_envelope || !s.encryptionPrivateKey)
     throw keyUnavailable();
@@ -776,20 +779,20 @@ async function completedHere(reviewId) {
   }
   return false;
 }
-async function openedReview(r, contentKey) {
+async function openedReview(r, contentKey, getVault) {
   const reviewId = r.review_id || r.id;
   let view;
   try {
     if ((r.state || r.status) !== "draft") {
       const p = await publicDescriptor(reviewId);
-      contentKey ||= await memberContentKey(r, p);
+      contentKey ||= await memberContentKey(r, p, getVault);
       view = reviewView(
         { ...r, descriptor: p.descriptor },
         await C.openDescriptorContent({ descriptor: p.descriptor, contentKey }),
       );
     } else {
       if (r.is_creator !== true) throw keyUnavailable();
-      contentKey ||= (await reviewKeys(reviewId)).contentKey;
+      contentKey ||= (await reviewKeys(reviewId, getVault)).contentKey;
       view = reviewView(
         r,
         await C.openDraftContent({
@@ -841,8 +844,12 @@ export const listReviews = async ({ orgId, after }) => {
   const r = await request(
     `/api/member/orgs/${orgId}/reviews${after ? "?after=" + encodeURIComponent(after) : ""}`,
   );
+  let vaultRequest;
+  const getVault = () => (vaultRequest ||= request("/api/member/vault"));
   return {
-    items: await Promise.all((r.items || []).map((r) => openedReview(r))),
+    items: await Promise.all(
+      (r.items || []).map((r) => openedReview(r, undefined, getVault)),
+    ),
     next: r.next ?? null,
   };
 };

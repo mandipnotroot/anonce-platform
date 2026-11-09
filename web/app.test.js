@@ -1217,6 +1217,106 @@ test("missing and unreadable authoritative review keys fail closed", async () =>
     );
   }
 });
+test("creator lists share only one invocation-local authoritative vault read", async () => {
+  for (const states of [
+    ["draft", "draft"],
+    ["published", "published"],
+    ["draft", "published"],
+  ]) {
+    const items = states.map((state, i) => ({
+      id: Buffer.alloc(16, i + 1).toString("base64url"),
+      org_id: Buffer.alloc(16, 9).toString("base64url"),
+      state,
+      is_creator: true,
+    }));
+    let reads = 0;
+    let mode = "valid";
+    const pending = [];
+    const context = await service({
+      request: async (path) => {
+        if (path === "/api/member/vault") {
+          reads++;
+          if (mode === "rejected") throw Error("vault unavailable");
+          if (mode === "concurrent") {
+            const wait = deferred();
+            pending.push(wait);
+            await wait.promise;
+          }
+          return {
+            objects:
+              mode === "missing"
+                ? []
+                : items.map(({ id }) => ({ id, revision: "1" })),
+          };
+        }
+        if (path.startsWith("/api/public/"))
+          return { descriptor: "e30", descriptor_signature: "YQ" };
+        return { items, next: "next-page" };
+      },
+      C: {
+        verifyDescriptor: async () => ({}),
+        openVaultObject: async ({ object }) =>
+          new TextEncoder().encode(
+            JSON.stringify({
+              v: 1,
+              kind: "review-keys",
+              review_id: object.id,
+              content_key:
+                mode === "invalid"
+                  ? "YQ"
+                  : Buffer.alloc(32, 2).toString("base64url"),
+              recipient_private_key: Buffer.alloc(32, 3).toString("base64url"),
+            }),
+          ),
+        openDraftContent: async () => ({ title: "Opened", questions: [] }),
+        openDescriptorContent: async () => ({ title: "Opened", questions: [] }),
+      },
+    });
+    for (const nextMode of [
+      "valid",
+      "missing",
+      "invalid",
+      "rejected",
+      "valid",
+    ]) {
+      mode = nextMode;
+      const before = reads;
+      const result = await context.service.listReviews({ orgId: "org" });
+      assert.equal(reads - before, 1);
+      assert.equal(result.next, "next-page");
+      for (const item of result.items) {
+        if (mode === "valid") assert.equal(item.title, "Opened");
+        else assert.equal(item.contentState, "locked");
+      }
+    }
+    mode = "concurrent";
+    const before = reads;
+    const first = context.service.listReviews({ orgId: "org" });
+    const second = context.service.listReviews({ orgId: "org" });
+    // Let both independent list requests reach their pending vault request.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(reads - before, 2);
+    for (const wait of pending) wait.resolve();
+    await Promise.all([first, second]);
+    mode = "valid";
+    const standaloneBefore = reads;
+    await context.service.reviewKeys(items[0].id);
+    await context.service.reviewKeys(items[0].id);
+    assert.equal(reads - standaloneBefore, 2);
+  }
+});
+
+test("empty review lists never read the vault", async () => {
+  const context = await service({
+    request: async (path) => {
+      assert.equal(path, "/api/member/orgs/org/reviews");
+      return { items: [] };
+    },
+  });
+  const result = await context.service.listReviews({ orgId: "org" });
+  assert.equal(result.items.length, 0);
+});
+
 test("noncreator review list stays locked without vault reads or private metadata", async () => {
   const review = {
     id: "review",
