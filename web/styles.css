@@ -1053,6 +1053,7 @@ textarea {
   padding: 8px 12px;
   color: var(--ink);
   font-weight: 570;
+  white-space: nowrap;
 }
 .nav a.active,
 .nav a:hover {
@@ -1061,6 +1062,9 @@ textarea {
 }
 .nav-label span + span::before {
   content: " ";
+}
+.nav-label {
+  white-space: nowrap;
 }
 .nav-item {
   display: flex;

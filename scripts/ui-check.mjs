@@ -118,6 +118,7 @@ try {
       await capturePage.setViewportSize(viewport);
       for (const colorScheme of ["light", "dark"]) {
         await capturePage.emulateMedia({ colorScheme });
+        await capturePage.waitForTimeout(200);
         await capturePage.evaluate(() => window.scrollTo(0, 0));
         assert.equal(
           await capturePage.evaluate(
@@ -181,6 +182,73 @@ try {
           ),
           true,
           `${name} action button icon missing`,
+        );
+        const buttonContrast = await capturePage.evaluate(() => {
+          const luminance = (color) =>
+            color
+              .match(/[\d.]+/g)
+              .slice(0, 3)
+              .map((value) => Number(value) / 255)
+              .map((value) =>
+                value <= 0.04045
+                  ? value / 12.92
+                  : ((value + 0.055) / 1.055) ** 2.4,
+              )
+              .reduce(
+                (sum, value, index) =>
+                  sum + value * [0.2126, 0.7152, 0.0722][index],
+                0,
+              );
+          return [...document.querySelectorAll(".button")]
+            .filter((button) => button.checkVisibility())
+            .map((button) => {
+              const style = getComputedStyle(button);
+              const colors = [style.color, style.backgroundColor]
+                .map(luminance)
+                .sort((a, b) => b - a);
+              return {
+                label:
+                  button.getAttribute("aria-label") ||
+                  button.textContent.trim(),
+                contrast: (colors[0] + 0.05) / (colors[1] + 0.05),
+                foreground: style.color,
+                background: style.backgroundColor,
+              };
+            });
+        });
+        for (const {
+          label,
+          contrast,
+          foreground,
+          background,
+        } of buttonContrast)
+          assert.ok(
+            contrast >= 4.5,
+            `${name} button “${label}” contrast ${contrast.toFixed(2)} below 4.5:1 at ${viewport.width}px (${colorScheme}); ${foreground} on ${background}`,
+          );
+        assert.equal(
+          await capturePage.evaluate(() => {
+            const root = getComputedStyle(document.documentElement);
+            const expected = (token) => {
+              const probe = document.createElement("span");
+              probe.style.backgroundColor = root.getPropertyValue(token).trim();
+              document.body.appendChild(probe);
+              const color = getComputedStyle(probe).backgroundColor;
+              probe.remove();
+              return color;
+            };
+            return [
+              ...document.querySelectorAll(".button.secondary, .button.ghost"),
+            ]
+              .filter((button) => button.checkVisibility())
+              .every(
+                (button) =>
+                  getComputedStyle(button).backgroundColor ===
+                  expected(button.disabled ? "--soft" : "--button-secondary"),
+              );
+          }),
+          true,
+          `${name} secondary button fill does not match its enabled/disabled state at ${viewport.width}px (${colorScheme})`,
         );
         if (name === "recovery")
           assert.equal(
@@ -301,6 +369,13 @@ try {
     (await page.locator(".recovery-actions .icon").count()) >= 2,
     "recovery action icons missing",
   );
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const expectedPhrase =
+    "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+  await verifyRecoveryTools(page, expectedPhrase);
+  await page.locator("#saved").check();
+  await page.getByRole("button", { name: "Continue to Anonce" }).click();
+  await page.getByRole("heading", { name: "Overview" }).waitFor();
   const errorContext = await browser.newContext();
   const errorPage = await errorContext.newPage();
   await errorPage.goto(`http://127.0.0.1:${port}/index.html#/login`);
@@ -356,10 +431,6 @@ try {
     );
   }
 
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  const expectedPhrase =
-    "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
-  await verifyRecoveryTools(page, expectedPhrase);
   assert.ok(
     requestPayloads.every(
       (payload) => !payload.includes("alpha bravo charlie"),
@@ -517,11 +588,21 @@ try {
     "admins cannot add other admins",
   );
   let revokePrompt = "";
+  const revokeButton = page.locator('[data-revoke="reviewer"]');
+  page.once("dialog", async (dialog) => {
+    await dialog.dismiss();
+  });
+  await revokeButton.click();
+  assert.equal(
+    await revokeButton.evaluate((button) => button === document.activeElement),
+    true,
+    "cancelled native confirmation did not restore focus",
+  );
   page.once("dialog", async (dialog) => {
     revokePrompt = dialog.message();
     await dialog.accept();
   });
-  await page.locator('[data-revoke="reviewer"]').click();
+  await revokeButton.click();
   await page
     .locator("#toast-region")
     .getByText("Membership revoked.")
@@ -614,15 +695,48 @@ try {
   await page
     .getByRole("heading", { name: "Response accepted", exact: true })
     .waitFor();
+  assert.equal(
+    await page
+      .getByText("Acceptance time unavailable", { exact: true })
+      .count(),
+    1,
+    "missing acceptance time should appear once without duplicated copy",
+  );
+  assert.equal(
+    await page
+      .getByText("Accepted Acceptance time unavailable", { exact: true })
+      .count(),
+    0,
+    "missing acceptance time should not duplicate Accepted label",
+  );
   await captures("receipt");
   await page.getByText("Receipt signature verified", { exact: true }).waitFor();
   await page
     .getByRole("button", { name: "Download receipt PNG", exact: true })
     .waitFor();
   await page.getByText("Technical details (JSON)", { exact: true }).click();
-  await page
-    .getByRole("button", { name: "Copy receipt data", exact: true })
-    .waitFor();
+  const copyReceiptButton = page.getByRole("button", {
+    name: "Copy receipt data",
+    exact: true,
+  });
+  await copyReceiptButton.waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await copyReceiptButton.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const nav = document
+        .querySelector(".site-header .nav")
+        .getBoundingClientRect();
+      return (
+        button === document.activeElement &&
+        (rect.bottom <= nav.top || rect.top >= nav.bottom)
+      );
+    }),
+    true,
+    "keyboard-focused receipt action is obscured by fixed mobile navigation",
+  );
   assert.match(
     await page.locator(".receipt-data").textContent(),
     /mock-signed-receipt/,

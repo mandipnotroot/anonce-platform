@@ -211,6 +211,12 @@ try {
           );
         }
       } else {
+        if (width > 900)
+          assert.equal(
+            new Set(result.linkHeights).size,
+            1,
+            `uneven desktop navigation tiles at ${width}px (${colorScheme})`,
+          );
         assert.equal(
           await page
             .locator(".site-header")
@@ -284,6 +290,26 @@ try {
         });
     }
   }
+  await page.setViewportSize({ width: 320, height: 256 });
+  const shortViewport = await page.evaluate(() => ({
+    width: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+    navTargets: [...document.querySelectorAll(".nav a")].map((link) => {
+      const { width, height } = link.getBoundingClientRect();
+      return { width, height };
+    }),
+  }));
+  assert.equal(
+    shortViewport.width,
+    shortViewport.viewport,
+    "horizontal overflow at 320×256 reflow viewport",
+  );
+  assert.ok(
+    shortViewport.navTargets.every(
+      ({ width, height }) => width >= 24 && height >= 24,
+    ),
+    "navigation target below 24×24 CSS pixels at short viewport",
+  );
 } finally {
   await browser.close();
 }

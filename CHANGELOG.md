@@ -42,6 +42,11 @@ No version has been released.
 
 ### Changed
 
+- Keep desktop navigation labels on one line for consistent tile heights. Extend
+  mock browser checks for navigation sizing, short-viewport overflow, and focus
+  after canceling membership revocation, button contrast, and mobile receipt
+  action visibility. Complete recovery confirmation before navigating to later
+  test flows, and remove duplicated receipt text when acceptance time is unavailable.
 - Gate proxy startup on application readiness, allow 30 seconds for Compose
   shutdown, and force HTTP connections closed if the 15-second drain fails.
 - Align organization-table selects with shared form controls, reuse theme-aware

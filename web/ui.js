@@ -168,7 +168,11 @@ async function copyText(value, label = "Text") {
 function receiptHTML(receipt) {
   const text = JSON.stringify(receipt, null, 2);
   const acceptedAt = formatReceiptTime(receipt?.accepted_at);
-  return `<section class="notice receipt-notice" aria-labelledby="receipt-heading"><h2 id="receipt-heading">Response accepted</h2><p class="receipt-status" role="status">Receipt signature verified</p><p>Accepted <time>${esc(acceptedAt)}</time></p><p>Keep a copy of this receipt. It confirms acceptance, not what your response said.</p><div class="receipt-actions"><button type="button" class="button" data-receipt-download>Download receipt PNG</button><a class="button ghost" href="#/verify-receipt">Verify a receipt</a></div><details class="receipt-details"><summary>Technical details (JSON)</summary><button type="button" class="button secondary" data-receipt-copy>Copy receipt data</button><pre class="receipt-data">${esc(text)}</pre></details></section>`;
+  const acceptedTime =
+    acceptedAt === "Acceptance time unavailable"
+      ? esc(acceptedAt)
+      : `Accepted <time>${esc(acceptedAt)}</time>`;
+  return `<section class="notice receipt-notice" aria-labelledby="receipt-heading"><h2 id="receipt-heading">Response accepted</h2><p class="receipt-status" role="status">Receipt signature verified</p><p>${acceptedTime}</p><p>Keep a copy of this receipt. It confirms acceptance, not what your response said.</p><div class="receipt-actions"><button type="button" class="button" data-receipt-download>Download receipt PNG</button><a class="button ghost" href="#/verify-receipt">Verify a receipt</a></div><details class="receipt-details"><summary>Technical details (JSON)</summary><button type="button" class="button secondary" data-receipt-copy>Copy receipt data</button><pre class="receipt-data">${esc(text)}</pre></details></section>`;
 }
 function bindReceiptTools(box, receipt) {
   const text = JSON.stringify(receipt, null, 2);
