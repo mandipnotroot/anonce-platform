@@ -45,12 +45,21 @@ let active = sessionStorage.getItem("mock-session") ? JSON.parse(sessionStorage.
 const setActive=value=>{active=value;if(value)sessionStorage.setItem("mock-session",JSON.stringify(value));else sessionStorage.removeItem("mock-session")};
 let statusCalls=0,statusHold=null,statusResolve=null,statusListeners=[];
 let mockRole = "owner";
+let reviewHold=null,reviewResolve=null,pendingHold=null,pendingResolve=null,reviewStarted=0,pendingStarted=0;
+let failPending=false;
+let failReviews=false;
+export const holdOverview=()=>{reviewHold=new Promise(resolve=>reviewResolve=resolve);pendingHold=new Promise(resolve=>pendingResolve=resolve);reviewStarted=0;pendingStarted=0};
+export const overviewCalls=()=>({reviewStarted,pendingStarted});
+export const failPendingResponses=value=>failPending=value;
+export const failReviewRequests=value=>failReviews=value;
+export const releaseOverview=()=>{reviewResolve?.({items:[{id:"delayed-review",title:"Delayed review",status:"published",is_creator:true,contentState:"ok"}],next:null});pendingResolve?.({items:[]});reviewHold=null;pendingHold=null;reviewResolve=null;pendingResolve=null};
 export const addedMembers=[];
 export const memberCalls=[];
 const organizationRole=id=>id==="respondent-org"?"respondent":id==="reviewer-org"?"reviewer":mockRole;
 const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"];
 export const getSourceURL=()=>"https://example.invalid/source";
 export const getSession=async()=>active;
+export const invalidateSession=()=>setActive(null);
 export const getSessionStatus=async()=>{statusCalls++;statusListeners.splice(0).forEach(resolve=>resolve());return statusHold?await statusHold:active};
 export const resetSessionStatus=()=>{statusCalls=0};
 export const waitForSessionStatus=()=>statusCalls?Promise.resolve():new Promise(resolve=>statusListeners.push(resolve));
@@ -69,8 +78,8 @@ export const addMember=async({email,role})=>addedMembers.push({email,role});
 export const approveMember=async()=>{};
 export const revokeMember=async()=>{};
 export const changeMemberRole=async()=>{};
-export const listReviews=async()=>({items:[],next:null});
-export const listPendingResponses=async()=>({items:[]});
+export const listReviews=async()=>{reviewStarted++;if(failReviews)throw new Error("Reviews unavailable");return reviewHold?await reviewHold:{items:[],next:null}};
+export const listPendingResponses=async()=>{pendingStarted++;if(failPending)throw new Error("Pending responses unavailable");return pendingHold?await pendingHold:{items:[]}};
 export const createReview=async()=>({id:"new-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",is_creator:true,revision:1,questions:[]});
 export const updateReview=async()=>({});
 export const publishReview=async()=>({});
@@ -384,6 +393,114 @@ try {
   await verifyRecoveryTools(page, expectedPhrase);
   await page.locator("#saved").check();
   await page.getByRole("button", { name: "Continue to Anonce" }).click();
+  await page.getByRole("heading", { name: "Overview" }).waitFor();
+  await page.evaluate(() => {
+    location.hash = "#/orgs";
+  });
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(async () => (await import("/app.js")).holdOverview());
+  await page.evaluate(() => {
+    location.hash = "#/";
+  });
+  await page.getByRole("status").getByText("Loading your overview…").waitFor();
+  await page.waitForFunction(async () => {
+    const calls = (await import("/app.js")).overviewCalls();
+    return calls.reviewStarted === 1 && calls.pendingStarted === 1;
+  });
+  assert.equal(
+    await page.locator(".overview-loading[aria-busy=true]").count(),
+    1,
+    "overview loading feedback appears before requests finish",
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(
+    await page
+      .locator(".loading-indicator")
+      .evaluate((node) => getComputedStyle(node).animationName),
+    "none",
+    "loading animation respects reduced-motion preference",
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.evaluate(() => {
+    location.hash = "#/account";
+  });
+  await page.getByRole("heading", { name: "Account & recovery" }).waitFor();
+  await page.evaluate(async () => (await import("/app.js")).releaseOverview());
+  await page.waitForTimeout(30);
+  assert.equal(
+    await page.getByText("Delayed review", { exact: true }).count(),
+    0,
+    "late overview response must not replace newer route",
+  );
+  await page.evaluate(async () =>
+    (await import("/app.js")).failPendingResponses(true),
+  );
+  await page.evaluate(() => {
+    location.hash = "#/";
+  });
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  await page
+    .locator("#toast-region")
+    .getByText("Pending responses unavailable")
+    .waitFor();
+  await page.evaluate(async () =>
+    (await import("/app.js")).failPendingResponses(false),
+  );
+  await page.evaluate(async () =>
+    (await import("/app.js")).failReviewRequests(true),
+  );
+  await page.evaluate(() => {
+    location.hash = "#/orgs";
+  });
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(() => {
+    location.hash = "#/";
+  });
+  await page
+    .getByText("We couldn’t load reviews. Try again shortly.")
+    .waitFor();
+  assert.equal(
+    await page.locator(".overview-loading[aria-busy=true]").count(),
+    0,
+    "review failure clears loading feedback",
+  );
+  await page
+    .locator("#toast-region")
+    .getByText("Reviews unavailable")
+    .waitFor();
+  await page.evaluate(async () =>
+    (await import("/app.js")).failReviewRequests(false),
+  );
+  await page.evaluate(() => {
+    location.hash = "#/orgs";
+  });
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(async () => (await import("/app.js")).holdOverview());
+  await page.evaluate(() => {
+    location.hash = "#/";
+  });
+  await page.getByRole("status").getByText("Loading your overview…").waitFor();
+  await page.waitForFunction(async () => {
+    const calls = (await import("/app.js")).overviewCalls();
+    return calls.reviewStarted === 1 && calls.pendingStarted === 1;
+  });
+  await page.evaluate(async () =>
+    (await import("/app.js")).invalidateSession(),
+  );
+  await page.evaluate(() => {
+    location.hash = "#/account";
+  });
+  await page.getByRole("heading", { name: "Welcome back" }).waitFor();
+  await page.evaluate(async () => (await import("/app.js")).releaseOverview());
+  await page.waitForTimeout(30);
+  assert.equal(
+    await page.getByText("Delayed review", { exact: true }).count(),
+    0,
+    "late overview response must not render after session invalidation",
+  );
+  await page.locator("#email").fill("demo@example.net");
+  await page.locator("#password").fill("correct horse battery staple");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Overview" }).waitFor();
   await page.getByRole("link", { name: "Verify receipt", exact: true }).click();
   await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();

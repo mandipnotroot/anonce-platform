@@ -430,6 +430,27 @@ a {
   text-align: left;
   color: var(--muted);
 }
+.overview-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 88px;
+  margin-top: 24px;
+}
+.loading-indicator {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: overview-spin 800ms linear infinite;
+}
+@keyframes overview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .empty strong {
   display: block;
   margin-bottom: 5px;
@@ -1304,7 +1325,8 @@ textarea {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast {
+  .toast,
+  .loading-indicator {
     animation: none;
   }
 }

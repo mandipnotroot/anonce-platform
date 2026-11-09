@@ -428,6 +428,12 @@ async function load() {
     );
     return;
   }
+  if (!route[0]) {
+    frame(
+      `${head("Overview", "Review activity and manage responses.")}<section class="card empty overview-loading" role="status" aria-live="polite" aria-busy="true"><span class="loading-indicator" aria-hidden="true"></span><span>Loading your overview…</span></section>`,
+      "Overview",
+    );
+  }
   if (!isWorkspaceRouteAllowed(session, route[0])) {
     frame(
       emptyCard(
@@ -496,28 +502,29 @@ async function load() {
     return;
   }
   const orgId = currentOrg.id;
-  try {
-    const result = await api.listReviews({ orgId });
-    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
-    reviews = result.items;
-    reviewNext = result.next;
-    try {
-      pendingResponses = (await api.listPendingResponses()).items;
-    } catch (e) {
-      if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
-      pendingResponses = null;
-      toast(say(e));
-    }
-    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
-    renderHome();
-  } catch (e) {
-    if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
+  const [reviewResult, pendingResult] = await Promise.allSettled([
+    api.listReviews({ orgId }),
+    api.listPendingResponses(),
+  ]);
+  if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
+  if (reviewResult.status === "rejected") {
     frame(
       `${head("Reviews unavailable", "We couldn’t load reviews. Try again shortly.")}`,
       "Overview",
     );
-    toast(say(e));
+    toast(say(reviewResult.reason));
+    return;
   }
+  reviews = reviewResult.value.items;
+  reviewNext = reviewResult.value.next;
+  if (pendingResult.status === "fulfilled") {
+    pendingResponses = pendingResult.value.items;
+  } else {
+    pendingResponses = null;
+    toast(say(pendingResult.reason));
+  }
+  if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
+  renderHome();
 }
 async function renderReceiptVerifier() {
   let currentTrust = "";

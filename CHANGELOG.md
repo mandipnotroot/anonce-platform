@@ -42,6 +42,10 @@ No version has been released.
 
 ### Changed
 
+- Show immediate, accessible loading feedback when opening Overview and fetch
+  reviews and pending responses concurrently after loading organizations. Keep
+  fresh data without adding a cache, and test delayed requests, failures, and
+  navigation away before requests finish.
 - Show receipt-verification navigation according to the current session, including
   direct visits and refreshes, without loading the account vault or crypto state.
 - Keep desktop navigation labels on one line for consistent tile heights. Extend
