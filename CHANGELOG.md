@@ -42,6 +42,8 @@ No version has been released.
 
 ### Changed
 
+- Show receipt-verification navigation according to the current session, including
+  direct visits and refreshes, without loading the account vault or crypto state.
 - Keep desktop navigation labels on one line for consistent tile heights. Extend
   mock browser checks for navigation sizing, short-viewport overflow, and focus
   after canceling membership revocation, button contrast, and mobile receipt

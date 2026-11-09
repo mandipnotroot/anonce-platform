@@ -446,6 +446,19 @@ export async function getSession() {
   }
   return null;
 }
+export async function getSessionStatus() {
+  try {
+    const session = await request("/api/member/me");
+    return {
+      account_id: session.account_id,
+      scope: session.scope,
+      email: session.email,
+    };
+  } catch (error) {
+    if (error.code?.toLowerCase() === "unauthenticated") return null;
+    throw error;
+  }
+}
 export async function login({ email, password }) {
   const expectedGeneration = ++generation;
   await initialize();

@@ -393,7 +393,12 @@ async function load() {
   )
     returnRoute = hashParams.get("next");
   if (route[0] === "verify-receipt") {
-    session = null;
+    try {
+      session = await api.getSessionStatus();
+    } catch {
+      session = null;
+    }
+    if (!isCurrentLoad()) return;
     return await renderReceiptVerifier();
   }
   try {

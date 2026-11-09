@@ -41,7 +41,9 @@ const server = createServer(async (request, response) => {
 });
 
 const mockModule = `
-let active = null;
+let active = sessionStorage.getItem("mock-session") ? JSON.parse(sessionStorage.getItem("mock-session")) : null;
+const setActive=value=>{active=value;if(value)sessionStorage.setItem("mock-session",JSON.stringify(value));else sessionStorage.removeItem("mock-session")};
+let statusCalls=0,statusHold=null,statusResolve=null,statusListeners=[];
 let mockRole = "owner";
 export const addedMembers=[];
 export const memberCalls=[];
@@ -49,9 +51,16 @@ const organizationRole=id=>id==="respondent-org"?"respondent":id==="reviewer-org
 const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"];
 export const getSourceURL=()=>"https://example.invalid/source";
 export const getSession=async()=>active;
-export const register=async({email})=>{active={account_id:"acct",email,scope:"full"};return {recoveryWords:phrase,session:active};};
-export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");active={account_id:"acct",email,scope:"full"};return active;};
-export const recover=async({email})=>{active={account_id:"acct",email,scope:"full"};return {recoveryWords:phrase,session:active};};
+export const getSessionStatus=async()=>{statusCalls++;statusListeners.splice(0).forEach(resolve=>resolve());return statusHold?await statusHold:active};
+export const resetSessionStatus=()=>{statusCalls=0};
+export const waitForSessionStatus=()=>statusCalls?Promise.resolve():new Promise(resolve=>statusListeners.push(resolve));
+export const holdSessionStatus=()=>{statusHold=new Promise(resolve=>statusResolve=resolve)};
+export const releaseSessionStatus=()=>{statusResolve?.(active);statusHold=null;statusResolve=null};
+export const setMockScope=scope=>setActive({...active,scope});
+export const loadReceiptTrust=async()=>({keys:[]});
+export const register=async({email})=>{setActive({account_id:"acct",email,scope:"full"});return {recoveryWords:phrase,session:active};};
+export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");setActive({account_id:"acct",email,scope:"full"});return active;};
+export const recover=async({email})=>{setActive({account_id:"acct",email,scope:"full"});return {recoveryWords:phrase,session:active};};
 export const rotateRecovery=async()=>({recoveryWords:phrase,session:active});
 export const setMockRole=role=>mockRole=role;
 export const listOrganizations=async()=>({items:[{id:"org",name:"Demo workspace",role:mockRole,status:"approved"},{id:"other",name:"Other workspace",role:mockRole,status:"approved"},{id:"respondent-org",name:"Respondent workspace",role:"respondent",status:"approved"},{id:"reviewer-org",name:"Reviewer workspace",role:"reviewer",status:"approved"},{id:"pending-org",name:"Pending workspace",role:"owner",status:"pending"},{id:"revoked-org",name:"Revoked workspace",role:"owner",status:"revoked"}]});
@@ -375,6 +384,92 @@ try {
   await verifyRecoveryTools(page, expectedPhrase);
   await page.locator("#saved").check();
   await page.getByRole("button", { name: "Continue to Anonce" }).click();
+  await page.getByRole("heading", { name: "Overview" }).waitFor();
+  await page.getByRole("link", { name: "Verify receipt", exact: true }).click();
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  for (const name of ["Overview", "Organizations", "Account and recovery"])
+    await page.getByRole("link", { name, exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Verify receipt", exact: true })
+      .getAttribute("aria-current"),
+    "page",
+  );
+  await page.reload();
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  await page.getByRole("link", { name: "Overview", exact: true }).waitFor();
+  await page.evaluate(async () => {
+    const app = await import("/app.js");
+    app.setMockScope("recovery");
+    location.hash = "#/account";
+  });
+  await page.getByRole("heading", { name: "Account & recovery" }).waitFor();
+  await page.getByRole("link", { name: "Verify receipt", exact: true }).click();
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Overview", exact: true }).count(),
+    0,
+    "recovery-scoped verifier exposes Overview",
+  );
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Organizations", exact: true })
+      .count(),
+    0,
+    "recovery-scoped verifier exposes Organizations",
+  );
+  await page.getByRole("link", { name: "Account and recovery" }).waitFor();
+  await page.evaluate(async () => {
+    const app = await import("/app.js");
+    app.setMockScope("full");
+    location.hash = "#/orgs";
+  });
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(async () => {
+    const app = await import("/app.js");
+    app.resetSessionStatus();
+    app.holdSessionStatus();
+    const started = app.waitForSessionStatus();
+    location.hash = "#/verify-receipt";
+    await started;
+  });
+  await page.evaluate(() => {
+    location.hash = "#/orgs";
+  });
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(async () => {
+    (await import("/app.js")).releaseSessionStatus();
+  });
+  await page.waitForTimeout(50);
+  await page.getByRole("heading", { name: "Organizations" }).waitFor();
+  await page.evaluate(() => {
+    location.hash = "#/verify-receipt";
+  });
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  await page.evaluate(() => {
+    sessionStorage.removeItem("mock-session");
+    location.reload();
+  });
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  await page
+    .getByRole("link", { name: "Account and recovery", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Overview", exact: true }).count(),
+    0,
+    "signed-out verifier exposes signed-in navigation",
+  );
+  await page.goto(`http://127.0.0.1:${port}/index.html#/verify-receipt`);
+  await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Overview", exact: true }).count(),
+    0,
+    "direct signed-out verifier exposes signed-in navigation",
+  );
+  await page.goto(`http://127.0.0.1:${port}/index.html#/login`);
+  await page.locator("#email").fill("demo@example.net");
+  await page.locator("#password").fill("correct horse battery staple");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Overview" }).waitFor();
   const errorContext = await browser.newContext();
   const errorPage = await errorContext.newPage();

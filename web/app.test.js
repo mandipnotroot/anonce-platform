@@ -81,7 +81,7 @@ async function authService(overrides = {}) {
   vm.runInContext(
     `initialize=async()=>({});
     cacheState=async()=>{};
-    globalThis.auth={getSession,login,recover,logout,sessionStart,loginAfterCredentialChange};
+    globalThis.auth={getSession,getSessionStatus,login,recover,logout,sessionStart,loginAfterCredentialChange};
     globalThis.inspect=()=>({state,generation});`,
     context,
   );
@@ -112,6 +112,60 @@ test("stale session lookup cannot restore CSRF after logout", async () => {
   assert.equal(await pending, null);
   assert.equal(context.inspect().state, undefined);
   assert.equal(csrf, undefined);
+});
+
+test("session status checks identity without initializing vault state", async () => {
+  const paths = [];
+  const context = await authService({
+    request: async (path) => {
+      paths.push(path);
+      return {
+        account_id: "YQ",
+        scope: "full",
+        email: "member@example.net",
+        csrf_token: "never returned to UI",
+        memberships: [{ id: "org" }],
+      };
+    },
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await context.auth.getSessionStatus())),
+    {
+      account_id: "YQ",
+      scope: "full",
+      email: "member@example.net",
+    },
+  );
+  assert.deepEqual(paths, ["/api/member/me"]);
+});
+
+test("session status maps unauthenticated responses to signed out", async () => {
+  const paths = [];
+  const context = await authService({
+    request: async (path) => {
+      paths.push(path);
+      throw Object.assign(new Error("signed out"), {
+        code: "UNAUTHENTICATED",
+      });
+    },
+  });
+  assert.equal(await context.auth.getSessionStatus(), null);
+  assert.deepEqual(paths, ["/api/member/me"]);
+});
+
+test("session status propagates non-authentication failures", async () => {
+  const failure = Object.assign(new Error("network unavailable"), {
+    code: "NETWORK_ERROR",
+  });
+  const context = await authService({
+    request: async () => {
+      throw failure;
+    },
+  });
+  await assert.rejects(
+    context.auth.getSessionStatus(),
+    (error) => error === failure,
+  );
 });
 
 test("delayed logout keeps newer login state and CSRF", async () => {

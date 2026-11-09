@@ -710,12 +710,13 @@ test("receipt verifier uses local API only and enforces UTF-8 byte bounds", asyn
   assert.equal(calls.length, 1);
   assert.match(
     source,
-    /route\[0\] === "verify-receipt"\) \{\s*session = null;\s*return await renderReceiptVerifier\(\);/,
+    /route\[0\] === "verify-receipt"\) \{\s*try \{\s*session = await api\.getSessionStatus\(\);/,
   );
   assert.ok(
     source.indexOf('if (route[0] === "verify-receipt")') <
       source.indexOf("const result = await api.getSession()"),
   );
+  assert.match(source, /api\.getSessionStatus\(\)/);
   assert.match(source, /verifyReceiptLocally\(inputText, selectedTrust\)/);
   assert.match(source, /verifySavedReceipt/);
   assert.match(source, /href="#\/verify-receipt"/);
