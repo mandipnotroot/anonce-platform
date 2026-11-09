@@ -1073,23 +1073,6 @@ test("unavailable site trust leaves independent configuration editable and prese
   );
 });
 
-test("receipt times never render invalid dates for out-of-range values", () => {
-  const helper = source.slice(
-    source.indexOf("function formatReceiptTime("),
-    source.indexOf("async function verifyReceiptLocally("),
-  );
-  const format = vm.runInNewContext(`${helper}; formatReceiptTime`, {
-    BigInt,
-    Date,
-  });
-  assert.equal(
-    format("18446744073709551615"),
-    "Unix time 18446744073709551615 (outside display range)",
-  );
-  assert.equal(format("not-a-time"), "Acceptance time unavailable");
-  assert.doesNotMatch(format("18446744073709551615"), /Invalid Date/);
-});
-
 test("stale receipt file reads cannot replace edits or surface old read errors", async () => {
   const helper = source.slice(
     source.indexOf("async function loadVerifierFile("),
@@ -1557,6 +1540,46 @@ test("JSON and CSV exports confirm that browser download started", async () => {
     { message: "CSV export download started.", type: "success" },
   ]);
 });
+
+for (const [label, item, expected] of [
+  [
+    "Unix seconds",
+    { acceptedAt: "1735689600" },
+    new Date(1735689600 * 1000).toLocaleString(),
+  ],
+  ["epoch", { acceptedAt: "0" }, new Date(0).toLocaleString()],
+  [
+    "out-of-display-range uint64",
+    { acceptedAt: "18446744073709551615" },
+    "Unix time 18446744073709551615 (outside display range)",
+  ],
+  [
+    "malformed timestamp",
+    { acceptedAt: "not-a-time" },
+    "Acceptance time unavailable",
+  ],
+  ["absent timestamp", {}, ""],
+]) {
+  test(`response results render ${label}`, () => {
+    const formatterSource = source.slice(
+      source.indexOf("function formatReceiptTime("),
+      source.indexOf("async function verifyReceiptLocally("),
+    );
+    const resultsSource = source.slice(
+      source.indexOf("function renderResponseResults("),
+      source.indexOf("function questionHTML("),
+    );
+    const render = vm.runInNewContext(
+      `${formatterSource}\n${resultsSource}\nrenderResponseResults`,
+      { esc: String, Date },
+    );
+    const html = render({ items: [item] }, "", { questions: [] });
+    assert.equal(
+      html.match(/<span class="help">([^<]*)<\/span>/)?.[1],
+      expected,
+    );
+  });
+}
 
 test("logout reports success or failure and restores button after failure", async () => {
   const button = { disabled: false };

@@ -1429,7 +1429,7 @@ function renderResponseResults(result, error, r) {
   return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? " · more responses available" : ""}</p></div></div><div class="review-list">${items
     .map(
       (item, index) =>
-        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(new Date(item.acceptedAt).toLocaleString()) : ""}</span></div>${
+        `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(formatReceiptTime(item.acceptedAt)) : ""}</span></div>${
           item.status === "invalid"
             ? '<p class="alert" role="status">This response could not be decrypted or validated.</p>'
             : questions

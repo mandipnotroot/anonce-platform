@@ -134,6 +134,8 @@ No version has been released.
 
 ### Fixed
 
+- Correctly convert Unix-second response acceptance times in the manage dashboard,
+  avoiding invalid dates and handling timestamps outside the display range.
 - Isolate established-member API request capacity from public and anonymous
   traffic with independently bounded request windows. Validate sessions before
   selecting member capacity, including session-bound challenge requests, without
