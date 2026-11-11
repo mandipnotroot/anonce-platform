@@ -42,6 +42,9 @@ No version has been released.
 
 ### Changed
 
+- Remove redundant page breadcrumbs and use the shared trash icon for question
+  removal while preserving its accessible name. Keep mocked UI style checks
+  independent of incidental pointer hover.
 - Reuse one fresh, lazy vault download within each review-list request for
   creator-owned reviews instead of downloading the vault for every review.
   Separate list loads and standalone key lookups still fetch independently;

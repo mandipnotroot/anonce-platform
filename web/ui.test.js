@@ -507,6 +507,7 @@ test("dashboard exposes local completion and response action for creators and me
 });
 
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
+  assert.doesNotMatch(source, /class="route-context"/);
   assert.match(
     source,
     /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/,
@@ -1340,6 +1341,13 @@ test("organization rows group role and status while preserving Open action targe
   assert.match(
     styles,
     /@media\s*\(max-width:\s*390px\)[\s\S]*?\.nav\s*\{\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+  );
+});
+
+test("question removal uses the shared icon system and keeps an accessible name", () => {
+  assert.match(
+    source,
+    /data-remove aria-label="Remove question">\$\{icon\("trash-2"\)\}/,
   );
 });
 

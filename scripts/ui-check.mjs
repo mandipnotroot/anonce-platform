@@ -134,6 +134,7 @@ try {
       { width: 320, height: 720 },
     ]) {
       await capturePage.setViewportSize(viewport);
+      await capturePage.mouse.move(0, 0);
       for (const colorScheme of ["light", "dark"]) {
         await capturePage.emulateMedia({ colorScheme });
         await capturePage.waitForTimeout(200);

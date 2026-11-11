@@ -1114,11 +1114,6 @@ textarea {
 .content {
   max-width: 1000px;
 }
-.route-context {
-  margin-bottom: 28px;
-  color: var(--muted);
-  font-size: 13px;
-}
 .workspace-label {
   display: flex;
   align-items: center;
@@ -1450,9 +1445,6 @@ select:focus-visible {
   }
   .main {
     padding: 24px 0 38px;
-  }
-  .route-context {
-    margin-bottom: 22px;
   }
   .site-footer {
     align-items: flex-start;
