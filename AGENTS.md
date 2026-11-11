@@ -33,6 +33,15 @@
   decisions, limitations, and unfinished work rather than implying completion.
 - Use verified latest stable dependencies and Alpine container images; pin
   versions and validate changes.
+- Use Docker Compose for the supported container deployment. Prefer pinned,
+  unmodified upstream images for third-party services; do not fork, patch, or
+  rebuild their source unless a documented requirement makes that unavoidable.
+- Keep third-party integration in project-owned configuration and initialization
+  scripts. Limit derived images and entrypoint wrappers to necessary deployment
+  or security requirements; document their purpose and validation.
+- Upstream projects maintain third-party service code. This project maintains
+  its integration, version pins, and necessary customizations; operators remain
+  responsible for deployment security, updates, and backups.
 - This is unreleased: target the current stack only; do not add legacy support
   or upgrade migrations. Keep schema initialization and versioning as needed.
 

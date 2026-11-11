@@ -41,6 +41,9 @@
 
 ### Changed
 
+- Establish Docker Compose as the supported container deployment path and clarify
+  upstream service ownership, minimal customization rules, and integration and
+  operator responsibilities.
 - Remove stale implementation and pre-module guidance; consolidate repeated
   verification details while preserving current format limits and safety warnings.
 - Restructure dense documentation into concise points and ordered setup steps.

@@ -12,6 +12,24 @@
 | Published ports | Compose publishes TCP 80/443 and UDP 443 through Caddy only                                           |
 | User flows      | Browser-only, same-origin HTTPS                                                                       |
 
+## Service ownership
+
+- Docker Compose v2 is the supported container deployment entry point.
+- PostgreSQL and Caddy service code is maintained upstream, not by this project.
+  Do not fork or patch that code unless a documented requirement makes it necessary.
+- This project maintains the application, Compose configuration, database role
+  initialization, Caddy configuration, image pins, and minimal deployment wrappers.
+- PostgreSQL uses the upstream image. Its Compose wrapper checks for nonempty
+  initialization scripts before invoking the upstream entrypoint.
+- The Caddy image derives from the pinned upstream image without source patches.
+  It only adjusts volume ownership and removes the low-port file capability to
+  support the non-root runtime described below.
+- Keep future customizations minimal and document why upstream configuration
+  cannot meet the requirement. Prefer upstream fixes over maintaining a fork.
+- Upstream ownership does not remove integration or operator responsibilities:
+  review security advisories, validate image updates, and maintain deployment
+  security and backups. See the [release gates](../CONTRIBUTING.md#verification-and-release-gates).
+
 ## Deployment contracts
 
 - PostgreSQL 18 uses backend-owned initialization scripts in `db/init` by default; `ANONCE_DB_INIT_DIR` can override that directory.
