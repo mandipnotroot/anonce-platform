@@ -2,7 +2,8 @@
 
 # Architecture and trust boundaries
 
-This document describes system boundaries, not evidence of completed verification. See [protocol.md](protocol.md) for cryptographic formats, [openapi.yaml](openapi.yaml) for HTTP contracts, and [verification requirements](../CONTRIBUTING.md#verification-and-release-gates) for release checks.
+- This document describes system boundaries, not evidence of completed verification.
+- See [protocol.md](protocol.md) for cryptographic formats, [openapi.yaml](openapi.yaml) for HTTP contracts, and [verification requirements](../CONTRIBUTING.md#verification-and-release-gates) for release checks.
 
 ## Boundaries
 
@@ -49,15 +50,13 @@ accDescr: Creator publishes encrypted questions and member key envelopes. An app
 This diagram shows system boundaries, not protection from malicious delivered
 code or network/timing correlation.
 
-The browser encrypts review titles, descriptions, and complete questions before
-draft creation. Signed descriptors contain encrypted content, not plaintext
-questions. Publication snapshots all approved memberships and encrypts the content
-key separately to each account's independent X25519 encryption key. Dashboard
-access unwraps only the caller's envelope; ordinary links contain no secret.
-Later approvals receive no historical envelopes. The separate X25519 answer
-recipient private key stays in the creator's encrypted vault; content keys
-cannot decrypt answers. Anonymous transport remains separate from
-authenticated issuance, not proof against traffic correlation.
+- The browser encrypts review titles, descriptions, and complete questions before draft creation.
+- Signed descriptors contain encrypted content, not plaintext questions.
+- Publication snapshots all approved memberships and encrypts the content key separately to each account's independent X25519 encryption key.
+- Dashboard access unwraps only the caller's envelope; ordinary links contain no secret.
+- Later approvals receive no historical envelopes.
+- The separate X25519 answer recipient private key stays in the creator's encrypted vault; content keys cannot decrypt answers.
+- Anonymous transport remains separate from authenticated issuance, not proof against traffic correlation.
 
 ## State and transactions
 
@@ -70,13 +69,15 @@ authenticated issuance, not proof against traffic correlation.
 | Password change     | Rewraps the same vault key, preserving objects.                                                  |
 | Recovery session    | Allows only vault reads/writes, credential reset, and logout.                                    |
 
-- Membership signing keys are separate from password/recovery authentication keys. The browser proves possession directly, without a CSR.
-- Account X25519 encryption keys are independent of membership signing keys. A
-  deployment/account-bound Ed25519 signature authenticates their binding. Private
-  keys remain inside browser-encrypted vault and device-cache state.
+- Membership signing keys are separate from password/recovery authentication keys.
+- The browser proves possession directly, without a CSR.
+- Account X25519 encryption keys are independent of membership signing keys.
+- A deployment/account-bound Ed25519 signature authenticates their binding.
+- Private keys remain inside browser-encrypted vault and device-cache state.
 - The server issues Ed25519 X.509 leaves from its Ed25519 CA: DigitalSignature only, CA=false, and bounded validity.
 - URI SAN: `urn:anonce:deployment:<deployment>:org:<org>:member:<membership>`.
-- Database roles, approval, and revocation remain authoritative. A certificate alone is not sufficient authorization.
+- Database roles, approval, and revocation remain authoritative.
+- A certificate alone is not sufficient authorization.
 
 | Verification boundary           | Checks and limits                                                                                                                                                    |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -86,7 +87,9 @@ authenticated issuance, not proof against traffic correlation.
 | Backend publication/issuance    | Enforces current certificate validity and membership revocation.                                                                                                     |
 | Historical trust                | Browser verification cannot prove signing time, historical approval, or absence of revocation. There is no trusted timestamp guarantee.                              |
 
-Same-device automatic unlock trusts the origin; it does not protect against malicious served JavaScript, XSS, or profile backups. Logout cannot revoke copied capabilities or state. See [vault mechanics](protocol.md#vault) for cache behavior and snapshot limits.
+- Same-device automatic unlock trusts the origin; it does not protect against malicious served JavaScript, XSS, or profile backups.
+- Logout cannot revoke copied capabilities or state.
+- See [vault mechanics](protocol.md#vault) for cache behavior and snapshot limits.
 
 ### Reviews, issuance, and acceptance
 
@@ -103,40 +106,53 @@ Same-device automatic unlock trusts the origin; it does not protect against mali
 
 - `issued_count` and aggregate `accepted_count` are separate; neither implies the other.
 - Only committed encrypted records contribute to `accepted_count`, not issuance, rejected requests, rollbacks, or retries.
-- Submission storage has no member/account/session/issuance-request column or identifying logs. Never join issuance to submissions.
-- The server cannot validate encrypted question or answer semantics. Browser validation enforces content and answer rules. One unreadable response must not block other reviewer results or exports.
+- Submission storage has no member/account/session/issuance-request column or identifying logs.
+- Never join issuance to submissions.
+- The server cannot validate encrypted question or answer semantics.
+- Browser validation enforces content and answer rules.
+- One unreadable response must not block other reviewer results or exports.
 
 ## Privacy boundary
 
-Review links contain no content keys. The server stores per-member encrypted key
-envelopes and can observe recipient/access metadata, not their plaintext keys.
-Revocation cannot erase previously obtained content or keys. This version has no
-content-key rotation. Review content is not padded: ciphertext lengths remain visible.
-Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions,
-and counts remain server-visible. Quotas and schedules remain plaintext because
-the server enforces them; they are no longer public descriptor fields.
-Public descriptors omit creator account IDs and retain organization/membership
-IDs and certificates for trust verification. Member review responses expose an
-`is_creator` flag instead of account IDs. Only creators receive review settings,
-revisions, and activity counters. These are disclosure restrictions, not E2EE
-against the server. Existing plaintext data or copied snapshots
-are not retroactively protected; this unreleased format has no upgrade migration.
+- Review links contain no content keys.
+- The server stores per-member encrypted key envelopes and can observe recipient/access metadata, not their plaintext keys.
+- Revocation cannot erase previously obtained content or keys.
+- This version has no content-key rotation.
+- Review content is not padded: ciphertext lengths remain visible.
+- Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions, and counts remain server-visible.
+- Quotas and schedules remain plaintext because the server enforces them; they are no longer public descriptor fields.
+- Public descriptors omit creator account IDs and retain organization/membership IDs and certificates for trust verification.
+- Member review responses expose an `is_creator` flag instead of account IDs.
+- Only creators receive review settings, revisions, and activity counters.
+- These are disclosure restrictions, not E2EE against the server.
+- Existing plaintext data or copied snapshots are not retroactively protected; this unreleased format has no upgrade migration.
 
-Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`. The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them. Logs, telemetry and errors must not recreate an identifying submission trail.
+- Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`.
+- The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them.
+- Logs, telemetry and errors must not recreate an identifying submission trail.
 
-Dashboard completion derives only from locally encrypted records with verified
-acceptance receipts. “No completion recorded here” does not mean no submission
-exists. Another browser or cleared local state may show no completion. There is
-no named completion API or join between issuance and submissions.
+- Dashboard completion derives only from locally encrypted records with verified acceptance receipts.
+- “No completion recorded here” does not mean no submission exists.
+- Another browser or cleared local state may show no completion.
+- There is no named completion API or join between issuance and submissions.
 
-Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage. Older retained objects remain exposed to that linkage. Response lengths, timing and other deployment metadata remain observable. Before decrypting a reviewer result, the browser verifies a receipt binding the encrypted envelope to its deployment, review, descriptor, and issuer. This detects unsigned ciphertext replacement; it does not establish complete database integrity. A database-write attacker can delete or replay accepted records, roll back history, or remove spend state and reuse stored bearer authorizations through the honest signing endpoint. Acceptance also trusts database-held issuer context. Protect database integrity and retain independently trusted receipt public keys.
+- Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage.
+- Older retained objects remain exposed to that linkage.
+- Response lengths, timing and other deployment metadata remain observable.
+- Before decrypting a reviewer result, the browser verifies a receipt binding the encrypted envelope to its deployment, review, descriptor, and issuer.
+- This detects unsigned ciphertext replacement; it does not establish complete database integrity.
+- A database-write attacker can delete or replay accepted records, roll back history, or remove spend state and reuse stored bearer authorizations through the honest signing endpoint.
+- Acceptance also trusts database-held issuer context.
+- Protect database integrity and retain independently trusted receipt public keys.
 
-This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution. Independent source-first security review is required, not an audit claim. Rotating a recovery phrase does not revoke compromised encrypted snapshots: full compromise repair requires a new vault key, object re-encryption and membership-key rotation.
+- This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution.
+- Independent source-first security review is required, not an audit claim.
+- Rotating a recovery phrase does not revoke compromised encrypted snapshots: full compromise repair requires a new vault key, object re-encryption and membership-key rotation.
 
 ## Product limits
 
-Organization lists have no cursor; member lists return at most 100 entries.
-Review and submission lists return at most 50 entries per page using `after`,
-without a configurable `limit`. Registration, credential changes, and deletion
-are not universally retry-cached; issuance and spend idempotency do not imply a
-global retry guarantee. See [OpenAPI](openapi.yaml) for endpoint contracts.
+- Organization lists have no cursor; member lists return at most 100 entries.
+- Review and submission lists return at most 50 entries per page using `after`,
+  without a configurable `limit`.
+- Registration, credential changes, and deletion are not universally retry-cached; issuance and spend idempotency do not imply a global retry guarantee.
+- See [OpenAPI](openapi.yaml) for endpoint contracts.

@@ -1,8 +1,17 @@
 # Third-party notices
 
-Original Anonce sources are AGPL-3.0-only. The following npm dependencies retain their respective licenses. Versions and integrity hashes are pinned in package-lock.json. Browser dependencies are bundled locally; no runtime CDN is used. esbuild and Playwright are development-only dependencies, not browser runtime dependencies. SJCL is used under its BSD-2-Clause option. Platform-specific optional packages not installed here retain the licenses recorded in package-lock.json and their distributions.
-
-The self-hosted Geist variable font (Geist 1.9.1) is licensed under SIL Open Font License 1.1. Its license text ships in `web/assets/licenses/GEIST-LICENSE.txt`. Self-hosted Lucide SVG icons are licensed under ISC; each icon retains its `lucide-static` license header, and the license text ships in `web/assets/licenses/LUCIDE-LICENSE.txt`. Source package versions are pinned in `package-lock.json`.
+- Original Anonce sources are AGPL-3.0-only; npm dependencies retain their respective licenses.
+- Versions and integrity hashes are pinned in `package-lock.json`.
+- Browser dependencies are bundled locally; no runtime CDN is used.
+- esbuild and Playwright are development-only dependencies, not browser runtime dependencies.
+- SJCL is used under its BSD-2-Clause option.
+- Platform-specific optional packages not installed here retain the licenses
+  recorded in `package-lock.json` and their distributions.
+- The self-hosted Geist variable font (Geist 1.9.1) is licensed under SIL Open Font
+  License 1.1; its license text ships in `web/assets/licenses/GEIST-LICENSE.txt`.
+- Self-hosted Lucide SVG icons are licensed under ISC; each icon retains its
+  `lucide-static` license header. The license text ships in `web/assets/licenses/LUCIDE-LICENSE.txt`.
+- Source package versions are pinned in `package-lock.json`.
 
 ## @cloudflare/blindrsa-ts 0.4.6
 

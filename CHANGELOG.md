@@ -2,10 +2,9 @@
 
 # Changelog
 
-Notable changes are curated here following
-[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
-Future releases will follow [Semantic Versioning](https://semver.org/).
-No version has been released.
+- Notable changes follow [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
+- Future releases will follow [Semantic Versioning](https://semver.org/).
+- No version has been released.
 
 ## Unreleased
 
@@ -42,6 +41,9 @@ No version has been released.
 
 ### Changed
 
+- Restructure dense documentation into concise points and ordered setup steps.
+  Apply explicit documentation rules to `AGENTS.md` and other project documentation;
+  preserve technical contracts, security caveats, and verification limits.
 - Remove redundant page breadcrumbs and use the shared trash icon for question
   removal while preserving its accessible name. Keep mocked UI style checks
   independent of incidental pointer hover.

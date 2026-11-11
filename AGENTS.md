@@ -2,23 +2,23 @@
 
 # Repository guidance
 
-This guidance applies to all contributors and automated coding tools working in
-this repository. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the
-contribution process. Nested guidance may add requirements for its directory.
+- This guidance applies to all contributors and automated coding tools in this repository.
+- Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the contribution process.
+- Follow any additional guidance in nested `AGENTS.md` files for their directories.
 
 ## Mandatory references
 
 - Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
-  Use `type(scope): description`; mark breaking changes with `!` or a
-  `BREAKING CHANGE:` footer. Use `feat` for features and `fix` for bug fixes.
+  - Use `type(scope): description`; use `feat` for features and `fix` for bug fixes.
+  - Mark breaking changes with `!` or a `BREAKING CHANGE:` footer.
 - Keep a Changelog 1.1.0: https://keepachangelog.com/en/1.1.0/
-  Maintain human-curated `CHANGELOG.md`, newest first, with `Unreleased` and
-  Added/Changed/Deprecated/Removed/Fixed/Security as applicable. Date releases
-  YYYY-MM-DD, link versions, and state the versioning policy; do not dump commits.
+  - Maintain human-curated `CHANGELOG.md`, newest first, with `Unreleased` and
+    Added/Changed/Deprecated/Removed/Fixed/Security as applicable.
+  - Date releases YYYY-MM-DD, link versions, and state the versioning policy; do not dump commits.
 - JetBrains modern Go: https://github.com/JetBrains/go-modern-guidelines
-  Read its applicable feature guidance. Detect the supported version from
-  `go.mod`; use modern idioms only when supported by that version. Before a
-  module exists, agree on a supported version; never assume the newest features.
+  - Read the applicable feature guidance.
+  - Detect the supported version from `go.mod`; use modern idioms only when supported by that version.
+  - Before a module exists, agree on a supported version; never assume the newest features.
 
 ## Contribution workflow
 
@@ -32,10 +32,26 @@ contribution process. Nested guidance may add requirements for its directory.
   writers begin. Assign disjoint file scopes; escalate cross-scope changes.
 - Keep documentation and changelog accurate to implemented behavior. Record
   decisions, limitations, and unfinished work rather than implying completion.
-- Keep documentation concise. Use verified latest stable dependencies and Alpine
-  container images; pin versions and validate changes.
+- Use verified latest stable dependencies and Alpine container images; pin
+  versions and validate changes.
 - This is unreleased: target the current stack only; do not add legacy support
   or upgrade migrations. Keep schema initialization and versioning as needed.
+
+## Documentation
+
+- Apply these documentation rules to `AGENTS.md` files as well as other project documentation.
+- Prefer concise bullet points over dense paragraphs. Keep each point focused on
+  one topic; retain short prose only when it improves understanding.
+- Use numbered steps when order matters, descriptive headings for navigation,
+  and tables for structured comparisons or reference data.
+- Remove repetition and unnecessary background; link to the authoritative
+  document instead of repeating detailed guidance.
+- Preserve prerequisites, security warnings, trust boundaries, limitations, and
+  the distinction between implemented behavior and planned or unverified work.
+- Keep commands, code examples, protocol values, links, and heading anchors
+  accurate. Do not paraphrase third-party license text or attribution notices.
+- Update affected documentation when behavior changes. Keep verification results
+  in pull requests or CI artifacts, not checked-in execution diaries.
 
 ## Code formatting
 
@@ -58,14 +74,14 @@ contribution process. Nested guidance may add requirements for its directory.
   SQL by interpolating untrusted values.
 - Browser stack: HTML, CSS, and vanilla JavaScript ES modules by default. A
   lightweight frontend-only framework requires a documented need and review of
-  bundle size, accessibility, maintenance, and build complexity. Keep the Go
-  backend independent of frontend tooling.
+  bundle size, accessibility, maintenance, and build complexity.
+- Keep the Go backend independent of frontend tooling.
 - Bundle established crypto dependencies locally; no runtime CDN crypto imports.
 - All user flows are web-only. UI changes must consider layout, hierarchy,
-  responsiveness, keyboard access, focus states, and component behavior. Use
-  consistent bundled icons with visible labels or accessible names. Prefer
-  purposeful controls over decorative elements. When specialist design review is
-  available, use it; no particular editor, agent, or paid tool is required.
+  responsiveness, keyboard access, focus states, and component behavior.
+- Use consistent bundled icons with visible labels or accessible names. Prefer
+  purposeful controls over decorative elements.
+- Use specialist design review when available; no particular editor, agent, or paid tool is required.
 
 ## Security and privacy invariants
 
@@ -79,10 +95,11 @@ contribution process. Nested guidance may add requirements for its directory.
   standard checksum and a cryptographically secure random source.
 - Client-held private keys, vault master/wrapping keys, password/recovery
   material, and response plaintext remain browser-only; never send them to the
-  server or log them. RSA blind issuer, membership CA, and Ed25519 receipt signing
-  keys are separate server-only keys and must be protected at rest.
-  Define central, versioned formats
-  and encodings; share test vectors rather than inventing per-component formats.
+  server or log them.
+- RSA blind issuer, membership CA, and Ed25519 receipt signing keys are separate
+  server-only keys and must be protected at rest.
+- Define central, versioned formats and encodings; share test vectors rather
+  than inventing per-component formats.
 - Do not claim anonymity against malicious served code or network/timing
   correlation. State trust assumptions and metadata limitations explicitly.
 - Anonymous endpoints must omit credentials (`credentials: "omit"` in browser
