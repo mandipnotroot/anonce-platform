@@ -3,8 +3,6 @@
 # Member content-key delivery contract
 
 - Status: implementation contract, not proof of passed tests.
-- Follow the [verification requirements](../CONTRIBUTING.md#verification-and-release-gates) and record run results in pull requests or CI artifacts.
-- This replaces secret question-key links, not creator-only answer decryption.
 
 ## Access policy
 
@@ -12,7 +10,6 @@
 - Later approvals receive no historical content keys.
 - Published content stays immutable.
 - Revoked members cannot fetch envelopes, but cannot unlearn keys or content already obtained.
-- No compatibility path for old registrations or secret links is provided in this unreleased application.
 - Changing the initial schema does not upgrade an initialized database.
 - Operators must explicitly approve any fresh-database deployment; never delete existing data automatically.
 
@@ -21,7 +18,7 @@
 - Generate an independent X25519 account encryption pair in the browser.
 - Keep Ed25519 membership keys separate.
 - Registration requires canonical base64url `encryption_public_key` (32 bytes) and `encryption_key_signature` (64 bytes).
-- The membership signing key signs the existing length-prefixed transcript:
+- The membership signing key signs the length-prefixed transcript:
 
 ```text
 E('member-encryption-key', deployment_id, account_id,
@@ -32,7 +29,7 @@ E('member-encryption-key', deployment_id, account_id,
 - Server verifies the binding, lengths, canonical encoding, and usable X25519 input through an established implementation.
 - Keys are immutable. `encryption_key_id` is SHA-256 of the raw encryption public key.
 
-Membership vault plaintext becomes:
+Membership vault plaintext:
 
 ```json
 {
@@ -43,11 +40,11 @@ Membership vault plaintext becomes:
 }
 ```
 
-- `GET /api/member/vault` additionally returns the registered public key and binding signature.
+- `GET /api/member/vault` returns the registered public key and binding signature.
 - Unlock recomputes both public keys and verifies the binding and restored private key against the registered key; mismatches fail closed.
-- Encrypted device cache includes the new private key.
+- Encrypted device cache includes the account encryption private key.
 - Logout clears memory.
-- Creator review-key vault objects remain unchanged and are never distributed.
+- Creator review-key vault objects are never distributed.
 
 ## Recipient directory
 
@@ -93,12 +90,11 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 - Binary fields use canonical base64url.
 - Accept a recovered key only after verifying the descriptor signature and successfully decrypting its authenticated content.
 - No separate envelope signature is required.
-- Descriptor v3 and response HPKE stay unchanged.
 
 ## Atomic publication and storage
 
-- Signed `review-publish` payload gains `content_key_envelopes: [envelope, ...]`.
-- Under the existing organization lock and review transaction, validate creator, revision, descriptor signature, and saved content.
+- Signed `review-publish` payload includes `content_key_envelopes: [envelope, ...]`.
+- Under the organization lock and review transaction, validate creator, revision, descriptor signature, and saved content.
 - Require exactly one envelope for every current approved membership, including creator, with matching key ID.
 - Reject missing, duplicate, extra, pending, revoked, or foreign recipients.
 - Persist all envelopes, publication, public descriptor, and idempotent result atomically.
@@ -109,7 +105,7 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 - Changed payload with reused ID remains `request_conflict`.
 - Keep the 1536*1024-byte decoded payload limit; reject excess explicitly, never truncate.
 
-- Initial account schema gains required `encryption_public` (32 bytes) and `encryption_key_signature` (64 bytes).
+- Account schema requires `encryption_public` (32 bytes) and `encryption_key_signature` (64 bytes).
 - Member-only `review_content_keys` stores `review_id`, `membership_id`, `encryption_key_id`, `enc`, and `ciphertext` with length checks, foreign keys, and primary key `(review_id, membership_id)`.
 - Anonymous database role has no access.
 
@@ -122,16 +118,14 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 
 - Ordinary navigation is `/#/respond/<review_id>`.
 - Reject old secret query forms. `prepareResponse({reviewId, answers})` obtains the key internally using authenticated review access.
-- Remove secret-link APIs and UI rather than retaining a fallback.
 
-- Review view models retain `contentState` (`locked` or existing unlocked state)
-  and gain boolean `completedOnThisBrowser`.
+- Review view models include `contentState` (`locked` or unlocked state)
+  and boolean `completedOnThisBrowser`.
 - Derive completion only from encrypted local pending records with verified acceptance receipts.
 - Do not infer completion from issuance, quota exhaustion, or counters.
 - Do not upload completion state.
 - Use “Completed on this browser” and “No completion recorded here”; keep response actions available when more responses are allowed.
 - Browser clearing or another browser can lose completion visibility.
-- No new completion store/API is needed.
 
 ## Limits and required evidence
 
@@ -142,7 +136,8 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 - Network/timing correlation remains possible.
 - Server cannot prove an envelope contains the right key.
 
-Verify:
+Follow the [verification requirements](../CONTRIBUTING.md#verification-and-release-gates)
+with these contract-specific cases:
 
 - Registration binding/input failures and vault mismatch.
 - Directory pagination beyond 100.
@@ -153,5 +148,3 @@ Verify:
 - Later-approved/revoked access.
 - Local receipt-based completion.
 - Credential-free anonymous requests.
-
-- Record commands, results, and unverified database/browser boundaries without claiming production readiness or audit.

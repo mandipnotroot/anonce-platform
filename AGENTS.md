@@ -18,7 +18,6 @@
 - JetBrains modern Go: https://github.com/JetBrains/go-modern-guidelines
   - Read the applicable feature guidance.
   - Detect the supported version from `go.mod`; use modern idioms only when supported by that version.
-  - Before a module exists, agree on a supported version; never assume the newest features.
 
 ## Contribution workflow
 
@@ -46,12 +45,13 @@
   and tables for structured comparisons or reference data.
 - Remove repetition and unnecessary background; link to the authoritative
   document instead of repeating detailed guidance.
+- Describe current behavior, not completed implementation tasks. Remove stale
+  rollout instructions; retain active compatibility limits and data-loss warnings.
 - Preserve prerequisites, security warnings, trust boundaries, limitations, and
   the distinction between implemented behavior and planned or unverified work.
 - Keep commands, code examples, protocol values, links, and heading anchors
   accurate. Do not paraphrase third-party license text or attribution notices.
-- Update affected documentation when behavior changes. Keep verification results
-  in pull requests or CI artifacts, not checked-in execution diaries.
+- Update affected documentation when behavior changes.
 
 ## Code formatting
 
@@ -111,6 +111,8 @@
 
 ## Verification and evidence
 
+- Follow [verification and release gates](CONTRIBUTING.md#verification-and-release-gates);
+  keep run results in pull requests or CI artifacts, not checked-in execution diaries.
 - Run focused checks appropriate to changed behavior, including negative cases
   and security/concurrency boundaries. Record exact commands, exit statuses,
   results, and skipped checks with reasons.

@@ -53,6 +53,5 @@
 
 - If verification fails, check the file and trusted configuration.
 - Do not bypass failure by trusting a replacement key from an untrusted receipt sender.
-- Current code supports receipt v2 only; there is no legacy receipt import path.
 
 See [protocol.md](protocol.md) for receipt v2 fields and signature bytes, and [architecture.md](architecture.md) for system trust boundaries.

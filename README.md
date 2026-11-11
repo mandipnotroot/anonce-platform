@@ -109,15 +109,11 @@ make test
 make vet
 ```
 
-- `make browser` installs pinned npm dependencies, builds assets, and runs browser
-  unit and crypto interoperability tests.
 - Database integration tests require both `ANONCE_TEST_DATABASE_URL` and
   `ANONCE_TEST_ANON_DATABASE_URL` for distinct roles in a disposable database;
   they skip without those variables.
-- Browser E2E needs an already-running disposable HTTPS service.
 - See [verification and release gates](CONTRIBUTING.md#verification-and-release-gates)
-  for commands and required coverage.
-- Record run results in pull requests or CI artifacts.
+  for check details, browser E2E setup, and required coverage.
 
 ## Documentation
 

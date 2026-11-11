@@ -41,6 +41,8 @@
 
 ### Changed
 
+- Remove stale implementation and pre-module guidance; consolidate repeated
+  verification details while preserving current format limits and safety warnings.
 - Restructure dense documentation into concise points and ordered setup steps.
   Apply explicit documentation rules to `AGENTS.md` and other project documentation;
   preserve technical contracts, security caveats, and verification limits.
