@@ -14,8 +14,7 @@
     "test:e2e": "node scripts/e2e.mjs",
     "test:interop": "node scripts/crypto-interop.mjs",
     "build": "node scripts/build.mjs",
-    "test:crypto": "node --test web/crypto.test.js",
-    "test:crypto-interop": "node scripts/crypto-interop.mjs"
+    "test:crypto": "node --test web/crypto.test.js"
   },
   "dependencies": {
     "@cloudflare/blindrsa-ts": "0.4.6",

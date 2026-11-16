@@ -1236,6 +1236,22 @@ test("shared spacing tokens drive cards, forms, fields, and responsive layouts",
   assert.match(styles, /--radius-card:\s*12px/);
 });
 
+test("skip navigation retains a visible focus cue on the main content", () => {
+  assert.match(
+    styles,
+    /\.main:focus-visible\s*\{\s*box-shadow:\s*inset 0 3px var\(--blue\);?\s*\}/,
+  );
+});
+
+test("required fields share a visible and screen-reader label marker", () => {
+  assert.match(
+    source,
+    /root\.querySelectorAll\("\.field label"\)\.forEach\(\(label\) => \{[\s\S]*?label\.control\?\.required[\s\S]*?required-indicator[\s\S]*?accessibleMarker\.textContent = " required"/,
+  );
+  assert.match(styles, /\.required-indicator\s*\{\s*color:\s*var\(--danger\)/);
+  assert.match(source, /At least 12 characters\./);
+});
+
 test("browser theme metadata follows light and dark system preference", () => {
   assert.match(
     html,

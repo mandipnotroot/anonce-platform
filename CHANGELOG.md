@@ -15,8 +15,8 @@
   missing. Container CI validates base/local Compose configurations and builds
   application and proxy images without deploying or publishing them.
 - Browser-side encryption of review titles, descriptions, and complete questions,
-  including drafts, with separate invitation-link content keys and answer keys.
-  Secret links permit question reading, not membership or answer decryption.
+  including drafts, with separate member-delivered content keys and creator-only
+  answer keys. Publication delivers content keys to members approved at that time.
   Signed descriptors replace plaintext content; no legacy-format migration is provided.
 - Browser-local receipt verification with explicit public trust configuration,
   receipt-file import, and downloadable current/historical verification keys.
@@ -41,6 +41,8 @@
 
 ### Changed
 
+- Clarify publication-time membership and creator-only answer decryption in the
+  README; replace a historical restore result with repeatable validation guidance.
 - Establish Docker Compose as the supported container deployment path and clarify
   upstream service ownership, minimal customization rules, and integration and
   operator responsibilities.
@@ -139,12 +141,15 @@
 
 ### Removed
 
+- Remove the duplicate `test:crypto-interop` npm alias; use `test:interop`.
 - Remove the checked-in verification diary and historical run logs. Consolidate
   repeatable test commands and release gates in the contribution guide; keep run
   results in pull requests or CI artifacts and product limits in architecture docs.
 
 ### Fixed
 
+- Use consistent required-field labels and new-password guidance across forms,
+  and retain visible keyboard focus after skipping to the main content.
 - Correctly convert Unix-second response acceptance times in the manage dashboard,
   avoiding invalid dates and handling timestamps outside the display range.
 - Isolate established-member API request capacity from public and anonymous

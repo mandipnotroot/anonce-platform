@@ -175,8 +175,10 @@ PostgreSQL 18 mounts `pgdata` at `/var/lib/postgresql`.
 Use the same Compose project and override flags as startup in every command below.
 `anonce_admin` is the operator dump/restore role, not either runtime connection.
 
-- A disposable custom-format backup/restore exercise matched all 14 table counts and sorted SHA-256 row digests, including ciphertext/receipt digests.
-- This is not evidence of encrypted off-host backup handling or production disaster recovery.
+- Validate disposable restores against the backup using table counts and sorted
+  SHA-256 row digests, including ciphertext and receipts.
+- A local restore alone does not establish encrypted off-host backup handling or
+  production disaster recovery.
 
 - Stop writes (`docker compose stop app`) for a coordinated backup.
 - With restrictive local permissions, dump the database:

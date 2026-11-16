@@ -364,6 +364,19 @@ try {
     }
   };
   await page.goto(`http://127.0.0.1:${port}/index.html#/login`);
+  const requiredLabelsAreMarked = async (capturePage = page) =>
+    capturePage
+      .locator(".field label")
+      .evaluateAll((labels) =>
+        labels
+          .filter((label) => label.control?.required)
+          .every(
+            (label) =>
+              label.querySelector(".required-indicator") &&
+              label.querySelector(".sr-only")?.textContent === " required",
+          ),
+      );
+  assert.equal(await requiredLabelsAreMarked(), true);
   assert.ok(
     await page.locator(".site-header nav").count(),
     "reference-style centered navigation missing",
@@ -379,6 +392,18 @@ try {
   );
   await captures("auth");
   await page.goto(`http://127.0.0.1:${port}/index.html#/register`);
+  assert.equal(await requiredLabelsAreMarked(), true);
+  assert.equal(
+    await page
+      .locator("#password")
+      .evaluate((input) =>
+        input.parentElement
+          .querySelector(".help")
+          ?.textContent.includes("At least 12 characters."),
+      ),
+    true,
+    "registration password guidance is missing",
+  );
   await page.locator("#email").fill("demo@example.net");
   await page.locator("#password").fill("correct horse battery staple");
   await page.getByRole("button", { name: "Create account" }).click();
@@ -426,6 +451,18 @@ try {
     location.hash = "#/account";
   });
   await page.getByRole("heading", { name: "Account & recovery" }).waitFor();
+  assert.equal(await requiredLabelsAreMarked(), true);
+  assert.equal(
+    await page
+      .locator("#password input[name=newPassword]")
+      .evaluate((input) =>
+        input.parentElement
+          .querySelector(".help")
+          ?.textContent.includes("At least 12 characters."),
+      ),
+    true,
+    "account password guidance is missing",
+  );
   await page.evaluate(async () => (await import("/app.js")).releaseOverview());
   await page.waitForTimeout(30);
   assert.equal(
@@ -988,6 +1025,17 @@ try {
     skipResult.focus,
     "main-content",
     "skip navigation did not focus main landmark",
+  );
+  assert.equal(
+    await page.evaluate(() => {
+      const main = document.querySelector("#main-content");
+      return (
+        main.matches(":focus-visible") &&
+        getComputedStyle(main).boxShadow !== "none"
+      );
+    }),
+    true,
+    "skip navigation did not leave a visible focus cue on main content",
   );
   assert.equal(
     skipResult.heading,

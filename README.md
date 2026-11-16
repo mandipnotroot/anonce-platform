@@ -16,9 +16,9 @@ cryptography and same-origin HTTPS.
 - Register, unlock an encrypted vault, and save a 12-word recovery phrase.
 - Create or join organizations; owners and admins manage membership.
 - Encrypt review titles, descriptions, and questions, including drafts; publish
-  signed encrypted reviews for every approved organization member's dashboard.
+  signed encrypted reviews for members approved at publication.
 - Obtain blind response authorizations through approved membership.
-- Submit encrypted answers anonymously; recipients decrypt and export responses.
+- Submit encrypted answers anonymously; only the review creator decrypts and exports responses.
 - Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
   access on another device.
 

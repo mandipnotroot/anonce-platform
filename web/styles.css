@@ -470,6 +470,10 @@ a {
   font-size: var(--text-label);
   font-weight: 620;
 }
+.required-indicator {
+  color: var(--danger);
+  font-weight: 700;
+}
 .field input,
 .field textarea,
 .field select,
@@ -1345,6 +1349,9 @@ textarea {
 }
 .main:focus {
   outline: none;
+}
+.main:focus-visible {
+  box-shadow: inset 0 3px var(--blue);
 }
 a:focus-visible,
 button:focus-visible,

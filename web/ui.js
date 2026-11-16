@@ -276,6 +276,19 @@ function frame(body, title = "Workspace") {
       control.id = `field-${Math.random().toString(36).slice(2)}`;
     label.htmlFor = control.id;
   });
+  root.querySelectorAll(".field label").forEach((label) => {
+    if (!label.control?.required || label.querySelector(".required-indicator"))
+      return;
+    const marker = document.createElement("span");
+    marker.className = "required-indicator";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = " *";
+    label.appendChild(marker);
+    const accessibleMarker = document.createElement("span");
+    accessibleMarker.className = "sr-only";
+    accessibleMarker.textContent = " required";
+    label.appendChild(accessibleMarker);
+  });
 }
 function head(title, sub, action = "") {
   return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${esc(sub)}</p></div>${action}</div>`;
@@ -930,7 +943,7 @@ function renderAuth(mode, intent = "") {
   let body =
     mode === "recover"
       ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
-      : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="you@organization.org"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}"></div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
+      : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="you@organization.org"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}">${mode === "register" ? '<p class="help">At least 12 characters.</p>' : ""}</div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
   frame(
     `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down somewhere private. You cannot view them again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may recover your account. Downloaded copies are sensitive credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in to continue to this response form." : intent === "invite" ? "Sign in to accept your invitation." : mode === "register" ? "Create an account to join feedback spaces." : "Sign in to manage your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="${authHref("login")}">Sign in</a>` : `New to Anonce? <a href="${authHref("register")}">Create an account</a> · <a href="${authHref("recover")}">Recover account</a>`}</p>`}</section></div>`,
     title,
@@ -1140,7 +1153,7 @@ async function loadMembers() {
 }
 async function renderAccount() {
   frame(
-    `${head("Account & recovery", "Manage password and recovery settings.")}<section class="card form-card"><h2 class="section-title">Change password</h2><form id="password" class="form-spaced"><div class="field"><label>Current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><div class="field"><label>New password</label><input type="password" name="newPassword" minlength="12" required autocomplete="new-password"></div><p class="form-error"></p><button class="button" type="submit">Update password</button></form><div class="divider"></div><h2 class="section-title">Recovery phrase</h2><p class="subtitle">Replacing it disables your old phrase.</p><form id="rotate" class="form-spaced"><div class="field"><label>Confirm with current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><p class="form-error"></p><button class="button secondary" type="submit">Rotate recovery phrase</button></form><div id="new-phrase"></div><div class="divider"></div><button id="logout" class="button ghost">Sign out</button></section>`,
+    `${head("Account & recovery", "Manage password and recovery settings.")}<section class="card form-card"><h2 class="section-title">Change password</h2><form id="password" class="form-spaced"><div class="field"><label>Current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><div class="field"><label>New password</label><input type="password" name="newPassword" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Update password</button></form><div class="divider"></div><h2 class="section-title">Recovery phrase</h2><p class="subtitle">Replacing it disables your old phrase.</p><form id="rotate" class="form-spaced"><div class="field"><label>Confirm with current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><p class="form-error"></p><button class="button secondary" type="submit">Rotate recovery phrase</button></form><div id="new-phrase"></div><div class="divider"></div><button id="logout" class="button ghost">Sign out</button></section>`,
     "Account",
   );
   bind("#password", async (fd) => {
