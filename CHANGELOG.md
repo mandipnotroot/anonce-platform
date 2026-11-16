@@ -96,8 +96,9 @@
   or revalidate historical test results.
 - Group organization names, roles, and status badges in compact list rows, with
   full-width Open actions on mobile, 44px tap targets, and theme-matched Approved icons.
-- Download receipts as readable PNG cards containing the complete signed receipt
-  in a QR code. Read receipt images locally before applying the existing signature
+- Download receipts as QR-only PNGs containing the complete signed receipt,
+  without branding, captions, or duplicate details. Preserve the white scanning
+  border. Read receipt images locally before applying the existing signature
   checks; keep signing keys separate from receipt data.
 - Make receipt verification file-first, with a visible desktop/mobile navigation
   link, optional JSON paste and signing-key details, and clearer result guidance.

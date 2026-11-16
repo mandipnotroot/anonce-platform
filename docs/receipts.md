@@ -6,12 +6,15 @@
 
 - The accepted screen appears after the browser verifies the signed receipt
   against your pending encrypted response and its signed review descriptor.
-- Download and keep the PNG receipt card.
+- Download and keep the receipt PNG.
 - Its QR code contains the complete signed receipt, not your response contents or private keys.
+- The PNG contains only the QR code and its required white scanning border.
+- Every receipt field is needed for signature verification; branding, captions,
+  and duplicate receipt details are omitted.
 - You do not need to open or edit JSON.
 - Technical receipt data remains available in the optional disclosure.
 - Keep the original image: cropping, resizing, or editing its QR code can make it unreadable.
-- The card's printed text is not proof of authenticity.
+- An image alone is not proof of authenticity; verify its signed receipt.
 
 - If delivery is uncertain, use **Check status**.
 - You can return to the original signed-in browser to recover pending responses.
@@ -21,7 +24,7 @@
 
 1. Choose **Verify receipt** in the navigation (`#/verify-receipt`). Sign-in is
    not required.
-2. Choose your downloaded PNG receipt card. The browser reads its QR code locally.
+2. Choose your downloaded receipt PNG. The browser reads its QR code locally.
    PNG files must be at most 4 MiB, no more than 4096 pixels in either dimension,
    and no more than 16 million pixels total. Camera scanning is not enabled.
 3. The default uses this site's public signing keys. To use a configuration

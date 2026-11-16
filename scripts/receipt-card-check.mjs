@@ -16,6 +16,12 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
   const server = createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url, "http://localhost").pathname;
+      if (pathname === "/api/member/me") {
+        response.statusCode = 401;
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
       if (pathname === "/api/public/config") {
         response.setHeader("Content-Type", "application/json");
         response.end(
@@ -58,6 +64,12 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
     const requestFailures = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => {
+      if (
+        new URL(message.location().url || "about:blank").pathname ===
+          "/api/member/me" &&
+        message.text().includes("401 (Unauthorized)")
+      )
+        return;
       if (message.type() === "error") pageErrors.push(message.text());
     });
     page.on("requestfailed", (request) =>
@@ -93,14 +105,45 @@ test("receipt card downloads as a verifiable PNG and fits mobile layouts", async
     const trustPath = join(tempDir, "trust.json");
     const card = await page.evaluate(async (receipt) => {
       const { renderReceiptPNG } = await import("/receipt-card.js");
+      const { createReceiptQRCanvas } = await import("/receipt-qr.bundle.js");
       const blob = await renderReceiptPNG({ receipt });
+      const qr = await createReceiptQRCanvas({ receipt });
+      const image = await createImageBitmap(blob);
+      const pixels = document.createElement("canvas");
+      pixels.width = image.width;
+      pixels.height = image.height;
+      const context = pixels.getContext("2d", { willReadFrequently: true });
+      context.drawImage(image, 0, 0);
+      const outputData = context.getImageData(
+        0,
+        0,
+        image.width,
+        image.height,
+      ).data;
+      const qrData = qr
+        .getContext("2d", { willReadFrequently: true })
+        .getImageData(0, 0, qr.width, qr.height).data;
+      const matches =
+        image.width === qr.width &&
+        image.height === qr.height &&
+        outputData.every((value, index) => value === qrData[index]);
+      image.close();
       return {
         type: blob.type,
         size: blob.size,
+        width: qr.width,
+        height: qr.height,
+        matchesQR: matches,
         bytes: [...new Uint8Array(await blob.arrayBuffer())],
       };
     }, vector.receipt);
     assert.equal(card.type, "image/png");
+    assert.equal(card.width, card.height, "receipt PNG is square");
+    assert.equal(
+      card.matchesQR,
+      true,
+      "PNG pixels equal the generated QR including quiet zone",
+    );
     await writeFile(pngPath, Buffer.from(card.bytes));
     await writeFile(trustPath, JSON.stringify(vector.trust));
     await page.locator(".verify-trust summary").click();
