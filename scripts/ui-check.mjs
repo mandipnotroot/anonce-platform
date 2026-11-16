@@ -444,6 +444,35 @@ try {
     }
   };
   await page.goto(`http://127.0.0.1:${port}/index.html#/login`);
+  const logo = page.locator(".brand-logo");
+  await logo.waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Anonce home" }).count(),
+    1,
+  );
+  assert.equal(
+    await logo.evaluate(
+      (image) =>
+        image.complete &&
+        image.naturalWidth > 0 &&
+        Math.abs(image.naturalWidth / image.naturalHeight - 400 / 128) < 0.01 &&
+        image.getBoundingClientRect().width > 0 &&
+        image.getBoundingClientRect().height > 0,
+    ),
+    true,
+    "brand logo did not load at its intrinsic proportions",
+  );
+  assert.equal(
+    await page.locator('link[rel="icon"]').evaluate(async (link) => {
+      const response = await fetch(link.href);
+      return (
+        response.ok &&
+        response.headers.get("content-type").includes("image/svg+xml")
+      );
+    }),
+    true,
+    "SVG favicon failed to load",
+  );
   const requiredLabelsAreMarked = async (capturePage = page) =>
     capturePage
       .locator(".field label")

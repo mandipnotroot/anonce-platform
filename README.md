@@ -2,6 +2,12 @@
 
 # Anonce
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/assets/branding/anonce-logo-on-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="web/assets/branding/anonce-logo-on-light.svg">
+  <img src="web/assets/branding/anonce-logo.svg" alt="Anonce logo" width="300" height="96">
+</picture>
+
 Private, anonymous feedback for verified members. A Go/PostgreSQL modular
 monolith serves HTML, CSS, and vanilla browser ES modules with locally bundled
 cryptography and same-origin HTTPS.

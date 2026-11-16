@@ -16,11 +16,24 @@
     />
     <meta name="description" content="Create reviews and collect responses." />
     <title>Anonce</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="./assets/branding/anonce-logo-mark.svg"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div id="app" aria-live="polite" aria-busy="true">
-      <div class="boot">Anonce<span>.</span></div>
+      <div class="boot">
+        <picture>
+          <source
+            srcset="./assets/branding/anonce-logo-on-dark.svg"
+            media="(prefers-color-scheme: dark)"
+          />
+          <img src="./assets/branding/anonce-logo-on-light.svg" alt="Anonce" />
+        </picture>
+      </div>
     </div>
     <script type="module" src="./ui.js"></script>
   </body>

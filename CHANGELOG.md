@@ -10,6 +10,8 @@
 
 ### Added
 
+- Supplied Anonce SVG branding for the README and browser interface, including
+  a logo-mark favicon; original SVG files are preserved unchanged.
 - Dedicated disposable PostgreSQL CI coverage with distinct member and anonymous
   roles, plus an opt-in guard that fails tests when required database URLs are
   missing. Container CI validates base/local Compose configurations and builds
@@ -53,7 +55,6 @@
   stacked actions, and labeled membership rows without sideways scrolling.
   Keep mobile navigation in one labeled row and extend
   responsive checks for control sizing, overflow, and long content.
-- Remove the standalone “A” brand mark while retaining the Anonce home link.
 - Clarify publication-time membership and creator-only answer decryption in the
   README; replace a historical restore result with repeatable validation guidance.
 - Establish Docker Compose as the supported container deployment path and clarify

@@ -7,6 +7,12 @@ import { chromium } from "playwright";
 const webURL = new URL("../web/", import.meta.url);
 const css = await readFile(new URL("styles.css", webURL), "utf8");
 const font = await readFile(new URL("assets/geist-variable.woff2", webURL));
+const brandLight = (
+  await readFile(new URL("assets/branding/anonce-logo-on-light.svg", webURL))
+).toString("base64");
+const brandDark = (
+  await readFile(new URL("assets/branding/anonce-logo-on-dark.svg", webURL))
+).toString("base64");
 const icons = new Map(
   await Promise.all(
     ["house", "building-2", "check-circle-2", "user-round"].map(
@@ -70,7 +76,7 @@ try {
     workspaceLabel,
   );
   await page.setContent(
-    `<meta name="viewport" content="width=device-width, initial-scale=1"><style>${css.replace("url('./assets/geist-variable.woff2')", `url('data:font/woff2;base64,${font.toString("base64")}')`)}</style>${root.innerHTML}`,
+    `<meta name="viewport" content="width=device-width, initial-scale=1"><style>${css.replace("url('./assets/geist-variable.woff2')", `url('data:font/woff2;base64,${font.toString("base64")}')`)}</style>${root.innerHTML.replaceAll("./assets/branding/anonce-logo-on-light.svg", `data:image/svg+xml;base64,${brandLight}`).replaceAll("./assets/branding/anonce-logo-on-dark.svg", `data:image/svg+xml;base64,${brandDark}`)}`,
   );
   await page.evaluate(async () => {
     await document.fonts.ready;
