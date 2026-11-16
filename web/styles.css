@@ -920,7 +920,32 @@ textarea {
 }
 .member-help {
   margin: 0 0 var(--space-3);
+  color: var(--muted);
   line-height: 1.5;
+}
+.members-section {
+  margin-top: clamp(32px, 5vw, 56px);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+.members-section .section-row {
+  margin: 0 0 var(--space-2);
+}
+.members-heading {
+  min-width: 0;
+}
+.members-context {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.members-section .member-help {
+  max-width: 62ch;
+  margin-bottom: var(--space-4);
 }
 .member-actions {
   min-width: 92px;

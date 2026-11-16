@@ -41,6 +41,8 @@
 
 ### Changed
 
+- Replace dot-separated member headings with a dedicated Members heading,
+  organization context, and clearer section spacing and membership guidance.
 - Give mobile pages more spacing, larger touch targets, readable form controls,
   stacked actions, and labeled membership rows without sideways scrolling.
   Keep mobile navigation in one labeled row and extend

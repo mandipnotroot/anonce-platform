@@ -777,6 +777,16 @@ try {
     "Demo workspace",
   );
   assert.equal(
+    await page.getByRole("heading", { name: "Members", exact: true }).count(),
+    1,
+    "member area uses a clear Members heading",
+  );
+  assert.equal(
+    await page.locator(".members-context").textContent(),
+    "Demo workspace",
+    "member heading retains its organization context",
+  );
+  assert.equal(
     await page.locator("#member-area [data-role]").count(),
     3,
     "owners can edit roles only for approved non-owners",
@@ -821,7 +831,7 @@ try {
       `${orgId} cannot see membership table`,
     );
     assert.equal(
-      await page.getByRole("heading", { name: / · members$/ }).count(),
+      await page.getByRole("heading", { name: "Members", exact: true }).count(),
       0,
       `${orgId} cannot see membership heading`,
     );
