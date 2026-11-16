@@ -291,10 +291,10 @@ function frame(body, title = "Workspace") {
   });
 }
 function head(title, sub, action = "") {
-  return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${esc(sub)}</p></div>${action}</div>`;
+  return `<div class="page-head"><div><h1>${esc(title)}</h1>${sub ? `<p class="subtitle">${esc(sub)}</p>` : ""}</div>${action}</div>`;
 }
 function headWithBadge(title, badge, detail, action = "") {
-  return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${badge} · ${esc(detail)}</p></div>${action}</div>`;
+  return `<div class="page-head"><div><h1>${esc(title)}</h1><p class="subtitle">${badge} ${esc(detail)}</p></div>${action}</div>`;
 }
 function statusBadge(value) {
   const status = String(value || "active").toLowerCase();
@@ -443,7 +443,7 @@ async function load() {
   }
   if (!route[0]) {
     frame(
-      `${head("Overview", "Review activity and manage responses.")}<section class="card empty overview-loading" role="status" aria-live="polite" aria-busy="true"><span class="loading-indicator" aria-hidden="true"></span><span>Loading your overview…</span></section>`,
+      `${head("Overview", "")}<section class="card empty overview-loading" role="status" aria-live="polite" aria-busy="true"><span class="loading-indicator" aria-hidden="true"></span><span>Loading your overview…</span></section>`,
       "Overview",
     );
   }
@@ -509,7 +509,7 @@ async function load() {
     frame(
       hasMemberships
         ? `${head("Organization access pending", "Your organizations appear here when membership is approved.")}${emptyCard("No approved organization yet", "Pending or revoked memberships cannot open workspaces. Check membership status or contact an organization owner.", button("View membership status", "orgs"))}`
-        : `${head("A thoughtful space for feedback", "Start by creating an organization, then invite the people who can review responses.")}${emptyCard("No organization yet", "Create an organization to build your first anonymous review.", button("Create organization", "orgs"))}`,
+        : `${head("Get started", "Create an organization, then invite people who can review responses.")}${emptyCard("No organization yet", "", button("Create organization", "orgs"))}`,
       "Overview",
     );
     return;
@@ -778,20 +778,20 @@ async function loadVerifierFile(
   }
 }
 function emptyCard(t, d, act = "") {
-  return `<section class="card empty"><strong>${esc(t)}</strong>${esc(d)}<div class="empty-action">${act}</div></section>`;
+  return `<section class="card empty"><strong>${esc(t)}</strong>${d ? esc(d) : ""}${act ? `<div class="empty-action">${act}</div>` : ""}</section>`;
 }
 function renderHome() {
   const creatorReviews = reviews.filter(isReviewOwner);
   const canCreate = canCreateReviews(currentOrg);
   frame(
-    `${head("Overview", "Review activity and manage responses.", canCreate ? button("New review", "review/new") : "")}${renderPendingResponses()}${canCreate ? `<div class="stat-grid"><div class="card stat"><div class="stat-label">Your reviews shown</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div>` : ""}<div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">${canCreate ? "Your reviews" : "Reviews to respond to"}</h2><a class="top-link" href="#/orgs">Organizations</a></div>${
+    `${head("Overview", "", canCreate ? button("New review", "review/new") : "")}${renderPendingResponses()}${canCreate ? `<div class="stat-grid"><div class="card stat"><div class="stat-label">Your reviews shown</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div>` : ""}<div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">${canCreate ? "Your reviews" : "Reviews to respond to"}</h2><a class="top-link" href="#/orgs">Organizations</a></div>${
       reviews.length
         ? `<div class="review-list">${reviews
             .map((r) => {
               const mine = isReviewOwner(r);
               const metrics =
                 mine && r.contentState !== "locked"
-                  ? ` · <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> · <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>`
+                  ? ` <span aria-label="Accepted responses">${countText(r.accepted_count)} accepted</span> <span aria-label="Issued authorizations">${countText(r.issued_count)} issued</span>`
                   : "";
               const completion =
                 r.completedOnThisBrowser === true
@@ -813,7 +813,7 @@ function renderHome() {
                       "secondary small",
                     )
                   : "";
-              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" || r.contentState === "corrupt" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${mine ? metrics : ""} · ${esc(detail)}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : ""}${respond}</article>`;
+              return `<article class="card review-row"><div class="review-info"><strong>${esc(r.contentState === "locked" || r.contentState === "corrupt" ? "Encrypted review" : r.title || "Untitled review")}</strong><small>${statusBadge(r.status)}${mine ? metrics : ""} ${esc(detail)}</small></div>${mine ? button("Manage", `review/${encodeURIComponent(r.id)}`, "secondary small") : ""}${respond}</article>`;
             })
             .join(
               "",
@@ -821,7 +821,7 @@ function renderHome() {
         : emptyCard(
             canCreate ? "Nothing here yet" : "No open reviews",
             canCreate
-              ? "Your reviews will appear here once you create one."
+              ? ""
               : "Open reviews will appear here when your organization shares them.",
             canCreate ? button("Create your first review", "review/new") : "",
           )
@@ -945,7 +945,7 @@ function renderAuth(mode, intent = "") {
       ? `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email"></div><div class="field"><label for="words">12-word recovery phrase</label><textarea id="words" name="words" required autocomplete="off" placeholder="Enter all 12 words in order"></textarea></div><div class="field"><label for="password">New password</label><input id="password" name="newPassword" type="password" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Recover account</button></form>`
       : `<form id="auth" class="form-card auth-inner-form"><div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="you@organization.org"></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="${mode === "register" ? "new-password" : "current-password"}">${mode === "register" ? '<p class="help">At least 12 characters.</p>' : ""}</div><p class="form-error"></p><button class="button" type="submit">${mode === "register" ? "Create account" : "Sign in"}</button></form>`;
   frame(
-    `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">SAVE THIS ONCE</p><h1>Your recovery phrase</h1><p>Write these 12 words down somewhere private. You cannot view them again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may recover your account. Downloaded copies are sensitive credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1><p>${intent === "respond" ? "Sign in to continue to this response form." : intent === "invite" ? "Sign in to accept your invitation." : mode === "register" ? "Create an account to join feedback spaces." : "Sign in to manage your organization."}</p>${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="${authHref("login")}">Sign in</a>` : `New to Anonce? <a href="${authHref("register")}">Create an account</a> · <a href="${authHref("recover")}">Recover account</a>`}</p>`}</section></div>`,
+    `<div class="auth-wrap"><section class="card auth-card">${words ? `<p class="eyebrow">Save this once</p><h1>Your recovery phrase</h1><p>Write these 12 words down somewhere private. You cannot view them again.</p><div class="alert"><strong>Keep it secret.</strong> Anyone with this phrase may recover your account. Downloaded copies are sensitive credentials.</div>${recoveryPhrasePanel(words)}<label class="check"><input id="saved" type="checkbox"> I saved my 12-word phrase somewhere safe.</label><button id="continue" class="button" disabled>Continue to Anonce</button>` : `<h1>${title}</h1>${intent === "respond" ? "<p>Sign in to continue to this response form.</p>" : intent === "invite" ? "<p>Sign in to accept your invitation.</p>" : ""}${body}<div class="divider"></div><p class="help">${mode === "register" ? `Already have an account? <a href="${authHref("login")}">Sign in</a>` : `New to Anonce? <a href="${authHref("register")}">Create an account</a> or <a href="${authHref("recover")}">recover your account</a>`}</p>`}</section></div>`,
     title,
   );
   if (words) {
@@ -999,12 +999,12 @@ function renderOrgs() {
   const canManage = canManageMemberships(currentOrg);
   const membersHeading =
     currentOrg && canManage
-      ? `<section class="members-section" aria-labelledby="members-heading"><div class="section-row"><div class="members-heading"><p class="members-context">${esc(currentOrg.name)}</p><h2 id="members-heading" class="section-title">Members</h2></div><div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div></div><p class="member-help">Manage who belongs to this organization. Add existing accounts by email or invite someone with a link.</p></section>`
+      ? `<section class="members-section" aria-labelledby="members-heading"><div class="section-row"><div class="members-heading"><p class="members-context">${esc(currentOrg.name)}</p><h2 id="members-heading" class="section-title">Members</h2></div><div class="toolbar"><button class="button secondary small" id="add-toggle">${icon("user-plus")} Add by email</button><button class="button ghost small" id="invite-toggle">${icon("link-2")} Invite link</button></div></div></section>`
       : "";
   const roleOptions = (includeAdmin) =>
     `${includeAdmin ? '<option value="admin">Admin</option>' : ""}<option value="reviewer">Reviewer</option><option value="respondent">Respondent</option>`;
   frame(
-    `${head("Organizations", "Manage your teams, memberships, and invitations.", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card org-list">${orgs.length ? orgs.map((o) => `<div class="review-row org-row"><div class="avatar org-avatar">${icon("building-2")}</div><div class="review-info org-info"><strong>${esc(o.name)}</strong><div class="org-meta"><span class="org-role">${esc(o.role || "Member")}</span>${statusBadge(o.status || "active")}</div></div><button class="button secondary org-open" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("Your people, together", "Organizations bring verified members into one trusted space.")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg && canManage ? `${membersHeading}<div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div><div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
+    `${head("Organizations", "", `<button class="button" id="new-org">${icon("plus")} New organization</button>`)}<div class="card org-list">${orgs.length ? orgs.map((o) => `<div class="review-row org-row"><div class="avatar org-avatar">${icon("building-2")}</div><div class="review-info org-info"><strong>${esc(o.name)}</strong><div class="org-meta"><span class="org-role">${esc(o.role || "Member")}</span>${statusBadge(o.status || "active")}</div></div><button class="button secondary org-open" data-org="${esc(o.id)}">${icon("arrow-right")} Open</button></div>`).join("") : emptyCard("No organizations yet", "")}</div><div id="org-form" class="card form-card hidden org-form-spaced"><form id="create-org"><div class="field"><label for="orgname">Organization name</label><input id="orgname" name="name" required maxlength="100"></div><p class="form-error"></p><button class="button" type="submit">Create organization</button></form></div>${currentOrg && canManage ? `${membersHeading}<div id="add-area" class="card form-card hidden"><form id="add-member"><div class="inline"><div class="field"><label for="member-email">Member email</label><input id="member-email" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="person@organization.org"></div><div class="field"><label for="member-role">Role</label><select id="member-role" name="role">${roleOptions(currentOrg.role === "owner")}</select></div></div><p class="form-error"></p><button class="button" type="submit">${icon("user-plus")} Add member</button><p class="help">This adds an existing account immediately. New members can register first or join with an invite link.</p></form></div><div id="invite-area" class="card form-card hidden"><form id="invite"><div class="inline"><div class="field"><label for="invite-role">Role</label><select id="invite-role" name="role"><option value="reviewer">Reviewer</option><option value="respondent">Respondent</option></select></div><div class="field"><label for="invite-expires">Invite expires</label><input id="invite-expires" name="expiresAt" type="datetime-local" required></div></div><p class="form-error"></p><button class="button" type="submit">${icon("link-2")} Create invite</button><div id="invite-result"></div></form></div><div id="member-area" class="card empty">Loading membership…</div>` : ""}`,
     "Organizations",
   );
   document.querySelectorAll("[data-org]").forEach((button) => {
@@ -1098,10 +1098,7 @@ async function loadMembers() {
             return `<tr><td data-label="Email"><span class="member-email">${icon("mail")}<span>${esc(m.email || "Email unavailable")}</span></span></td><td data-label="Role">${editableRole ? `<label class="sr-only" for="role-${esc(memberId)}">Role for ${esc(m.email || "member")}</label><select id="role-${esc(memberId)}" data-role="${esc(memberId)}" aria-label="Role for ${esc(m.email || "member")}">${owner ? `<option value="admin" ${memberRole === "admin" ? "selected" : ""}>Admin</option>` : ""}<option value="reviewer" ${memberRole === "reviewer" ? "selected" : ""}>Reviewer</option><option value="respondent" ${memberRole === "respondent" ? "selected" : ""}>Respondent</option></select>` : esc(m.role || "Member")}</td><td data-label="Status">${statusBadge(memberStatus)}</td>${owner || admin ? `<td class="member-actions" data-label="Actions">${manageable && memberStatus === "pending" ? `<button class="icon-btn" data-approve="${esc(memberId)}" aria-label="Approve ${esc(m.email || "member")}" title="Approve">${icon("check")}</button>` : ""}${canRevoke ? `<button class="icon-btn danger-icon" data-revoke="${esc(memberId)}" aria-label="Revoke ${esc(m.email || "member")}" title="Revoke">${icon("trash-2")}</button>` : ""}</td>` : ""}</tr>`;
           })
           .join("")}</tbody></table></div>`
-      : emptyCard(
-          "No members yet",
-          "Invites and membership approvals will appear here.",
-        );
+      : emptyCard("No members yet", "");
     box.querySelectorAll("[data-role]").forEach((select) =>
       select.addEventListener("change", async () => {
         try {
@@ -1157,7 +1154,7 @@ async function loadMembers() {
 }
 async function renderAccount() {
   frame(
-    `${head("Account & recovery", "Manage password and recovery settings.")}<section class="card form-card"><h2 class="section-title">Change password</h2><form id="password" class="form-spaced"><div class="field"><label>Current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><div class="field"><label>New password</label><input type="password" name="newPassword" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Update password</button></form><div class="divider"></div><h2 class="section-title">Recovery phrase</h2><p class="subtitle">Replacing it disables your old phrase.</p><form id="rotate" class="form-spaced"><div class="field"><label>Confirm with current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><p class="form-error"></p><button class="button secondary" type="submit">Rotate recovery phrase</button></form><div id="new-phrase"></div><div class="divider"></div><button id="logout" class="button ghost">Sign out</button></section>`,
+    `${head("Account & recovery", "")}<section class="card form-card"><h2 class="section-title">Change password</h2><form id="password" class="form-spaced"><div class="field"><label>Current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><div class="field"><label>New password</label><input type="password" name="newPassword" minlength="12" required autocomplete="new-password"><p class="help">At least 12 characters.</p></div><p class="form-error"></p><button class="button" type="submit">Update password</button></form><div class="divider"></div><h2 class="section-title">Recovery phrase</h2><p class="subtitle">Replacing it disables your old phrase.</p><form id="rotate" class="form-spaced"><div class="field"><label>Confirm with current password</label><input type="password" name="currentPassword" required autocomplete="current-password"></div><p class="form-error"></p><button class="button secondary" type="submit">Rotate recovery phrase</button></form><div id="new-phrase"></div><div class="divider"></div><button id="logout" class="button ghost">Sign out</button></section>`,
     "Account",
   );
   bind("#password", async (fd) => {
@@ -1442,8 +1439,8 @@ function renderResponseResults(result, error, r) {
   const items = Array.isArray(result.items) ? result.items : [],
     questions = r.questions || [];
   if (!items.length)
-    return `<section class="card empty"><strong>No responses yet</strong>Submitted responses will appear here once they are available to review.</section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
-  return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? " · more responses available" : ""}</p></div></div><div class="review-list">${items
+    return `<section class="card empty"><strong>No responses yet</strong></section>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
+  return `<div class="section-row"><div><h2 class="section-title">Responses</h2><p class="subtitle">${items.length} ${items.length === 1 ? "response" : "responses"} loaded${result.next ? ". More responses are available." : ""}</p></div></div><div class="review-list">${items
     .map(
       (item, index) =>
         `<article class="card form-card response-content-card"><div class="question-top"><strong>Response ${index + 1}</strong><span class="help">${item.acceptedAt ? esc(formatReceiptTime(item.acceptedAt)) : ""}</span></div>${
@@ -1506,7 +1503,7 @@ async function renderRespond(id) {
   }
   const questions = r.questions || [];
   frame(
-    `<section class="card response-card"><p class="eyebrow">ANONYMOUS FEEDBACK</p><h1>${esc(r.title || "Share your thoughts")}</h1><p class="subtitle">${esc(r.description || "Your thoughtful answer can help make things better.")}</p><div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
+    `<section class="card response-card"><p class="eyebrow">Anonymous feedback</p><h1>${esc(r.title || "Share your thoughts")}</h1>${r.description ? `<p class="subtitle">${esc(r.description)}</p>` : ""}<div class="alert">Your response is submitted without account credentials. Availability follows review status and limits.</div><form id="respond">${questions.map((q, i) => `<fieldset class="question-preview answer-group"><legend class="label">${esc(q.text)}${q.required ? ' <span aria-label="required">*</span>' : ""}</legend>${q.type === "text" ? `<textarea id="answer-${i}" name="q-${i}" aria-label="${esc(q.text)}" ${q.required ? "required" : ""} maxlength="5000"></textarea>` : (q.options || []).map((o, j) => `<label class="answer-option"><input name="q-${i}" type="${q.type === "multiple" ? "checkbox" : "radio"}" value="${esc(o)}" ${q.required && q.type === "single" && j === 0 ? "required" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}<p class="form-error"></p><button class="button" type="submit">Send response</button></form><div id="receipt"></div><p class="footnote">Anonce cannot prevent network or timing correlation. Avoid identifying details in answers.</p></section>`,
     "Respond",
   );
   document.querySelectorAll("#respond input[type=checkbox]").forEach((input) =>

@@ -200,6 +200,12 @@ a {
   font-weight: 650;
   letter-spacing: -0.04em;
 }
+.page-head h1 + .subtitle,
+.response-card h1 + .subtitle,
+.auth-card > h1 + p,
+.section-title + .subtitle {
+  margin-top: var(--space-3);
+}
 .subtitle {
   margin: 7px 0 0;
   color: var(--muted);
@@ -212,7 +218,6 @@ a {
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.06em;
 }
 .card,
 .form-card,
@@ -324,7 +329,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin: var(--space-8) 0 var(--space-3);
+  margin: var(--space-10) 0 var(--space-4);
 }
 .section-title {
   margin: 0;
@@ -570,8 +575,6 @@ textarea {
   color: var(--blue);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .verifier-intro p {
   margin: 0;
@@ -842,6 +845,10 @@ textarea {
   line-height: 1.2;
   letter-spacing: -0.04em;
 }
+.auth-card > h1 + p {
+  margin-bottom: var(--space-5);
+  line-height: 1.55;
+}
 .auth-card > p:not(.eyebrow) {
   color: var(--muted);
 }
@@ -887,7 +894,7 @@ textarea {
   min-width: 0;
 }
 .page-head .subtitle {
-  margin-top: var(--space-2);
+  margin-top: var(--space-3);
 }
 .question-preview {
   min-width: 0;
@@ -939,8 +946,6 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.045em;
-  text-transform: uppercase;
   overflow-wrap: anywhere;
 }
 .members-section .member-help {

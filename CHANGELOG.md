@@ -41,6 +41,12 @@
 
 ### Changed
 
+- Increase spacing between page titles, supporting copy, and section content
+  for a clearer heading hierarchy.
+- Use sentence-case interface labels instead of uppercase styling, and remove
+  redundant descriptions while retaining setup instructions and security warnings.
+- Remove middle-dot separators throughout the UI, including review metadata,
+  authentication links, and response summaries.
 - Replace dot-separated member headings with a dedicated Members heading,
   organization context, and clearer section spacing and membership guidance.
 - Give mobile pages more spacing, larger touch targets, readable form controls,

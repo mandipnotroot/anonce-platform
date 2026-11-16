@@ -495,7 +495,7 @@ test("dashboard exposes local completion and response action for creators and me
   assert.match(source, /\$\{mine \? button\("Manage"[\s\S]*?\$\{respond\}/);
   assert.match(
     source,
-    /small>\$\{statusBadge\(r\.status\)\}\$\{mine \? metrics : ""\} · \$\{esc\(detail\)\}/,
+    /small>\$\{statusBadge\(r\.status\)\}\$\{mine \? metrics : ""\} \$\{esc\(detail\)\}/,
   );
   assert.match(source, /Review content could not be verified/);
   assert.match(
@@ -504,6 +504,78 @@ test("dashboard exposes local completion and response action for creators and me
   );
   assert.match(source, /Members approved later need a future review/);
   assert.doesNotMatch(source, /pending globally|not submitted/i);
+});
+
+test("UI source contains no middle-dot separators", () => {
+  assert.doesNotMatch(source, /·|&middot;|&#183;|\\u00b7|\\u\{b7\}/i);
+});
+
+test("presentational UI copy uses sentence case without uppercase styling", () => {
+  assert.doesNotMatch(styles, /text-transform\s*:\s*uppercase/i);
+  assert.doesNotMatch(
+    styles,
+    /\.(?:eyebrow|verifier-step|members-context)\s*\{[^}]*letter-spacing:\s*0\./s,
+  );
+  assert.doesNotMatch(source, />\s*(?:SAVE THIS ONCE|ANONYMOUS FEEDBACK)\s*</);
+  assert.match(source, />Save this once</);
+  assert.match(source, />Anonymous feedback</);
+});
+
+test("member and empty-state copy avoids explaining its own headings", () => {
+  assert.doesNotMatch(
+    source,
+    /Manage who belongs to this organization|Organizations bring verified members into one trusted space|Your reviews will appear here once you create one/,
+  );
+  assert.match(
+    source,
+    /This adds an existing account immediately\. New members can register first or join with an invite link\./,
+  );
+  assert.match(source, /Members approved later need a future review/);
+  assert.match(
+    source,
+    /function emptyCard\(t, d, act = ""\)[\s\S]*?d \? esc\(d\) : ""/,
+  );
+});
+
+test("page and section headings have deliberate breathing room", () => {
+  assert.match(
+    styles,
+    /\.page-head h1 \+ \.subtitle,[\s\S]*?margin-top: var\(--space-3\);/,
+  );
+  assert.match(
+    styles,
+    /\.section-row \{[\s\S]*?margin: var\(--space-10\) 0 var\(--space-4\);/,
+  );
+  assert.match(
+    styles,
+    /\.auth-card > h1 \+ p \{[\s\S]*?margin-bottom: var\(--space-5\);/,
+  );
+});
+
+test("redundant page copy is removed while user descriptions and intent context remain", () => {
+  for (const copy of [
+    "Review activity and manage responses.",
+    "Manage password and recovery settings.",
+    "Submitted responses will appear here once they are available to review.",
+    "Invites and membership approvals will appear here.",
+    "Your thoughtful answer can help make things better.",
+    "Sign in to manage your organization.",
+    "Create an account to join feedback spaces.",
+    "A thoughtful space for feedback",
+  ]) {
+    assert.ok(!source.includes(copy), `redundant copy remains: ${copy}`);
+  }
+  assert.match(
+    source,
+    /r\.description \? `<p class="subtitle">\$\{esc\(r\.description\)\}<\/p>`/,
+  );
+  assert.match(source, /Sign in to continue to this response form/);
+  assert.match(source, /Sign in to accept your invitation/);
+  assert.match(
+    source,
+    /Create an organization, then invite people who can review responses/,
+  );
+  assert.match(source, /Replacing it disables your old phrase/);
 });
 
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
