@@ -41,6 +41,7 @@
 
 ### Changed
 
+- Remove the standalone “A” brand mark while retaining the Anonce home link.
 - Clarify publication-time membership and creator-only answer decryption in the
   README; replace a historical restore result with repeatable validation guidance.
 - Establish Docker Compose as the supported container deployment path and clarify
