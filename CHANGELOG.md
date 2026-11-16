@@ -41,6 +41,10 @@
 
 ### Changed
 
+- Give mobile pages more spacing, larger touch targets, readable form controls,
+  stacked actions, and labeled membership rows without sideways scrolling.
+  Keep mobile navigation in one labeled row and extend
+  responsive checks for control sizing, overflow, and long content.
 - Remove the standalone “A” brand mark while retaining the Anonce home link.
 - Clarify publication-time membership and creator-only answer decryption in the
   README; replace a historical restore result with repeatable validation guidance.

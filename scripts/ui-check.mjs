@@ -109,6 +109,80 @@ async function verifyRecoveryTools(page, expected) {
   assert.equal(await readFile(await download.path(), "utf8"), `${expected}\n`);
 }
 
+// Exercise the actual journey markup, including controls below the fold.
+async function verifyResponsiveControls(page, name, viewport, colorScheme) {
+  const failures = await page.evaluate(() => {
+    const failures = [];
+    const visible = (node) => node.checkVisibility();
+    const describe = (node) =>
+      node.getAttribute("aria-label") ||
+      node.textContent.trim().slice(0, 70) ||
+      node.name ||
+      node.id ||
+      node.tagName;
+    const controls = [
+      ...document.querySelectorAll(
+        "button, a.button, .nav a, input, select, textarea",
+      ),
+    ].filter(visible);
+    for (const control of controls) {
+      const checkable = control.matches(
+        'input[type="checkbox"], input[type="radio"]',
+      );
+      const target = checkable
+        ? [...(control.labels || [])].find(visible) || control
+        : control;
+      const rect = target.getBoundingClientRect();
+      if (rect.width < 43.5 || rect.height < 43.5)
+        failures.push(
+          `${describe(control)} target ${rect.width}×${rect.height}`,
+        );
+      if (rect.left < -1 || rect.right > innerWidth + 1)
+        failures.push(`${describe(control)} outside viewport`);
+      if (
+        innerWidth <= 640 &&
+        control.matches("input, select, textarea") &&
+        !checkable &&
+        parseFloat(getComputedStyle(control).fontSize) < 16
+      )
+        failures.push(`${describe(control)} input text below 16px`);
+    }
+    for (const node of document.querySelectorAll(
+      ".question-preview strong, .response-card h2, .response-card > p, .answer-copy, .receipt-data",
+    )) {
+      if (
+        visible(node) &&
+        node.scrollWidth > node.clientWidth + 1 &&
+        node.clientWidth
+      )
+        failures.push(`${describe(node)} content does not fit`);
+    }
+    // Allow wrapping or stacking without prescribing a breakpoint or direction.
+    for (const group of document.querySelectorAll(
+      ".toolbar, .recovery-actions, .inline",
+    )) {
+      const children = [...group.children].filter(visible);
+      for (let i = 0; i < children.length; i++) {
+        const a = children[i].getBoundingClientRect();
+        for (const child of children.slice(i + 1)) {
+          const b = child.getBoundingClientRect();
+          if (
+            Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+            Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+          )
+            failures.push(`${group.className} children overlap`);
+        }
+      }
+    }
+    return failures;
+  });
+  assert.deepEqual(
+    failures,
+    [],
+    `${name} responsive controls at ${viewport.width}px (${colorScheme}): ${failures.join("; ")}`,
+  );
+}
+
 let browser;
 try {
   await new Promise((resolveListen) =>
@@ -139,6 +213,12 @@ try {
         await capturePage.emulateMedia({ colorScheme });
         await capturePage.waitForTimeout(200);
         await capturePage.evaluate(() => window.scrollTo(0, 0));
+        await verifyResponsiveControls(
+          capturePage,
+          name,
+          viewport,
+          colorScheme,
+        );
         assert.equal(
           await capturePage.evaluate(
             () =>
@@ -926,8 +1006,16 @@ try {
   await captures("review-edit");
   await page.getByRole("button", { name: "Add question" }).click();
   await page.locator('[name="qtext"]').last().fill("What would help?");
+  await page
+    .locator('textarea[name="description"]')
+    .fill(
+      "Long feedback context ".repeat(30) +
+        "https://example.invalid/" +
+        "unbroken-content-".repeat(20),
+    );
   await page.getByRole("button", { name: "Preview" }).click();
   await page.getByText("What would help?", { exact: true }).waitFor();
+  await captures("review-preview-long-content");
   await page.getByRole("button", { name: "Save draft" }).click();
   await page
     .locator("#toast-region")

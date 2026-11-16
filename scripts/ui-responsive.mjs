@@ -92,6 +92,10 @@ try {
           linkHeights: links.map((link) =>
             Math.round(link.getBoundingClientRect().height),
           ),
+          touchTargets: links.map((link) => {
+            const { width, height } = link.getBoundingClientRect();
+            return { width, height };
+          }),
           linkSizes: links.map((link) => [link.scrollWidth, link.clientWidth]),
           labelFits: links.every(
             (link) => link.scrollWidth <= link.clientWidth + 1,
@@ -139,6 +143,12 @@ try {
         `navigation label overflow at ${width}px (${colorScheme})`,
       );
       assert.equal(result.activeCount, 1);
+      assert.ok(
+        result.touchTargets.every(
+          ({ width, height }) => width >= 43.5 && height >= 43.5,
+        ),
+        `navigation target below 44×44 CSS pixels at ${width}px (${colorScheme})`,
+      );
       assert.equal(result.accountLabel, "Account and recovery");
       assert.equal(result.workspace, workspaceName);
       assert.equal(
@@ -306,9 +316,9 @@ try {
   );
   assert.ok(
     shortViewport.navTargets.every(
-      ({ width, height }) => width >= 24 && height >= 24,
+      ({ width, height }) => width >= 43.5 && height >= 43.5,
     ),
-    "navigation target below 24×24 CSS pixels at short viewport",
+    "navigation target below 44×44 CSS pixels at short viewport",
   );
 } finally {
   await browser.close();

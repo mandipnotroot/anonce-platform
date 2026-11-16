@@ -1218,7 +1218,13 @@ test("receipt file feedback handles cancel, empty files, failures, and stale edi
 });
 
 test("shared spacing tokens drive cards, forms, fields, and responsive layouts", () => {
-  for (const token of ["--space-2", "--space-3", "--space-4", "--space-6"]) {
+  for (const token of [
+    "--space-2",
+    "--space-3",
+    "--space-4",
+    "--space-5",
+    "--space-6",
+  ]) {
     assert.match(
       styles,
       new RegExp(`\\bvar\\(${token}\\)`),
@@ -1227,10 +1233,10 @@ test("shared spacing tokens drive cards, forms, fields, and responsive layouts",
   }
   assert.match(styles, /\.card \{\s*padding:\s*var\(--space-6\)/);
   assert.match(styles, /\.field\s*\{[^}]*gap:\s*var\(--space-2\)/);
-  assert.match(styles, /\.card\s*\{\s*padding:\s*var\(--space-4\)/);
+  assert.match(styles, /\.card\s*\{\s*padding:\s*var\(--space-5\)/);
   assert.match(
     styles,
-    /\.form-card\s*,\s*\.auth-card\s*\{\s*padding:\s*var\(--space-4\)/,
+    /\.form-card\s*,\s*\.auth-card\s*\{\s*padding:\s*var\(--space-5\)/,
   );
   assert.match(styles, /--radius-control:\s*8px/);
   assert.match(styles, /--radius-card:\s*12px/);
@@ -1356,7 +1362,25 @@ test("organization rows group role and status while preserving Open action targe
   assert.match(styles, /\[hidden\]\s*\{\s*display:\s*none !important/);
   assert.match(
     styles,
-    /@media\s*\(max-width:\s*390px\)[\s\S]*?\.nav\s*\{\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\.nav\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.nav\s*\{[^}]*grid-template-columns:\s*repeat\(2,/,
+  );
+});
+
+test("mobile membership rows retain field labels when reflowing into cards", () => {
+  for (const label of ["Email", "Role", "Status", "Actions"]) {
+    assert.ok(source.includes(`data-label="${label}"`));
+  }
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\.simple-table tr\s*\{\s*display:\s*grid/,
+  );
+  assert.match(
+    styles,
+    /\.simple-table td::before\s*\{\s*content:\s*attr\(data-label\)/,
   );
 });
 

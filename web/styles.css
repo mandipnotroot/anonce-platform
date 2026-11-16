@@ -254,7 +254,7 @@ a {
 /* Actions and data summaries */
 .button {
   display: inline-flex;
-  min-height: 42px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -290,8 +290,8 @@ a {
   color: var(--button-ink);
 }
 .button.small {
-  min-height: 36px;
-  padding: 5px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
   font-size: 13px;
 }
 .button:disabled {
@@ -470,7 +470,7 @@ a {
 .answer-group textarea {
   width: 100%;
   min-width: 0;
-  min-height: 41px;
+  min-height: 44px;
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -685,7 +685,7 @@ textarea {
   gap: 8px;
 }
 .answer-option {
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -860,6 +860,7 @@ textarea {
 }
 .check {
   align-items: flex-start;
+  min-height: 44px;
   line-height: 1.5;
 }
 .check input,
@@ -925,8 +926,8 @@ textarea {
   min-width: 92px;
 }
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   flex: none;
   border-radius: var(--radius-control);
 }
@@ -966,8 +967,8 @@ textarea {
   z-index: 120;
 }
 .toast-close {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 44px;
+  min-height: 44px;
 }
 .skip-link {
   z-index: 120;
@@ -992,8 +993,8 @@ textarea {
   gap: 12px;
 }
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--surface);
@@ -1063,7 +1064,7 @@ textarea {
   background: var(--surface);
 }
 .nav a {
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 12px;
   color: var(--ink);
   font-weight: 570;
@@ -1368,11 +1369,18 @@ select:focus-visible {
     grid-row: 2;
     justify-self: center;
   }
+  .field input,
+  .field textarea,
+  .field select,
+  .table-wrap select,
+  .answer-group textarea {
+    min-height: 44px;
+  }
 }
 @media (max-width: 640px) {
   .shell {
-    padding: 0 16px;
-    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+    padding: 0 18px;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
   .site-header {
     position: static;
@@ -1407,7 +1415,7 @@ select:focus-visible {
     grid-row: auto;
     justify-self: stretch;
     width: 100%;
-    padding: 7px 12px calc(7px + env(safe-area-inset-bottom));
+    padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
     border: 0;
     border-top: 1px solid var(--line);
     border-radius: 16px 16px 0 0;
@@ -1418,11 +1426,11 @@ select:focus-visible {
   .nav {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
+    gap: 8px;
   }
   .nav a {
     min-width: 0;
-    min-height: 56px;
+    min-height: 60px;
     justify-content: center;
     gap: 5px;
     padding: 7px 4px;
@@ -1440,7 +1448,7 @@ select:focus-visible {
     box-shadow: inset 0 -2px 0 var(--blue);
   }
   .main {
-    padding: 24px 0 38px;
+    padding: 30px 0 44px;
   }
   .site-footer {
     align-items: flex-start;
@@ -1499,7 +1507,7 @@ select:focus-visible {
   }
   .form-card,
   .auth-card {
-    padding: var(--space-4);
+    padding: var(--space-5);
   }
   .inline {
     flex-direction: column;
@@ -1521,7 +1529,7 @@ select:focus-visible {
     height: 18px;
   }
   .card {
-    padding: var(--space-4);
+    padding: var(--space-5);
   }
   .share-box {
     align-items: stretch;
@@ -1543,7 +1551,7 @@ select:focus-visible {
     width: 100%;
   }
   .toolbar > .button {
-    flex: 1 1 auto;
+    flex: 1 1 100%;
   }
   .inline {
     gap: 0;
@@ -1563,36 +1571,96 @@ select:focus-visible {
   .site-footer {
     padding-top: var(--space-4);
   }
+  .button,
+  .icon-btn,
+  .toast-close {
+    min-height: 48px;
+  }
+  .icon-btn {
+    width: 48px;
+  }
+  .field input,
+  .field textarea,
+  .field select,
+  .table-wrap select,
+  .answer-group textarea {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .field textarea {
+    min-height: 120px;
+  }
+  .response-card .question-preview textarea {
+    min-height: 120px;
+    font-size: 16px;
+  }
+  .review-row > .button {
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+  }
+  .table-wrap {
+    overflow: visible;
+  }
+  .simple-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 var(--space-3);
+  }
+  .simple-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+    clip-path: inset(50%);
+  }
+  .simple-table tbody {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .simple-table tr {
+    display: grid;
+    min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .simple-table td {
+    display: grid;
+    grid-template-columns: minmax(70px, 0.65fr) minmax(0, 1.35fr);
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--line);
+    overflow-wrap: anywhere;
+  }
+  .simple-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: var(--text-small);
+    font-weight: 650;
+  }
+  .simple-table td:last-child {
+    border-bottom: 0;
+  }
+  .simple-table .member-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: var(--space-2);
+  }
+  .simple-table .member-actions::before {
+    margin-right: auto;
+  }
+  .simple-table .member-email {
+    min-width: 0;
+  }
 }
 @media (max-width: 390px) {
   .shell {
-    padding-inline: 12px;
-    padding-bottom: calc(118px + env(safe-area-inset-bottom));
-  }
-  .nav a {
-    min-height: 48px;
-    padding: 6px 4px;
-    font-size: 12px;
-    line-height: 1.15;
-    white-space: normal;
-  }
-  .nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .nav .icon {
-    width: 17px;
-    height: 17px;
-  }
-  .header-account {
-    font-size: 11px;
-  }
-  .form-card,
-  .auth-card {
-    padding: var(--space-4);
-  }
-  .word-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-2);
+    padding-inline: 16px;
   }
   .share-box {
     flex-direction: column;
