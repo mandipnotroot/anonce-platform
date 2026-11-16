@@ -43,6 +43,8 @@
 
 ### Changed
 
+- Center the README branding and add linked CI status, license, pre-release
+  badges, and quick navigation to project documentation.
 - Increase spacing between page titles, supporting copy, and section content
   for a clearer heading hierarchy.
 - Use sentence-case interface labels instead of uppercase styling, and remove

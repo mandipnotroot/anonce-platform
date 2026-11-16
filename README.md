@@ -1,16 +1,30 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# Anonce
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/assets/branding/anonce-logo-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="web/assets/branding/anonce-logo-on-light.svg">
+    <img src="web/assets/branding/anonce-logo.svg" alt="Anonce — private, anonymous feedback for verified members" width="300" height="96">
+  </picture>
+</h1>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="web/assets/branding/anonce-logo-on-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="web/assets/branding/anonce-logo-on-light.svg">
-  <img src="web/assets/branding/anonce-logo.svg" alt="Anonce logo" width="300" height="96">
-</picture>
+<p align="center">Private, anonymous feedback for verified members.</p>
 
-Private, anonymous feedback for verified members. A Go/PostgreSQL modular
-monolith serves HTML, CSS, and vanilla browser ES modules with locally bundled
-cryptography and same-origin HTTPS.
+<p align="center">
+  <a href="https://github.com/mandipnotroot/anonce-platform/actions/workflows/ci.yml"><img src="https://github.com/mandipnotroot/anonce-platform/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI workflow status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="License: AGPL-3.0-only"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/status-pre--release-orange.svg" alt="Pre-release"></a>
+</p>
+
+<p align="center">
+  <a href="#quickstart-disposable-local-https">Quickstart</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
+
+A Go/PostgreSQL modular monolith serves HTML, CSS, and vanilla browser ES modules
+with locally bundled cryptography and same-origin HTTPS.
 
 **Pre-release. Not approved for sensitive production data.**
 
