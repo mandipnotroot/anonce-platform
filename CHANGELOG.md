@@ -43,6 +43,10 @@
 
 ### Changed
 
+- Center the organization selector beneath the logo and account row on mobile.
+- Refine the browser theme with a subtle background glow, softer cards, more
+  spacious page headings, and greater emphasis on primary actions while retaining
+  Anonce's visual identity.
 - Center the README branding and add linked CI status, license, pre-release
   badges, and quick navigation to project documentation.
 - Increase spacing between page titles, supporting copy, and section content
@@ -164,6 +168,13 @@
 
 ### Fixed
 
+- Prevent the page gradient from repeating into horizontal bands during initial
+  loading and on tall pages; keep the root background canvas at least viewport
+  height so it does not cut off beneath the loading logo.
+- Extend the mobile header to the viewport edges while preserving content
+  gutters, with responsive regression checks for edge alignment.
+- Remove the header's opaque background band so the page gradient continues
+  behind the Anonce logo.
 - Use consistent required-field labels and new-password guidance across forms,
   and retain visible keyboard focus after skipping to the main content.
 - Correctly convert Unix-second response acceptance times in the manage dashboard,

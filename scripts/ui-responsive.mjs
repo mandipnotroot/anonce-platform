@@ -41,6 +41,59 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ colorScheme: "light" });
   await page.setViewportSize({ width: 320, height: 900 });
+  const initialHTML = await readFile(new URL("index.html", webURL), "utf8");
+  const initialMarkup = initialHTML
+    .replace(/<link\s+rel="stylesheet"[^>]*>/, `<style>${css}</style>`)
+    .replace(/<script\s+type="module"[^>]*><\/script>/, "")
+    .replaceAll(
+      "./assets/branding/anonce-logo-on-light.svg",
+      `data:image/svg+xml;base64,${brandLight}`,
+    )
+    .replaceAll(
+      "./assets/branding/anonce-logo-on-dark.svg",
+      `data:image/svg+xml;base64,${brandDark}`,
+    );
+  for (const width of [390, 1280]) {
+    for (const height of [844, 1100]) {
+      await page.setViewportSize({ width, height });
+      for (const colorScheme of ["light", "dark"]) {
+        await page.emulateMedia({ colorScheme });
+        await page.setContent(initialMarkup);
+        const loading = await page.evaluate(() => ({
+          rootHeight: document.documentElement.getBoundingClientRect().height,
+          viewportHeight: document.documentElement.clientHeight,
+          scrollHeight: document.documentElement.scrollHeight,
+          backgroundRepeat: getComputedStyle(document.body).backgroundRepeat,
+          bootCount: document.querySelectorAll("#app .boot").length,
+          navCount: document.querySelectorAll(".nav").length,
+        }));
+        assert.equal(
+          loading.bootCount,
+          1,
+          "real initial boot markup is present",
+        );
+        assert.equal(loading.navCount, 0, "initial loading markup has no nav");
+        assert.ok(
+          loading.rootHeight >= loading.viewportHeight,
+          `HTML background canvas ends before viewport at ${width}x${height} (${colorScheme})`,
+        );
+        assert.equal(
+          loading.scrollHeight,
+          loading.viewportHeight,
+          `initial loading creates vertical overflow at ${width}x${height} (${colorScheme})`,
+        );
+        assert.equal(
+          loading.backgroundRepeat.split(",")[0].trim(),
+          "no-repeat",
+          "ambient gradient must not tile",
+        );
+        if (width === 390 && height === 1100)
+          await page.screenshot({
+            path: `${artifactDir}/loading-${width}-${height}-${colorScheme}.png`,
+          });
+      }
+    }
+  }
   const icon = (name) =>
     `<img class="icon" src="data:image/svg+xml;base64,${icons.get(name)}" alt="" aria-hidden="true">`;
   const root = { innerHTML: "" };
@@ -77,6 +130,13 @@ try {
   );
   await page.setContent(
     `<meta name="viewport" content="width=device-width, initial-scale=1"><style>${css.replace("url('./assets/geist-variable.woff2')", `url('data:font/woff2;base64,${font.toString("base64")}')`)}</style>${root.innerHTML.replaceAll("./assets/branding/anonce-logo-on-light.svg", `data:image/svg+xml;base64,${brandLight}`).replaceAll("./assets/branding/anonce-logo-on-dark.svg", `data:image/svg+xml;base64,${brandDark}`)}`,
+  );
+  assert.equal(
+    await page
+      .locator("body")
+      .evaluate((body) => getComputedStyle(body).backgroundRepeat),
+    "no-repeat, repeat",
+    "ambient page gradient must not tile into horizontal bands",
   );
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -163,6 +223,28 @@ try {
       );
       assert.equal(result.desktopSpacing, '" "');
       if (width <= 640) {
+        assert.equal(
+          await page.locator(".workspace-label").evaluate((label) => {
+            const rect = label.getBoundingClientRect();
+            return (
+              Math.abs(rect.left + rect.width / 2 - innerWidth / 2) <= 1 &&
+              rect.left >= 0 &&
+              rect.right <= innerWidth
+            );
+          }),
+          true,
+          `mobile workspace pill is not centered or exceeds viewport at ${width}px`,
+        );
+        assert.equal(
+          await page.locator(".site-header").evaluate((header) => {
+            const rect = header.getBoundingClientRect();
+            return (
+              Math.abs(rect.left) <= 1 && Math.abs(rect.right - innerWidth) <= 1
+            );
+          }),
+          true,
+          `mobile header does not extend to viewport edges at ${width}px`,
+        );
         assert.equal(
           await page
             .locator(".nav")
@@ -299,6 +381,25 @@ try {
         `header content overflow at ${width}px`,
       );
       await page.evaluate(() => scrollTo(0, 0));
+      if (width === 390 && colorScheme === "light") {
+        const workspaceNameNode = page.locator(".workspace-label strong");
+        await workspaceNameNode.evaluate(
+          (node) => (node.textContent = "Mandip"),
+        );
+        await page.screenshot({
+          path: `${artifactDir}/workspace-centered-390-short.png`,
+          fullPage: true,
+        });
+        await workspaceNameNode.evaluate(
+          (node) =>
+            (node.textContent =
+              "Design workspace with a deliberately long organization name for responsive header checks"),
+        );
+        await page.screenshot({
+          path: `${artifactDir}/workspace-centered-390-long.png`,
+          fullPage: true,
+        });
+      }
       if (width === 320 || width === 1280)
         await page.screenshot({
           path: `${artifactDir}/navigation-${width}-${colorScheme}.png`,
