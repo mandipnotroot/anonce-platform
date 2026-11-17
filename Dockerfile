@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM node:26.12.1-alpine3.24 AS browser
+FROM node:26.13.1-alpine3.24 AS browser
 WORKDIR /src
 COPY package*.json ./
 RUN npm ci
