@@ -10,6 +10,8 @@
 
 ### Added
 
+- Weekly Dependabot update checks for Go, npm, GitHub Actions, Dockerfile base
+  images, and Docker Compose images, with manually reviewed update PRs.
 - Supplied Anonce SVG branding for the README and browser interface, including
   a logo-mark favicon; original SVG files are preserved unchanged.
 - Dedicated disposable PostgreSQL CI coverage with distinct member and anonymous

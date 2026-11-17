@@ -22,6 +22,14 @@
 - Use only synthetic test data.
 - Never commit local environment files or keys.
 
+## Dependency updates
+
+Dependabot checks Go modules, npm packages, GitHub Actions, Dockerfile base images,
+and Compose images weekly. Update PRs require review and the relevant
+[verification checks](#verification-and-release-gates); they do not auto-merge.
+Keep related toolchain pins, inline CI image tags, and documentation in sync
+when reviewing updates.
+
 ## Formatting
 
 - Use the Go toolchain declared in `go.mod`.
