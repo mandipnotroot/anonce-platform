@@ -1310,8 +1310,8 @@ test("shared spacing tokens drive cards, forms, fields, and responsive layouts",
     styles,
     /\.form-card\s*,\s*\.auth-card\s*\{\s*padding:\s*var\(--space-5\)/,
   );
-  assert.match(styles, /--radius-control:\s*8px/);
-  assert.match(styles, /--radius-card:\s*12px/);
+  assert.match(styles, /--radius-control:\s*10px/);
+  assert.match(styles, /--radius-card:\s*16px/);
 });
 
 test("skip navigation retains a visible focus cue on the main content", () => {
