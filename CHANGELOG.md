@@ -170,6 +170,9 @@
 
 ### Fixed
 
+- Restrict the receipt QR browser-check server to fixed in-memory asset routes,
+  and replace regex-based script removal in responsive checks with inert HTML
+  parsing. Add traversal and script-removal regression checks.
 - Prevent the page gradient from repeating into horizontal bands during initial
   loading and on tall pages; keep the root background canvas at least viewport
   height so it does not cut off beneath the loading logo.

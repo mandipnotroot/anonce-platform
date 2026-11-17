@@ -38,21 +38,74 @@ const markupAssignment = ui.slice(assignmentStart, assignmentEnd);
 const widths = [320, 375, 390, 640, 768, 1280, 1365];
 const artifactDir = process.env.ANONCE_UI_ARTIFACT_DIR || "/tmp/anonce-ui";
 const browser = await chromium.launch({ headless: true });
+// This prepares trusted repository fixtures, not arbitrary untrusted HTML.
+// DOMParser keeps scripts inert until they have been deliberately removed.
+function prepareMarkup({ html, css, brandLight, brandDark }) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  function removeScripts(root) {
+    for (const script of root.querySelectorAll("script")) script.remove();
+    for (const template of root.querySelectorAll("template"))
+      removeScripts(template.content);
+  }
+  removeScripts(parsed);
+  for (const link of parsed.querySelectorAll('link[rel~="stylesheet"]')) {
+    const style = parsed.createElement("style");
+    style.textContent = css;
+    link.replaceWith(style);
+  }
+  for (const image of parsed.querySelectorAll("img")) {
+    const source = image.getAttribute("src");
+    if (source === "./assets/branding/anonce-logo-on-light.svg")
+      image.setAttribute("src", `data:image/svg+xml;base64,${brandLight}`);
+    if (source === "./assets/branding/anonce-logo-on-dark.svg")
+      image.setAttribute("src", `data:image/svg+xml;base64,${brandDark}`);
+  }
+  return "<!doctype html>" + parsed.documentElement.outerHTML;
+}
 try {
   const page = await browser.newPage({ colorScheme: "light" });
+  await mkdir(artifactDir, { recursive: true });
   await page.setViewportSize({ width: 320, height: 900 });
   const initialHTML = await readFile(new URL("index.html", webURL), "utf8");
-  const initialMarkup = initialHTML
-    .replace(/<link\s+rel="stylesheet"[^>]*>/, `<style>${css}</style>`)
-    .replace(/<script\s+type="module"[^>]*><\/script>/, "")
-    .replaceAll(
-      "./assets/branding/anonce-logo-on-light.svg",
-      `data:image/svg+xml;base64,${brandLight}`,
-    )
-    .replaceAll(
-      "./assets/branding/anonce-logo-on-dark.svg",
-      `data:image/svg+xml;base64,${brandDark}`,
+  const prepare = (html) =>
+    page.evaluate(prepareMarkup, { html, css, brandLight, brandDark });
+  for (const scripts of [
+    '<script>window.fixtureScriptRan = true</script><script type="module">window.fixtureScriptRan = true</script>',
+    '<ScRiPt data-x=">">window.fixtureScriptRan = true</sCrIpT >',
+    "<script><script>window.fixtureScriptRan = true</script></script>",
+    "<template><template><script>window.fixtureScriptRan = true</script></template></template>",
+    "<svg><script>window.fixtureScriptRan = true</script></svg>",
+    '<script src="/must-not-load.js">',
+  ]) {
+    const prepared = await prepare(
+      `<link rel="stylesheet" href="./styles.css"><img src="./assets/branding/anonce-logo-on-light.svg"><p id="fixture">Kept</p>${scripts}`,
     );
+    await page.setContent(prepared);
+    assert.equal(await page.locator("script").count(), 0);
+    assert.equal(
+      await page.evaluate(() => {
+        function hasScript(root) {
+          return (
+            !!root.querySelector("script") ||
+            [...root.querySelectorAll("template")].some((t) =>
+              hasScript(t.content),
+            )
+          );
+        }
+        return hasScript(document);
+      }),
+      false,
+      "scripts removed even inside nested template contents",
+    );
+    assert.equal(await page.evaluate(() => window.fixtureScriptRan), undefined);
+    assert.equal(await page.locator("#fixture").textContent(), "Kept");
+    assert.equal(await page.locator("style").textContent(), css);
+    assert.equal(
+      await page.locator("img").getAttribute("src"),
+      `data:image/svg+xml;base64,${brandLight}`,
+    );
+  }
+  const initialMarkup = await prepare(initialHTML);
   for (const width of [390, 1280]) {
     for (const height of [844, 1100]) {
       await page.setViewportSize({ width, height });

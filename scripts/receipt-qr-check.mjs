@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { createServer } from "node:http";
+import { createServer, get } from "node:http";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import { build } from "esbuild";
 import assert from "node:assert/strict";
 
-await build({
+const encoder = await build({
   stdin: {
     contents: "import QRCode from 'qrcode/lib/browser.js'; export {QRCode};",
     resolveDir: process.cwd(),
@@ -13,32 +13,78 @@ await build({
   bundle: true,
   format: "esm",
   platform: "browser",
-  outfile: "/tmp/opencode/qr-test-encoder.js",
+  write: false,
 });
+const assets = new Map([
+  ["/", { type: "text/html", body: "<!doctype html>" }],
+  [
+    "/encoder.js",
+    { type: "text/javascript", body: encoder.outputFiles[0].contents },
+  ],
+]);
+for (const name of [
+  "receipt-qr.bundle.js",
+  "app.js",
+  "crypto.bundle.js",
+  "api.js",
+  "storage.js",
+  "receipt-card.js",
+]) {
+  assets.set(`/${name}`, {
+    type: "text/javascript",
+    body: await readFile(new URL(`../web/${name}`, import.meta.url)),
+  });
+}
 const vector = JSON.parse(await readFile("testdata/receipt-v2.json", "utf8"));
 const csp =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
   res.setHeader("Content-Security-Policy", csp);
-  try {
-    if (req.url === "/") {
-      res.end("<!doctype html>");
-      return;
-    }
-    const path =
-      req.url === "/encoder.js"
-        ? "/tmp/opencode/qr-test-encoder.js"
-        : `${process.cwd()}/web/${req.url.slice(1)}`;
-    res.setHeader("Content-Type", "text/javascript");
-    res.end(await readFile(path));
-  } catch {
+  const asset = assets.get(req.url);
+  if (!asset) {
     res.statusCode = 404;
     res.end();
+    return;
   }
+  res.setHeader("Content-Type", asset.type);
+  res.end(asset.body);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 let browser;
 try {
+  // Use raw HTTP paths: URL-based clients can normalize traversal before sending.
+  for (const path of [
+    ...assets.keys(),
+    "/unknown.js",
+    "/../package.json",
+    "/../../etc/passwd",
+    "/%2e%2e/package.json",
+    "/..%2fpackage.json",
+    "/%252e%252e%252fpackage.json",
+    "/..\\package.json",
+    "/app.js?file=../package.json",
+    "//app.js",
+  ]) {
+    const response = await new Promise((resolve, reject) => {
+      get(
+        { hostname: "127.0.0.1", port: server.address().port, path },
+        (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () =>
+            resolve({ status: res.statusCode, body: Buffer.concat(chunks) }),
+          );
+          res.on("error", reject);
+        },
+      ).on("error", reject);
+    });
+    assert.equal(response.status, assets.has(path) ? 200 : 404, path);
+    assert.deepEqual(
+      response.body,
+      assets.has(path) ? Buffer.from(assets.get(path).body) : Buffer.alloc(0),
+      path,
+    );
+  }
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.on("console", (message) => {
