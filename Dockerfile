@@ -12,7 +12,7 @@ WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/anonce ./cmd/anonce
 
-FROM caddy:2.11.8-alpine AS proxy
+FROM caddy:2.11.9-alpine AS proxy
 RUN chown -R 1000:1000 /data /config && setcap -r /usr/bin/caddy
 USER 1000:1000
 
