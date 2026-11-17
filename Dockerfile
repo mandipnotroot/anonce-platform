@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM node:26.12.1-alpine3.24 AS browser
+FROM node:26.13.1-alpine3.24 AS browser
 WORKDIR /src
 COPY package*.json ./
 RUN npm ci
@@ -12,7 +12,7 @@ WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/anonce ./cmd/anonce
 
-FROM caddy:2.11.8-alpine AS proxy
+FROM caddy:2.11.9-alpine AS proxy
 RUN chown -R 1000:1000 /data /config && setcap -r /usr/bin/caddy
 USER 1000:1000
 
