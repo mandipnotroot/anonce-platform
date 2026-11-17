@@ -19,7 +19,7 @@
   "dependencies": {
     "@cloudflare/blindrsa-ts": "0.4.6",
     "@hpke/chacha20poly1305": "1.8.1",
-    "@hpke/core": "1.10.0",
+    "@hpke/core": "1.10.1",
     "@hpke/dhkem-x25519": "1.8.1",
     "@noble/ciphers": "2.4.0",
     "@noble/curves": "2.4.0",
