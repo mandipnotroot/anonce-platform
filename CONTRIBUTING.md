@@ -7,7 +7,7 @@
 - Report vulnerabilities privately through [SECURITY.md](SECURITY.md), not issues.
 - Read [AGENTS.md](AGENTS.md) before editing; its architecture, privacy,
   cryptography, interface, documentation, and evidence requirements apply to contributions.
-- No specific coding assistant or editor is required. Use your own Git author identity.
+- No specific coding assistant or editor is required.
 - Agree shared contracts and disjoint file scopes before parallel work.
 
 ## Local setup

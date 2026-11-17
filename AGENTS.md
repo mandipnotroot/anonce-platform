@@ -21,8 +21,11 @@
 
 ## Contribution workflow
 
-- Use your own contributor identity and Git configuration. Never attribute a
-  contribution to another person or require a maintainer's author identity.
+- Use the contributor's existing Git configuration for commits. Coding assistants
+  must not override it with an AI tool, model, provider, or bot identity.
+- Do not add AI attribution to commit authors, committers, co-author trailers,
+  commit messages, or pull request descriptions. Do not invent contributor
+  identities; if Git identity is missing, ask the contributor to configure it.
 - Original sources must carry `SPDX-License-Identifier: AGPL-3.0-only` in an
   appropriate comment. Preserve third-party licenses and attribution.
 - Preserve existing work; no destructive resets, force pushes, or unsolicited

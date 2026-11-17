@@ -2,10 +2,10 @@
 
 # Security policy
 
-- Anonce is under development, with no released or supported production version.
-- Implementation is pre-release and not approved for sensitive production data.
-- No independent security audit or production-readiness claim is made.
-- See [architecture/threat boundaries](docs/architecture.md) and [protocol](docs/protocol.md).
+Anonce is under development, with no released or supported production version,
+and is not approved for sensitive production data. No independent security audit
+or production-readiness claim is made. See
+[architecture/threat boundaries](docs/architecture.md) and [protocol](docs/protocol.md).
 
 ## Report privately
 
