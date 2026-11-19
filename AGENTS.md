@@ -18,6 +18,8 @@
 - JetBrains modern Go: https://github.com/JetBrains/go-modern-guidelines
   - Read the applicable feature guidance.
   - Detect the supported version from `go.mod`; use modern idioms only when supported by that version.
+  - Before editing Go, use the `use-modern-go` skill with version-aware guidance.
+    Install the skill outside this repository; do not commit skill files or lockfiles.
 
 ## Contribution workflow
 

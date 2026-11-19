@@ -82,11 +82,9 @@ Required standards:
 - [JetBrains modern Go guidelines](https://github.com/JetBrains/go-modern-guidelines),
   limited to the Go version declared by the project.
 
-- OpenCode discovers the project-local `use-modern-go` skill in
-  `.agents/skills/use-modern-go`; its upstream revision is pinned in `skills-lock.json`.
-- Before editing Go, load the skill and run its version-aware guidance:
-  `sh .agents/skills/use-modern-go/scripts/run-tool.sh list --file-path path/to/file.go`.
-  The first run downloads the pinned CLI into the user's cache and requires network access.
+- Before editing Go, use the `use-modern-go` skill and run its version-aware
+  guidance for the files being changed. Install the skill outside the repository;
+  do not commit skill files or skill lockfiles.
 - The skill is development-only; Go builds and tests do not depend on it.
 
 - Use `type(scope): description` commit subjects (`feat` for features, `fix` for bug fixes).

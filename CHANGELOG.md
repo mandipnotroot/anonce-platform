@@ -9,8 +9,6 @@
 
 ### Added
 
-- Project-local JetBrains `use-modern-go` skill with pinned upstream revision
-  and version-aware Go guidance.
 - Opt-in live-browser publication benchmarks with isolated HTTPS/PostgreSQL
   fixtures, bounded traffic checks, and performance interpretation guidance.
 - Go/PostgreSQL backend and browser flows for encrypted vaults, recovery,

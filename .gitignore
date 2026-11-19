@@ -22,6 +22,8 @@ secrets/
 
 # Local coordination state
 .slim/deepwork/
+/.agents/
+/skills-lock.json
 
 # Browser crypto build outputs (regenerated from pinned dependencies)
 /web/crypto.bundle.js
