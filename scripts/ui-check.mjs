@@ -728,6 +728,106 @@ try {
   );
   await page.goto(`http://127.0.0.1:${port}/index.html#/verify-receipt`);
   await page.getByRole("heading", { name: "Verify a receipt" }).waitFor();
+  const faq = page.locator(".verifier-faq");
+  const trust = page.locator(".verify-trust");
+  assert.equal(
+    await faq.evaluate((el) => el.open),
+    false,
+    "FAQ starts collapsed",
+  );
+  assert.equal(
+    await trust.evaluate((el) => el.open),
+    false,
+    "trust options start collapsed",
+  );
+  assert.equal(
+    await faq.locator("summary").evaluate((el) => {
+      const indicator = getComputedStyle(el, "::after");
+      return (
+        indicator.content !== "none" && indicator.borderRightWidth === "2px"
+      );
+    }),
+    true,
+    "FAQ disclosure has a visible chevron indicator",
+  );
+  for (const viewport of [
+    { width: 1365, height: 900, name: "desktop" },
+    { width: 390, height: 844, name: "mobile" },
+  ]) {
+    await page.setViewportSize(viewport);
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+      viewport.width,
+      `verifier has no horizontal overflow at ${viewport.width}px`,
+    );
+    await page.screenshot({
+      path: join(artifactDir, `receipt-verifier-${viewport.name}.png`),
+      fullPage: true,
+    });
+  }
+  const verifyButton = page.getByRole("button", { name: "Verify receipt" });
+  await verifyButton.evaluate((el) =>
+    el.scrollIntoView({ behavior: "instant", block: "center" }),
+  );
+  const buttonBounds = await verifyButton.boundingBox();
+  const navTop = await page
+    .locator(".site-header .nav")
+    .evaluate((el) => el.getBoundingClientRect().top);
+  assert.ok(
+    buttonBounds.y + buttonBounds.height <= navTop,
+    `mobile Verify receipt button is fully above fixed navigation (${JSON.stringify({ buttonBounds, navTop })})`,
+  );
+  await verifyButton.focus();
+  await page.keyboard.press("Enter");
+  await page
+    .getByText("Choose a receipt PNG or paste receipt JSON first.")
+    .waitFor();
+  await verifyButton.scrollIntoViewIfNeeded();
+  await verifyButton.click();
+  await page
+    .getByText("Choose a receipt PNG or paste receipt JSON first.")
+    .waitFor();
+  const faqSummary = faq.locator("summary");
+  await faqSummary.focus();
+  await page.keyboard.press("Space");
+  assert.equal(await faq.evaluate((el) => el.open), true, "keyboard opens FAQ");
+  assert.equal(
+    await faq.getByText(/does not prove response contents/).count(),
+    1,
+  );
+  await page.keyboard.press("Space");
+  assert.equal(
+    await faq.evaluate((el) => el.open),
+    false,
+    "keyboard closes FAQ",
+  );
+  const trustSummary = trust.locator("summary");
+  await trustSummary.focus();
+  await page.keyboard.press("Enter");
+  assert.equal(
+    await trust.evaluate((el) => el.open),
+    true,
+    "keyboard opens trust options",
+  );
+  for (const name of [
+    "Use keys published by this site",
+    "Use an independently obtained configuration",
+    "Configuration file",
+    "Configuration JSON",
+    "Download this site’s public configuration",
+  ]) {
+    const controlCount =
+      name === "Download this site’s public configuration"
+        ? await trust.getByRole("button", { name, exact: true }).count()
+        : await trust.getByLabel(name, { exact: false }).count();
+    assert.equal(controlCount, 1, `trust control is accessible: ${name}`);
+  }
+  await page.keyboard.press("Enter");
+  assert.equal(
+    await trust.evaluate((el) => el.open),
+    false,
+    "keyboard closes trust options",
+  );
   assert.equal(
     await page.getByRole("link", { name: "Overview", exact: true }).count(),
     0,

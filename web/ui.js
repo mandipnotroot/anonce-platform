@@ -479,7 +479,7 @@ async function load() {
   const p = path();
   if (p[0] === "invite" && p[1]) {
     frame(
-      `${head("You’re invited", "Accept this invitation to join an organization.")}<section class="card form-card"><button class="button" id="accept-invite">Accept invitation</button></section>`,
+      `${head("You’re invited", "")}<section class="card form-card"><button class="button" id="accept-invite">Accept invitation</button></section>`,
       "Invitation",
     );
     document.querySelector("#accept-invite").onclick = async () => {
@@ -551,11 +551,9 @@ async function renderReceiptVerifier() {
   frame(
     `${head("Verify a receipt", "Public signing keys load once from this site. Image reading and signature checking happen locally.")}
     <section class="card form-card verifier-card">
-      <div class="verifier-intro"><span class="verifier-step">A private, local check</span><p>Choose the receipt file you downloaded. You do not need to open or edit JSON.</p></div>
-      <label class="field receipt-file-field"><span>Receipt card image</span><input id="verify-receipt-file" type="file" accept="image/png,.png" aria-describedby="receipt-limit receipt-file-status"><span id="receipt-file-status" class="help" aria-live="polite">Choose your Anonce receipt PNG.</span></label>
-      <details class="verifier-paste"><summary>Paste receipt JSON instead</summary><label class="field" for="verify-receipt-text">Receipt JSON<textarea id="verify-receipt-text" rows="7" maxlength="65536" aria-describedby="receipt-limit"></textarea></label></details>
-      <p id="receipt-limit" class="help">Receipt image up to 4 MiB. Verification starts only when you press the button.</p>
-      <p class="notice verifier-trust-note">This check uses public signing keys published by this site unless you choose another configuration. A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt.</p>
+      <label class="field receipt-file-field"><span>Receipt card image</span><input id="verify-receipt-file" type="file" accept="image/png,.png" aria-describedby="receipt-file-status"><span id="receipt-file-status" class="help" aria-live="polite"></span></label>
+      <details class="verifier-paste"><summary>Paste receipt JSON instead</summary><label class="field" for="verify-receipt-text">Receipt JSON<textarea id="verify-receipt-text" rows="7" maxlength="65536"></textarea></label></details>
+      <details class="verifier-faq"><summary>What does verification check?</summary><p>This check uses public signing keys published by this site unless you choose another configuration. A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt.</p><p>A valid signature confirms only that listed acceptance details were signed. It does not prove response contents, storage, anonymity, or trusted time. This check still trusts code served by this site.</p></details>
       <details class="verify-trust"><summary>Choose which public signing keys to trust</summary><p class="help">${trustAvailable ? "This configuration uses keys published by this site. For an independent check, get a configuration from a source you trust." : "Could not load this site’s public signing keys. Choose an independently obtained configuration to continue."}</p>
         <label class="trust-choice"><input type="radio" name="trust-source" value="current" ${trustAvailable ? "checked" : "disabled"}> Use keys published by this site</label>
         <label class="trust-choice"><input type="radio" name="trust-source" value="import" ${trustAvailable ? "" : "checked"}> Use an independently obtained configuration</label>
@@ -565,7 +563,6 @@ async function renderReceiptVerifier() {
       </details>
       <button type="button" class="button verify-submit" id="verify-receipt">Verify receipt</button>
       <div id="verify-result" role="status" aria-live="polite"></div>
-      <p class="help verifier-limit">A valid signature confirms only that listed acceptance details were signed. It does not prove response contents, storage, anonymity, or trusted time. This check still trusts code served by this site.</p>
     </section>`,
     "Verify a receipt",
   );
@@ -609,7 +606,7 @@ async function renderReceiptVerifier() {
     const token = clearResult();
     receiptFileStatus.textContent = selectedFile
       ? "Reading receipt image…"
-      : "Choose your Anonce receipt PNG.";
+      : "";
     if (!selectedFile) return;
     if (selectedFile.size > 4 * 1024 * 1024) {
       receiptFileStatus.textContent =
@@ -741,10 +738,7 @@ async function loadVerifierFile(
 ) {
   const token = clearResult();
   target.value = "";
-  if (status)
-    status.textContent = file
-      ? "Reading file…"
-      : "Choose your Anonce receipt PNG.";
+  if (status) status.textContent = file ? "Reading file…" : "";
   if (!file) return;
   if (file.size > 65536) {
     if (isCurrent(token)) {
@@ -1226,7 +1220,7 @@ async function renderReview(id, tab, isCurrent = () => true) {
       return;
     }
     frame(
-      `${head("Start a new review", "Set a title and response limit. Add questions before publishing.")}<section class="card form-card"><form id="new-review"><div class="field"><label>Review title</label><input name="title" required maxlength="160" placeholder="What would you like to learn?"></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="1" required></div><p class="form-error"></p><button class="button" type="submit">Create draft</button></form></section>`,
+      `${head("Start a new review", "")}<section class="card form-card"><form id="new-review"><div class="field"><label>Review title</label><input name="title" required maxlength="160" placeholder="What would you like to learn?"></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="1" required></div><p class="form-error"></p><button class="button" type="submit">Create draft</button></form></section>`,
       "New review",
     );
     bind("#new-review", async (fd) => {

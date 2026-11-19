@@ -604,14 +604,16 @@ textarea {
   font-size: 13px;
 }
 .verifier-paste,
-.verify-trust {
+.verify-trust,
+.verifier-faq {
   margin: var(--space-5) 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
 .verifier-paste summary,
-.verify-trust summary {
+.verify-trust summary,
+.verifier-faq summary {
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -620,12 +622,31 @@ textarea {
   font-weight: 650;
   cursor: pointer;
 }
+.verifier-paste summary::after,
+.verify-trust summary::after,
+.verifier-faq summary::after {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  content: "";
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 160ms ease;
+}
+.verifier-paste[open] summary::after,
+.verify-trust[open] summary::after,
+.verifier-faq[open] summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
 .verifier-paste[open],
-.verify-trust[open] {
+.verify-trust[open],
+.verifier-faq[open] {
   padding-bottom: var(--space-4);
 }
 .verifier-paste .field,
-.verify-trust > :not(summary) {
+.verify-trust > :not(summary),
+.verifier-faq > :not(summary) {
   margin-inline: var(--space-4);
 }
 .verifier-paste .field {
@@ -635,6 +656,10 @@ textarea {
   padding: 0;
 }
 .verify-trust > .help {
+  line-height: 1.55;
+}
+.verifier-faq > p {
+  max-width: 78ch;
   line-height: 1.55;
 }
 .verify-trust .trust-choice {
@@ -653,6 +678,7 @@ textarea {
 }
 .verify-submit {
   min-width: 180px;
+  scroll-margin-bottom: 100px;
 }
 .verifier-limit {
   max-width: 78ch;
@@ -1510,7 +1536,7 @@ select:focus-visible {
     box-shadow: inset 0 -2px 0 var(--blue);
   }
   .main {
-    padding: 30px 0 44px;
+    padding: 30px 0 calc(100px + env(safe-area-inset-bottom));
   }
   .site-footer {
     align-items: flex-start;

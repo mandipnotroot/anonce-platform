@@ -34,6 +34,10 @@
 
 ### Changed
 
+- Collapse receipt-verification trust and signature-limit guidance into an
+  expandable FAQ while preserving signing-key controls and security information.
+- Remove redundant interface instructions while retaining actionable validation
+  errors and security warnings.
 - Use version-supported modern Go idioms for error matching, path splitting,
   fixed-count loops, and test contexts without changing protocol formats.
 - Freeze publication recipients before paged key encryption and bounded envelope

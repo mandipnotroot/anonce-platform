@@ -791,13 +791,43 @@ test("receipt verifier uses local API only and enforces UTF-8 byte bounds", asyn
   );
 });
 
-test("receipt verifier is file-first, keeps JSON and trust choices disclosed, and stays in navigation", () => {
+test("receipt verifier is file-first, keeps secondary guidance disclosed, and stays in navigation", () => {
   const verifier = source.slice(
     source.indexOf("async function renderReceiptVerifier()"),
     source.indexOf("function formatReceiptTime("),
   );
   assert.match(source, /href="#\/verify-receipt" aria-label="Verify receipt"/);
-  assert.match(verifier, /Choose the receipt file you downloaded/);
+  assert.doesNotMatch(verifier, /Receipt image up to 4 MiB/);
+  assert.doesNotMatch(
+    verifier,
+    /Verification starts only when you press the button/,
+  );
+  assert.doesNotMatch(verifier, /You do not need to open or edit JSON/);
+  assert.doesNotMatch(verifier, /A private, local check/);
+  assert.match(
+    verifier,
+    /head\("Verify a receipt", "Public signing keys load once from this site\. Image reading and signature checking happen locally\."\)/,
+  );
+  assert.match(verifier, /aria-live="polite"><\/span>/);
+  assert.match(verifier, /aria-describedby="receipt-file-status"/);
+  assert.doesNotMatch(
+    verifier,
+    /receipt-limit|aria-describedby="[^"]*receipt-limit/,
+  );
+  assert.doesNotMatch(verifier, /Choose your Anonce receipt PNG/);
+  assert.doesNotMatch(
+    source,
+    /head\("Start a new review", "Set a title and response limit/,
+  );
+  assert.doesNotMatch(
+    source,
+    /head\("You’re invited", "Accept this invitation to join an organization/,
+  );
+  assert.match(
+    verifier,
+    /<details class="verifier-faq"><summary>What does verification check\?/,
+  );
+  assert.match(verifier, /<details class="verifier-faq">/);
   assert.match(
     verifier,
     /<details class="verifier-paste"><summary>Paste receipt JSON instead/,
@@ -810,6 +840,10 @@ test("receipt verifier is file-first, keeps JSON and trust choices disclosed, an
   assert.match(
     verifier,
     /A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt/,
+  );
+  assert.match(
+    verifier,
+    /does not prove response contents, storage, anonymity, or trusted time/,
   );
   assert.match(
     verifier,
@@ -1219,7 +1253,7 @@ test("receipt file feedback handles cancel, empty files, failures, and stale edi
   const clear = () => ++generation;
   const current = (token) => token === generation;
   await load(null, target, result, clear, current, status);
-  assert.equal(status.textContent, "Choose your Anonce receipt PNG.");
+  assert.equal(status.textContent, "");
   await load(
     {
       size: 0,
