@@ -84,7 +84,7 @@ func TestEncryptedReviewViewPrivacy(t *testing.T) {
 	}
 	var d descriptor
 	if protocol.StrictJSON([]byte(`{"v":1,"title":"secret","questions":[]}`), &d) == nil {
-		t.Fatal("accepted legacy plaintext descriptor")
+		t.Fatal("accepted plaintext descriptor fields")
 	}
 }
 
@@ -98,8 +98,8 @@ func TestDescriptorFraming(t *testing.T) {
 		t.Fatalf("valid descriptor framing: %v", err)
 	}
 	d.V = 2
-	legacy, _ := json.Marshal(d)
-	if _, err := decodeDescriptor(legacy); err == nil {
+	unsupportedVersion, _ := json.Marshal(d)
+	if _, err := decodeDescriptor(unsupportedVersion); err == nil {
 		t.Fatal("accepted v2 descriptor")
 	}
 	var fields map[string]any

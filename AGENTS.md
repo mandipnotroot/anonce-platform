@@ -45,8 +45,8 @@
 - Upstream projects maintain third-party service code. This project maintains
   its integration, version pins, and necessary customizations; operators remain
   responsible for deployment security, updates, and backups.
-- This is unreleased: target the current stack only; do not add legacy support
-  or upgrade migrations. Keep schema initialization and versioning as needed.
+- This is unreleased: target only the current stack, formats, and schema;
+  database upgrades are unsupported. Keep schema initialization and versioning as needed.
 
 ## Documentation
 

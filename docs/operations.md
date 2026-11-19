@@ -40,12 +40,11 @@
 - Initialization runs only on empty volumes.
 - Backend installs the current `db/schema.sql` in one transaction, guarded by an
   advisory lock. A schema-version marker makes repeated startup a no-op.
-- This unreleased app has no database upgrade migrations. Databases from the old
-  migration runner or with an unsupported schema version are rejected, not modified.
-  The current schema version is 3; version 2's smaller ciphertext constraint is
-  unsupported.
-  Use a new, unused `ANONCE_DB_VOLUME` for a fresh database; existing data is not
-  transferred. Preserve the old volume and backups if its data matters.
+- The current schema version is 3. Initialization accepts an empty database or
+  the current schema; unsupported schema markers or versions are rejected, not modified.
+  Database upgrades and data transfer are unsupported.
+  Use a new, unused `ANONCE_DB_VOLUME` for a fresh database.
+  Preserve existing volumes and backups if their data matters.
 - The role names are `anonce_member` and `anonce_anon`, using `ANONCE_MEMBER_DB_PASSWORD` and `ANONCE_ANON_DB_PASSWORD`, respectively.
 - Confirm actual grants against the backend contract before deployment.
 

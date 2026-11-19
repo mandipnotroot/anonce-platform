@@ -394,8 +394,6 @@ try {
         r.completedOnThisBrowser !== false
       )
         throw Error("Approved member did not unlock published content");
-      if ("getInvitationURL" in a || "parseResponseInvitation" in a)
-        throw Error("Secret-link API remains");
       let rejected = false;
       try {
         await a.listResponses({ reviewId });

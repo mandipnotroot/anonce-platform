@@ -132,7 +132,7 @@ code or network/timing correlation.
 - Member review responses expose an `is_creator` flag instead of account IDs.
 - Only creators receive review settings, revisions, and activity counters.
 - These are disclosure restrictions, not E2EE against the server.
-- Existing plaintext data or copied snapshots are not retroactively protected; this unreleased format has no upgrade migration.
+- Encryption does not protect plaintext copies or snapshots retained outside the encrypted format.
 
 - Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`.
 - The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them.

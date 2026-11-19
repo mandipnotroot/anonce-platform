@@ -13,7 +13,7 @@ import (
 var schema string
 
 // Init initializes a fresh database or preserves an already-current schema.
-// Unreleased databases with older schemas must be recreated, not upgraded.
+// Unsupported schemas must be recreated, not upgraded.
 func Init(ctx context.Context, p *pgxpool.Pool) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -23,12 +23,12 @@ func Init(ctx context.Context, p *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(728619470120)"); err != nil {
 		return fmt.Errorf("lock schema initialization: %w", err)
 	}
-	var legacy bool
-	if err = tx.QueryRow(ctx, "SELECT to_regclass('public.anonce_migrations') IS NOT NULL").Scan(&legacy); err != nil {
-		return fmt.Errorf("check legacy schema: %w", err)
+	var unsupportedMarker bool
+	if err = tx.QueryRow(ctx, "SELECT to_regclass('public.anonce_migrations') IS NOT NULL").Scan(&unsupportedMarker); err != nil {
+		return fmt.Errorf("check schema marker: %w", err)
 	}
-	if legacy {
-		return fmt.Errorf("legacy public.anonce_migrations found: unreleased database must be recreated")
+	if unsupportedMarker {
+		return fmt.Errorf("unsupported public.anonce_migrations marker found: unreleased database must be recreated")
 	}
 	if _, err = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS public.anonce_schema_version(version integer PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create schema version marker: %w", err)

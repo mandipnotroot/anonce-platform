@@ -122,7 +122,7 @@ Descriptor is base64url exact JSON bytes, at most 786432 decoded bytes, containi
 `{v:3,deployment_id,review_id,org_id,reviewer_membership_id,reviewer_certificate,encrypted_content,recipient_public_key,issuer_key_id,issuer_public_key}`.
 
 - `encrypted_content`: the saved content envelope.
-- Descriptors v1 and v2 are not supported.
+- Only descriptor version 3 is accepted.
 - Quotas, schedules, and account IDs are not published in the descriptor.
 - Creator signature: membership Ed25519 over `E('review-descriptor',descriptor_bytes)`.
 - Descriptor hash: SHA256 of exact descriptor bytes.
@@ -135,7 +135,7 @@ Descriptor is base64url exact JSON bytes, at most 786432 decoded bytes, containi
 
 - The server retains `max_responses` and opening/closing times in plaintext to enforce per-member authorization quotas and acceptance windows atomically.
 - These settings are not E2EE.
-- Removing their public descriptor copies reduces disclosure without changing server enforcement.
+- Public descriptors omit these settings; server enforcement is unchanged.
 - No encrypted duplicate is used to imply confidentiality from the server.
 
 - Member review responses contain `id`, `org_id`, `is_creator`, `encrypted_content`, `content_key_envelope` (caller's own envelope or `null`), `state`, `issuer_public_key`, and `issuer_key_id`.
@@ -146,7 +146,7 @@ Descriptor is base64url exact JSON bytes, at most 786432 decoded bytes, containi
 ### Member content-key delivery
 
 - Respondent navigation is `https://<origin>/#/respond/<review_id>`, with a canonical 16-byte base64url review ID and no secret parameters.
-- Old secret-link forms are unsupported.
+- Response routes reject query parameters and additional path segments.
 - Authenticated review access obtains only the caller's HPKE envelope; anonymous submission remains credential-free.
 
 - The [member key-delivery contract](member-key-delivery.md) defines normative account bindings, paginated recipient discovery, HPKE transcripts, atomic publication coverage, and browser-local completion.
@@ -223,7 +223,7 @@ Use established libraries, not homegrown primitives.
 - Ed25519 signature transcript: `E('receipt-v2',deployment,receipt_id,review_id,descriptor_hash,issuer_key_id,response_hash,U64(accepted_at),receipt_key_id)`.
 - Exact spend retries return the original receipt; changed submissions for a spent token conflict.
 - Acceptance and receipt persistence are one transaction.
-- Receipt v1 is not supported; this unreleased project provides no upgrade migration.
+- Only receipt version 2 is accepted.
 
 - The portable public trust document contains exactly `{v:1,deployment_id,receipt_key_id,receipt_keys:[{receipt_key_id,receipt_public_key}]}`.
 - Each key ID is SHA-256 of its raw 32-byte Ed25519 public key.

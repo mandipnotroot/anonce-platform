@@ -35,8 +35,8 @@
 - Freeze publication recipients before paged key encryption and bounded envelope
   uploads; finalize complete snapshots atomically instead of sending one full-roster payload.
 - Use one current schema with transactional, version-checked initialization.
-  Older databases require a fresh database; automatic upgrades and data transfer
-  are not supported.
+  Initialization requires an empty database or the current schema; automatic
+  upgrades and data transfer are not supported.
 - Deliver review-content keys through per-member HPKE envelopes at publication.
   Later-approved members do not receive historical keys; answer decryption stays
   creator-only.

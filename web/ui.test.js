@@ -320,15 +320,7 @@ test("rotation checks unsaved phrase before issuing credential mutation", () => 
   assert.match(rotation, /current password/);
 });
 
-test("responses use ordinary review routes without secret-link APIs", () => {
-  const routeSource = source.slice(
-    source.indexOf("const routeHash"),
-    source.indexOf("const go ="),
-  );
-  assert.doesNotMatch(
-    source,
-    /parseResponseInvitation|getInvitationURL|contentKey: invitation/,
-  );
+test("responses render review content and prepare answers by review ID", () => {
   assert.match(source, /async function renderRespond\(id\)/);
   assert.match(source, /contentState === "locked"/);
   assert.match(
@@ -337,7 +329,7 @@ test("responses use ordinary review routes without secret-link APIs", () => {
   );
 });
 
-test("response routes reject secret query and extra-path forms before auth or review fetch", () => {
+test("response routes reject query parameters and extra path segments before auth or review fetch", () => {
   const helper = source.slice(
     source.indexOf("const hasUnsupportedResponseRoute"),
     source.indexOf("function authHref("),
@@ -348,7 +340,7 @@ test("response routes reject secret query and extra-path forms before auth or re
   );
   assert.equal(unsupported(["respond", "review"], "/respond/review"), false);
   assert.equal(
-    unsupported(["respond", "review"], "/respond/review?v=1&k=secret"),
+    unsupported(["respond", "review"], "/respond/review?extra=value"),
     true,
   );
   assert.equal(
@@ -364,7 +356,6 @@ test("response routes reject secret query and extra-path forms before auth or re
     /hasUnsupportedResponseRoute\(route, respondHash\)[\s\S]*?Unsupported response link/,
   );
   assert.doesNotMatch(guard, /getSession|returnRoute\s*=/);
-  assert.doesNotMatch(guard, /secret/);
 });
 
 test("auth continuation preserves full invitation fragment through refresh and auth switches", () => {
@@ -389,7 +380,7 @@ test("same-hash auth continuation reloads route without waiting for hashchange",
     source.indexOf("const say ="),
   );
   let loads = 0;
-  let hash = "#/respond/review?v=1&k=secret";
+  let hash = "#/respond/review?next=value";
   const location = {
     get hash() {
       return hash;
@@ -404,19 +395,12 @@ test("same-hash auth continuation reloads route without waiting for hashchange",
       loads++;
     },
   });
-  go("/respond/review?v=1&k=secret");
+  go("/respond/review?next=value");
   assert.equal(loads, 1);
-  assert.equal(location.hash, "#/respond/review?v=1&k=secret");
+  assert.equal(location.hash, "#/respond/review?next=value");
   go("/overview");
   assert.equal(location.hash, "#/overview");
   assert.equal(loads, 1);
-});
-
-test("secret review-link UI is absent", () => {
-  assert.doesNotMatch(
-    source,
-    /getInvitationURL|id="share"|Secret response link|secret link/i,
-  );
 });
 
 test("review dashboard hides locked member metadata and aggregates creator-owned reviews only", () => {

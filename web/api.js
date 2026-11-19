@@ -1,23 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { toBase64url, fromBase64url } from "./crypto.bundle.js";
+import { toBase64url } from "./crypto.bundle.js";
 
-export { toBase64url, fromBase64url };
 export const jsonBytes = (value) =>
   new TextEncoder().encode(JSON.stringify(value));
-const binaryKeys = new Set([
-  "account_id",
-  "challenge_id",
-  "payload_hash",
-  "nonce",
-  "id",
-  "salt",
-  "ciphertext",
-  "password_auth_public_key",
-  "recovery_auth_public_key",
-  "membership_public_key",
-  "recovery_salt",
-  "signature",
-]);
 export function toWire(value) {
   if (value instanceof Uint8Array) return toBase64url(value);
   if (Array.isArray(value)) return value.map(toWire);
@@ -27,15 +12,6 @@ export function toWire(value) {
     );
   return value;
 }
-export function decodeObject(value) {
-  return Object.fromEntries(
-    Object.entries(value).map(([k, v]) => [
-      k,
-      binaryKeys.has(k) && typeof v === "string" ? fromBase64url(v) : v,
-    ]),
-  );
-}
-
 export class APIError extends Error {
   constructor(code, message, fields, status) {
     super(message);
@@ -152,36 +128,4 @@ export async function request(
     throw new APIError(safeCode, message, undefined, response.status);
   }
   return result;
-}
-
-export async function signedRequest(
-  path,
-  { action, accountId, payload, seed, signChallenge, hashBytes },
-) {
-  const payloadBytes = jsonBytes(payload);
-  const challenge = await request("/api/member/challenges", {
-    method: "POST",
-    body: {
-      account_id: accountId,
-      action,
-      payload_hash: toBase64url(await hashBytes(payloadBytes)),
-    },
-  });
-  const signature = await signChallenge({
-    challenge,
-    expectedAction: action,
-    accountId,
-    payloadBytes,
-    seed,
-  });
-  return request(path, {
-    method: "POST",
-    body: {
-      payload: toBase64url(payloadBytes),
-      proof: {
-        challenge_id: challenge.challenge_id,
-        password_sig: toBase64url(signature),
-      },
-    },
-  });
 }

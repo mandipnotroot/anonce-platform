@@ -496,7 +496,7 @@ try {
   assert.equal(
     await page.locator(".side,.mobile-head").count(),
     0,
-    "legacy sidebar or mobile dock remains",
+    "sidebar or mobile dock is not allowed",
   );
   assert.ok(
     await page.locator(".site-footer").count(),

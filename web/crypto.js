@@ -1289,25 +1289,6 @@ export async function decryptResponse({
     return result;
   });
 }
-export async function submissionHash({
-  review_id,
-  issuer_key_id,
-  prepared_message,
-  signature,
-  enc,
-  ciphertext,
-}) {
-  return sha256(
-    encodeContext("submission", [
-      decode(review_id, 16),
-      decode(issuer_key_id, 32),
-      decode(prepared_message),
-      decode(signature, 384),
-      decode(enc, 32),
-      decode(ciphertext),
-    ]),
-  );
-}
 export async function responseHash({
   deploymentId,
   reviewId,

@@ -105,7 +105,7 @@ func TestInit(t *testing.T) {
 	}{
 		{"unsupported", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(2)", "unsupported schema version"},
 		{"multiple versions", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(1),(2)", "unsupported schema version"},
-		{"legacy", "CREATE TABLE public.anonce_migrations(version text PRIMARY KEY); INSERT INTO public.anonce_migrations VALUES('001_initial.sql')", "must be recreated"},
+		{"unrecognized schema marker", "CREATE TABLE public.anonce_migrations(version text PRIMARY KEY); INSERT INTO public.anonce_migrations VALUES('001_initial.sql')", "must be recreated"},
 		{"rollback", "CREATE SCHEMA member; CREATE TABLE member.accounts(sentinel text); INSERT INTO member.accounts VALUES('preserve')", "initialize schema"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestInit(t *testing.T) {
 				query += " AND (SELECT count(*)=1 AND min(version)=2 FROM public.anonce_schema_version)"
 			case "multiple versions":
 				query += " AND (SELECT count(*)=2 FROM public.anonce_schema_version)"
-			case "legacy":
+			case "unrecognized schema marker":
 				query += " AND to_regclass('public.anonce_schema_version') IS NULL AND (SELECT version='001_initial.sql' FROM public.anonce_migrations)"
 			case "rollback":
 				query += " AND to_regclass('public.anonce_schema_version') IS NULL AND (SELECT sentinel='preserve' FROM member.accounts)"

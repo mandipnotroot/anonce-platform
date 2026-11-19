@@ -1440,11 +1440,6 @@ test("reviewer rejects receipt and identifier mismatches before decrypting", asy
     assert.equal(result.items[0].answers.length, 0);
   }
 });
-test("secret-link service exports are removed", () => {
-  assert.equal(app.parseResponseInvitation, undefined);
-  assert.equal(app.getInvitationURL, undefined);
-});
-
 test("review keys require authoritative vault and exact review binding", async () => {
   const reviewId = Buffer.alloc(16, 1).toString("base64url"),
     key = Buffer.alloc(32, 2).toString("base64url");
