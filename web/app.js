@@ -25,22 +25,10 @@ function queueCookieMutation(operation) {
   cookieMutations = result.catch(() => {});
   return result;
 }
-export function getReceiptTrust() {
-  return C.getReceiptTrust();
-}
-export async function loadReceiptTrust() {
-  const config = await request("/api/public/config", { anonymous: true });
-  return {
-    v: 1,
-    deployment_id: config.deployment_id,
-    receipt_key_id: config.receipt_key_id,
-    receipt_keys: config.receipt_keys,
-  };
-}
-// Scan JSON structure before parsing so duplicate keys cannot disappear during parsing.
-function receiptJSON(text) {
+// Reject duplicate keys before parsing authenticated vault objects.
+function strictJSON(text) {
   const invalid = () => {
-    throw new APIError("INVALID_RECEIPT", "Invalid receipt or trust JSON.");
+    throw new APIError("INVALID_JSON", "Invalid JSON.");
   };
   if (
     typeof text !== "string" ||
@@ -113,46 +101,6 @@ function receiptJSON(text) {
   space();
   if (i !== text.length) invalid();
   return JSON.parse(text);
-}
-export async function verifySavedReceipt({ receiptText, trustText }) {
-  const receipt = receiptJSON(receiptText),
-    trust = receiptJSON(trustText);
-  const schema = (value, keys) =>
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value).length === keys.length &&
-    keys.every((key) => Object.hasOwn(value, key));
-  const strings = (value, keys) =>
-    keys.every((key) => typeof value[key] === "string");
-  const fields = [
-    "deployment_id",
-    "receipt_id",
-    "review_id",
-    "descriptor_hash",
-    "issuer_key_id",
-    "response_hash",
-    "accepted_at",
-    "receipt_key_id",
-    "signature",
-  ];
-  if (
-    !schema(receipt, ["v", ...fields]) ||
-    receipt.v !== 2 ||
-    !strings(receipt, fields) ||
-    !schema(trust, ["v", "deployment_id", "receipt_key_id", "receipt_keys"]) ||
-    trust.v !== 1 ||
-    !strings(trust, ["deployment_id", "receipt_key_id"]) ||
-    !Array.isArray(trust.receipt_keys) ||
-    !trust.receipt_keys.length ||
-    !trust.receipt_keys.every(
-      (key) =>
-        schema(key, ["receipt_key_id", "receipt_public_key"]) &&
-        strings(key, ["receipt_key_id", "receipt_public_key"]),
-    )
-  )
-    throw new APIError("INVALID_RECEIPT", "Invalid receipt or trust JSON.");
-  return { receipt: await C.verifyReceiptSignature({ receipt, trust }) };
 }
 export function getSourceURL() {
   try {
@@ -682,7 +630,7 @@ async function reviewKeys(
   );
   if (!object || String(object.revision) !== "1") throw keyUnavailable();
   try {
-    const value = receiptJSON(
+    const value = strictJSON(
       new TextDecoder("utf-8", { fatal: true }).decode(
         await C.openVaultObject({
           accountId: bytes(s.accountId),

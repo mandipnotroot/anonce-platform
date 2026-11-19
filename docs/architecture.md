@@ -150,7 +150,7 @@ code or network/timing correlation.
 - This detects unsigned ciphertext replacement; it does not establish complete database integrity.
 - A database-write attacker can delete or replay accepted records, roll back history, or remove spend state and reuse stored bearer authorizations through the honest signing endpoint.
 - Acceptance also trusts database-held issuer context.
-- Protect database integrity and retain independently trusted receipt public keys.
+- Protect database integrity and retain trusted historical receipt public keys in the deployment configuration.
 
 - This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution.
 - Independent source-first security review is required, not an audit claim.

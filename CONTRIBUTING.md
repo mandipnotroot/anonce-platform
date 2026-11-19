@@ -148,7 +148,7 @@ establish current-revision evidence for:
 - Atomic quota enforcement, idempotent retries, closure races, rollback, and
   restart continuity against PostgreSQL with both restricted database roles.
 - Live multiaccount browser journeys for registration, recovery, publication,
-  response submission/retries, receipt verification, and creator decrypt/export.
+  response submission/retries, response-bound acceptance checks, and creator decrypt/export.
   Check browser persistence, logout cleanup, keyboard access, mobile layouts,
   and assistive technology separately from module tests.
 - Anonymous credential omission, identifying-log prevention, metadata boundaries,

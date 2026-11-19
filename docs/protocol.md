@@ -216,7 +216,7 @@ Use established libraries, not homegrown primitives.
 - Submission: `{review_id,issuer_key_id,prepared_message,signature,enc,ciphertext}`; `enc` is 32 bytes.
 - Verify the prepared authorization and extract serial. `token_hash = SHA256(E('token',review_id,issuer_key_id,serial))`. `submission_hash = SHA256(E('submission',review_id,issuer_key_id,prepared_message,signature,enc,ciphertext))`.
 
-- The token and full submission hashes remain internal replay/idempotency values; neither appears in exported receipts.
+- The token and full submission hashes remain internal replay/idempotency values; neither appears in receipts.
 - Define `response_hash = SHA256(E('accepted-response-v2',deployment,review_id,descriptor_hash,issuer_key_id,enc,ciphertext))`, where `descriptor_hash` is SHA-256 of the exact verified descriptor bytes.
 
 - Receipt contains exactly `{v:2,deployment_id,receipt_id,review_id,descriptor_hash,issuer_key_id,response_hash,accepted_at,receipt_key_id,signature}`.
@@ -225,16 +225,14 @@ Use established libraries, not homegrown primitives.
 - Acceptance and receipt persistence are one transaction.
 - Only receipt version 2 is accepted.
 
-- The portable public trust document contains exactly `{v:1,deployment_id,receipt_key_id,receipt_keys:[{receipt_key_id,receipt_public_key}]}`.
+- Receipt trust configuration contains exactly `{v:1,deployment_id,receipt_key_id,receipt_keys:[{receipt_key_id,receipt_public_key}]}`.
 - Each key ID is SHA-256 of its raw 32-byte Ed25519 public key.
 - Require unique IDs and an entry for the current `receipt_key_id`.
 - Historical keys must be explicitly trusted by the operator; receipt fields cannot introduce verification keys.
 - Public configuration v2 publishes this keyring alongside the other deployment configuration.
-- Obtain and retain trust information through a trusted channel; an arbitrary key bundled with a receipt does not establish authenticity.
+- Verification trusts the deployment's public configuration and served browser code; receipt fields cannot establish their own trust.
 
-- Signature-only portable verification authenticates the server's acceptance
-  statement, not a match to an independently held submission.
-- Submission and reviewer flows additionally require the expected deployment, review, exact descriptor hash, issuer, and independently computed response hash.
+- Submission and reviewer flows require the expected deployment, review, exact descriptor hash, issuer, and independently computed response hash.
 - Reviewers verify the receipt and item ID before decryption and use only the signed acceptance time.
 - A failed receipt check makes that record invalid without
   blocking other records.

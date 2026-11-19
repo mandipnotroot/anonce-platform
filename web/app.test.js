@@ -80,7 +80,7 @@ async function service(overrides = {}) {
   vm.runInContext(
     source +
       `;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={initialize,getLimits,sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
+    globalThis.service={initialize,getLimits,sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
     globalThis.setState=value=>{state=value;};
     globalThis.setLogin=value=>{login=value;};
     globalThis.setCredentials=value=>{credentials=value;};
@@ -782,36 +782,6 @@ for (const operation of ["changePassword", "rotateRecovery", "recover"]) {
   });
 }
 
-test("standalone receipt trust loads only public config anonymously without crypto init", async () => {
-  let requestArgs;
-  const config = {
-    v: 99,
-    deployment_id: "deployment",
-    receipt_key_id: "current",
-    receipt_keys: [{ receipt_key_id: "current", receipt_public_key: "public" }],
-    ca_certificate: "unused",
-  };
-  const context = await service({
-    request: async (...args) => {
-      requestArgs = args;
-      return config;
-    },
-  });
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(await context.service.loadReceiptTrust())),
-    {
-      v: 1,
-      deployment_id: "deployment",
-      receipt_key_id: "current",
-      receipt_keys: config.receipt_keys,
-    },
-  );
-  assert.deepEqual(JSON.parse(JSON.stringify(requestArgs)), [
-    "/api/public/config",
-    { anonymous: true },
-  ]);
-});
-
 test("issuance padding has fixed byte length, whitespace roundtrip, and fits request limits", async () => {
   const sealed = [];
   const context = await service({
@@ -1259,53 +1229,6 @@ const portableTrust = {
   receipt_key_id: "Zw",
   receipt_keys: [{ receipt_key_id: "Zw", receipt_public_key: "aQ" }],
 };
-test("standalone verification uses explicit trust without initialization or requests", async () => {
-  let calls = 0;
-  const context = await service({
-    C: {
-      verifyReceiptSignature: async ({ receipt, trust }) => {
-        calls++;
-        assert.deepEqual(JSON.parse(JSON.stringify(trust)), portableTrust);
-        return receipt;
-      },
-    },
-  });
-  const result = await context.service.verifySavedReceipt({
-    receiptText: JSON.stringify(portableReceipt),
-    trustText: JSON.stringify(portableTrust),
-  });
-  assert.equal(result.receipt.receipt_id, "Yg");
-  assert.equal(calls, 1);
-});
-test("standalone verification rejects duplicate, unknown, malformed, trailing and oversized JSON", async () => {
-  const context = await service();
-  for (const receiptText of [
-    "{",
-    "null",
-    "[]",
-    JSON.stringify({ ...portableReceipt, token: "secret" }),
-    JSON.stringify(portableReceipt) + " false",
-    JSON.stringify(portableReceipt).replace('"v":2', '"v":2,"\\u0076":2'),
-    " ".repeat(65537),
-    '"' + "日".repeat(22000) + '"',
-  ]) {
-    await assert.rejects(
-      context.service.verifySavedReceipt({
-        receiptText,
-        trustText: JSON.stringify(portableTrust),
-      }),
-    );
-  }
-  await assert.rejects(
-    context.service.verifySavedReceipt({
-      receiptText: JSON.stringify(portableReceipt),
-      trustText: JSON.stringify({
-        ...portableTrust,
-        url: "https://evil.invalid",
-      }),
-    }),
-  );
-});
 test("cached and lookup receipts reverify descriptor, envelope and every expected context", async () => {
   for (const method of ["submitResponse", "lookupReceipt"])
     for (const cached of [false, true]) {

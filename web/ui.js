@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import * as api from "./app.js";
-import { decodeReceiptPNG } from "./receipt-qr.bundle.js";
-import { renderReceiptPNG } from "./receipt-card.js";
 
 const root = document.querySelector("#app");
 let session = null,
@@ -56,7 +54,7 @@ const loadMembersIfAllowed = (organization, load) => {
   if (canManageMemberships(organization)) load();
 };
 const isWorkspaceRouteAllowed = (account, route) =>
-  account?.scope === "full" || ["account", "verify-receipt"].includes(route);
+  account?.scope === "full" || route === "account";
 const isPermissionError = (error) =>
   error?.status === 403 ||
   ["forbidden", "FORBIDDEN", "recovery_scope", "RECOVERY_SCOPE"].includes(
@@ -166,46 +164,12 @@ async function copyText(value, label = "Text") {
   }
 }
 function receiptHTML(receipt) {
-  const text = JSON.stringify(receipt, null, 2);
   const acceptedAt = formatReceiptTime(receipt?.accepted_at);
   const acceptedTime =
     acceptedAt === "Acceptance time unavailable"
       ? esc(acceptedAt)
       : `Accepted <time>${esc(acceptedAt)}</time>`;
-  return `<section class="notice receipt-notice" aria-labelledby="receipt-heading"><h2 id="receipt-heading">Response accepted</h2><p class="receipt-status" role="status">Receipt signature verified</p><p>${acceptedTime}</p><p>Keep a copy of this receipt. It confirms acceptance, not what your response said.</p><div class="receipt-actions"><button type="button" class="button" data-receipt-download>Download receipt PNG</button><a class="button ghost" href="#/verify-receipt">Verify a receipt</a></div><details class="receipt-details"><summary>Technical details (JSON)</summary><button type="button" class="button secondary" data-receipt-copy>Copy receipt data</button><pre class="receipt-data">${esc(text)}</pre></details></section>`;
-}
-function bindReceiptTools(box, receipt) {
-  const text = JSON.stringify(receipt, null, 2);
-  box.querySelector("[data-receipt-copy]").onclick = () =>
-    copyText(text, "Receipt");
-  const download = box.querySelector("[data-receipt-download]");
-  download.onclick = async () => {
-    if (download.disabled || !download.isConnected) return;
-    download.disabled = true;
-    setButtonText(download, "Preparing PNG…");
-    let url;
-    try {
-      const blob = await renderReceiptPNG({ receipt });
-      if (!download.isConnected) return;
-      url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "anonce-receipt.png";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      toast("Receipt PNG download started.", "success");
-    } catch (error) {
-      if (download.isConnected)
-        toast(`Could not create receipt PNG. ${say(error)}`);
-    } finally {
-      if (url) URL.revokeObjectURL(url);
-      if (download.isConnected) {
-        download.disabled = false;
-        setButtonText(download, "Download receipt PNG");
-      }
-    }
-  };
+  return `<section class="notice receipt-notice" aria-labelledby="receipt-heading"><h2 id="receipt-heading">Response accepted</h2><p class="receipt-status" role="status">Receipt signature verified</p><p>${acceptedTime}</p><p>Your response was accepted. The signed receipt confirms acceptance, not what your response said.</p></section>`;
 }
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
@@ -254,7 +218,7 @@ function frame(body, title = "Workspace") {
     session && currentOrg
       ? `<div class="workspace-label" aria-label="Current workspace: ${esc(currentOrg.name || "Organization")}"><span class="workspace-icon">${icon("building-2")}</span><strong>${esc(currentOrg.name || "Organization")}</strong></div>`
       : "";
-  root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/" aria-label="Anonce home"><picture><source srcset="./assets/branding/anonce-logo-on-dark.svg" media="(prefers-color-scheme: dark)"><img class="brand-logo" src="./assets/branding/anonce-logo-on-light.svg" alt="Anonce"></picture></a>${workspaceLabel}<nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/verify-receipt" aria-label="Verify receipt" ${active === "verify-receipt" ? 'aria-current="page"' : ""} class="${active === "verify-receipt" ? "active" : ""}"><span class="nav-item">${icon("check-circle-2")}<span>Verify receipt</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.email || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content">${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p><a href="#/verify-receipt">Verify a receipt</a>${sourceLink}</footer></div>`;
+  root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a><div class="shell"><header class="site-header"><a class="brand" href="#/" aria-label="Anonce home"><picture><source srcset="./assets/branding/anonce-logo-on-dark.svg" media="(prefers-color-scheme: dark)"><img class="brand-logo" src="./assets/branding/anonce-logo-on-light.svg" alt="Anonce"></picture></a>${workspaceLabel}<nav class="nav" aria-label="Workspace"><a href="#/" aria-label="Overview" ${!active ? 'aria-current="page"' : ""} class="${!active ? "active" : ""}"><span class="nav-item">${icon("house")}<span>Overview</span></span></a><a href="#/orgs" aria-label="Organizations" ${active === "orgs" ? 'aria-current="page"' : ""} class="${active === "orgs" ? "active" : ""}"><span class="nav-item">${icon("building-2")}<span>Organizations</span></span></a><a href="#/account" aria-label="Account and recovery" ${active === "account" ? 'aria-current="page"' : ""} class="${active === "account" ? "active" : ""}"><span class="nav-item">${icon("user-round")}<span class="nav-label"><span>Account</span><span class="nav-detail">&amp; recovery</span></span></span></a></nav><div class="header-account">${session ? esc(session.email || "Member") : '<a href="#/login">Sign in</a>'}</div></header><main class="main" id="main-content" tabindex="-1"><div class="content">${body}</div></main><footer class="site-footer"><p>Responses are designed to be anonymous. See your organization’s privacy policy for its trust assumptions.</p>${sourceLink}</footer></div>`;
   if (session?.scope !== "full")
     root
       .querySelectorAll('.nav a[href="#/"], .nav a[href="#/orgs"]')
@@ -405,15 +369,6 @@ async function load() {
     hashParams.has("next")
   )
     returnRoute = hashParams.get("next");
-  if (route[0] === "verify-receipt") {
-    try {
-      session = await api.getSessionStatus();
-    } catch {
-      session = null;
-    }
-    if (!isCurrentLoad()) return;
-    return await renderReceiptVerifier();
-  }
   try {
     const result = await api.getSession();
     if (!isCurrentLoad()) return;
@@ -539,176 +494,6 @@ async function load() {
   if (!isCurrentLoad() || currentOrg?.id !== orgId) return;
   renderHome();
 }
-async function renderReceiptVerifier() {
-  let currentTrust = "";
-  let trustAvailable = true;
-  try {
-    currentTrust = JSON.stringify(await api.loadReceiptTrust(), null, 2);
-  } catch {
-    trustAvailable = false;
-  }
-  if (path()[0] !== "verify-receipt") return;
-  frame(
-    `${head("Verify a receipt", "Public signing keys load once from this site. Image reading and signature checking happen locally.")}
-    <section class="card form-card verifier-card">
-      <label class="field receipt-file-field"><span>Receipt card image</span><input id="verify-receipt-file" type="file" accept="image/png,.png" aria-describedby="receipt-file-status"><span id="receipt-file-status" class="help" aria-live="polite"></span></label>
-      <details class="verifier-paste"><summary>Paste receipt JSON instead</summary><label class="field" for="verify-receipt-text">Receipt JSON<textarea id="verify-receipt-text" rows="7" maxlength="65536"></textarea></label></details>
-      <details class="verifier-faq"><summary>What does verification check?</summary><p>This check uses public signing keys published by this site unless you choose another configuration. A receipt cannot provide or replace its own trusted key; never trust a replacement key supplied with a receipt.</p><p>A valid signature confirms only that listed acceptance details were signed. It does not prove response contents, storage, anonymity, or trusted time. This check still trusts code served by this site.</p></details>
-      <details class="verify-trust"><summary>Choose which public signing keys to trust</summary><p class="help">${trustAvailable ? "This configuration uses keys published by this site. For an independent check, get a configuration from a source you trust." : "Could not load this site’s public signing keys. Choose an independently obtained configuration to continue."}</p>
-        <label class="trust-choice"><input type="radio" name="trust-source" value="current" ${trustAvailable ? "checked" : "disabled"}> Use keys published by this site</label>
-        <label class="trust-choice"><input type="radio" name="trust-source" value="import" ${trustAvailable ? "" : "checked"}> Use an independently obtained configuration</label>
-        <label class="field">Configuration file<input id="verify-trust-file" type="file" accept="application/json,.json"></label>
-        <label class="field" for="verify-trust-text">Configuration JSON<textarea id="verify-trust-text" rows="6" maxlength="65536" ${trustAvailable ? "disabled" : ""}>${esc(currentTrust)}</textarea></label>
-        <button type="button" class="button secondary" id="download-trust" ${trustAvailable ? "" : "disabled"}>Download this site’s public configuration</button>
-      </details>
-      <button type="button" class="button verify-submit" id="verify-receipt">Verify receipt</button>
-      <div id="verify-result" role="status" aria-live="polite"></div>
-    </section>`,
-    "Verify a receipt",
-  );
-  const receiptText = document.querySelector("#verify-receipt-text");
-  const receiptFile = document.querySelector("#verify-receipt-file");
-  const trustText = document.querySelector("#verify-trust-text");
-  trustText.disabled = trustAvailable;
-  const trustFile = document.querySelector("#verify-trust-file");
-  const result = document.querySelector("#verify-result");
-  const verifyButton = document.querySelector("#verify-receipt");
-  let generation = 0;
-  let imageLoadToken = null;
-  const receiptFileStatus = document.querySelector("#receipt-file-status");
-  const clearResult = () => {
-    if (imageLoadToken !== null)
-      receiptFileStatus.textContent =
-        "Image loading interrupted. Choose the PNG again.";
-    imageLoadToken = null;
-    generation++;
-    result.replaceChildren();
-    verifyButton.disabled = false;
-    return generation;
-  };
-  const currentChoice = () =>
-    document.querySelector('input[name="trust-source"]:checked')?.value ===
-    "current";
-  receiptText.addEventListener("input", () => {
-    clearResult();
-    receiptFileStatus.textContent = "Using pasted receipt JSON.";
-  });
-  trustText.addEventListener("input", clearResult);
-  document.querySelectorAll('input[name="trust-source"]').forEach((radio) =>
-    radio.addEventListener("change", () => {
-      trustText.disabled = currentChoice();
-      clearResult();
-    }),
-  );
-  receiptFile.addEventListener("change", () => {
-    const selectedFile = receiptFile.files[0];
-    receiptText.value = "";
-    const token = clearResult();
-    receiptFileStatus.textContent = selectedFile
-      ? "Reading receipt image…"
-      : "";
-    if (!selectedFile) return;
-    if (selectedFile.size > 4 * 1024 * 1024) {
-      receiptFileStatus.textContent =
-        "Image exceeds 4 MiB. Choose a smaller PNG.";
-      return;
-    }
-    imageLoadToken = token;
-    verifyButton.disabled = true;
-    decodeReceiptPNG({ file: selectedFile })
-      .then((decoded) => {
-        if (
-          token !== generation ||
-          imageLoadToken !== token ||
-          !receiptFile.isConnected
-        )
-          return;
-        imageLoadToken = null;
-        receiptText.value = decoded;
-        receiptFileStatus.textContent =
-          "Receipt image loaded. Ready to verify.";
-        verifyButton.disabled = false;
-      })
-      .catch(() => {
-        if (
-          token !== generation ||
-          imageLoadToken !== token ||
-          !receiptFile.isConnected
-        )
-          return;
-        imageLoadToken = null;
-        receiptFileStatus.textContent =
-          "Could not read receipt image. Choose another PNG.";
-        result.textContent =
-          "This image does not contain a readable receipt QR code.";
-        verifyButton.disabled = false;
-      });
-  });
-  trustFile.addEventListener("change", () => {
-    document.querySelector(
-      'input[name="trust-source"][value="import"]',
-    ).checked = true;
-    trustText.disabled = false;
-    loadVerifierFile(
-      trustFile.files[0],
-      trustText,
-      result,
-      clearResult,
-      (token) => token === generation,
-    );
-  });
-  document.querySelector("#download-trust").onclick = () => {
-    const data = currentTrust;
-    const url = URL.createObjectURL(
-      new Blob([`${data}\n`], { type: "application/json;charset=utf-8" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "anonce-receipt-trust.json";
-    document.body.appendChild(link);
-    try {
-      link.click();
-    } finally {
-      link.remove();
-      URL.revokeObjectURL(url);
-    }
-    toast("Public trust configuration download started.", "success");
-  };
-  verifyButton.onclick = async () => {
-    clearResult();
-    const check = generation;
-    const inputText = receiptText.value;
-    const selectedTrust = currentChoice() ? currentTrust : trustText.value;
-    if (
-      !inputText.trim() &&
-      receiptFileStatus.textContent.startsWith("Could not read receipt image.")
-    ) {
-      result.textContent =
-        "This image does not contain a readable receipt QR code.";
-      return;
-    }
-    if (!inputText.trim() || !selectedTrust.trim()) {
-      result.textContent = !inputText.trim()
-        ? "Choose a receipt PNG or paste receipt JSON first."
-        : "Choose or paste a public trust configuration.";
-      return;
-    }
-    verifyButton.disabled = true;
-    result.textContent = "Checking receipt signature…";
-    try {
-      const verified = await verifyReceiptLocally(inputText, selectedTrust);
-      if (check !== generation) return;
-      const accepted = formatReceiptTime(verified.receipt.accepted_at);
-      result.innerHTML = `<section class="notice verifier-success"><strong>Receipt signature verified</strong><p>The signed receipt records acceptance at <time>${esc(accepted)}</time>.</p><p>This verifies the signature only. It does not match the receipt to your original response or prove what it contained.</p></section>`;
-    } catch {
-      if (check === generation)
-        result.innerHTML =
-          '<section class="notice verifier-failure"><strong>Receipt could not be verified</strong><p>Check that you selected the complete receipt and trusted public configuration. A failed check does not confirm acceptance.</p></section>';
-    } finally {
-      if (check === generation) verifyButton.disabled = false;
-    }
-  };
-}
 function formatReceiptTime(value) {
   if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value))
     return "Acceptance time unavailable";
@@ -719,57 +504,6 @@ function formatReceiptTime(value) {
   return Number.isNaN(date.getTime())
     ? `Unix time ${value}`
     : date.toLocaleString();
-}
-async function verifyReceiptLocally(receiptText, trustText) {
-  const byteLength = (value) => new TextEncoder().encode(value).byteLength;
-  if (byteLength(receiptText) > 65536 || byteLength(trustText) > 65536)
-    throw new Error(
-      "Receipt and trust configuration must each be 64 KiB or smaller.",
-    );
-  return api.verifySavedReceipt({ receiptText, trustText });
-}
-async function loadVerifierFile(
-  file,
-  target,
-  result,
-  clearResult,
-  isCurrent,
-  status = null,
-) {
-  const token = clearResult();
-  target.value = "";
-  if (status) status.textContent = file ? "Reading file…" : "";
-  if (!file) return;
-  if (file.size > 65536) {
-    if (isCurrent(token)) {
-      result.textContent = "File exceeds 64 KiB. Choose a smaller JSON file.";
-      if (status)
-        status.textContent = "File is too large. Choose a file up to 64 KiB.";
-    }
-    return;
-  }
-  try {
-    const text = await file.text();
-    if (!isCurrent(token)) return;
-    if (!text.trim()) {
-      result.textContent =
-        "This file is empty. Choose another receipt or paste its JSON.";
-      if (status)
-        status.textContent = "File is empty. Choose another or paste its JSON.";
-      return;
-    }
-    clearResult();
-    target.value = text;
-    if (status) status.textContent = "Receipt loaded. Ready to verify.";
-  } catch {
-    if (isCurrent(token)) {
-      result.textContent =
-        "Could not read file. Choose another file or paste its JSON.";
-      if (status)
-        status.textContent =
-          "Could not read file. Choose another or paste its JSON.";
-    }
-  }
 }
 function emptyCard(t, d, act = "") {
   return `<section class="card empty"><strong>${esc(t)}</strong>${d ? esc(d) : ""}${act ? `<div class="empty-action">${act}</div>` : ""}</section>`;
@@ -1578,7 +1312,6 @@ async function renderRespond(id) {
           if (x.status === "accepted") {
             box.innerHTML = receiptHTML(x.receipt);
             renderButtonIcons(box);
-            bindReceiptTools(box, x.receipt);
           } else
             state.textContent =
               "Still processing. You can check again shortly.";
@@ -1593,7 +1326,6 @@ async function renderRespond(id) {
       document.querySelector("#respond").classList.add("hidden");
       box.innerHTML = receiptHTML(result.receipt);
       renderButtonIcons(box);
-      bindReceiptTools(box, result.receipt);
     }
   });
 }

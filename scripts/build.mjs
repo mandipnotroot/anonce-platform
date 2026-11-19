@@ -14,16 +14,3 @@ await build({
   sourcemap: false,
   minify: true,
 });
-
-// Bundle QR codecs separately; UI modules remain unbundled.
-await build({
-  entryPoints: ["web/receipt-qr.js"],
-  outfile: "web/receipt-qr.bundle.js",
-  bundle: true,
-  format: "esm",
-  platform: "browser",
-  target: ["es2022"],
-  legalComments: "linked",
-  sourcemap: false,
-  minify: true,
-});

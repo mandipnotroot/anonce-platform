@@ -18,8 +18,6 @@
   Publication delivers content keys to members approved at that time.
 - Organization invite links, direct membership by registered email, multiple
   admins, and owner-only admin appointment controls.
-- Browser-local receipt verification, JSON/PNG import, QR receipt downloads,
-  and downloadable current/historical verification keys.
 - Bundled browser cryptography, versioned protocol/API contracts, and shared
   Go/browser cryptographic test vectors.
 - Transactional quota, replay, and idempotency controls with separate member
@@ -32,8 +30,6 @@
 
 ### Changed
 
-- Collapse receipt-verification trust and signature-limit guidance into an
-  expandable FAQ while preserving signing-key controls and security information.
 - Remove redundant interface instructions while retaining actionable validation
   errors and security warnings.
 - Use version-supported modern Go idioms for error matching, path splitting,
@@ -54,7 +50,7 @@
 - Bind receipt v2 to the encrypted response, deployment, review, descriptor, and
   issuer, with an operator-approved public signing-key ring.
 - Improve responsive layouts, keyboard focus, loading feedback, and action
-  notifications across account, organization, review, and receipt flows.
+  notifications across account, organization, and review flows.
 - Reuse a fresh vault download within each review-list request and load overview
   reviews and pending responses concurrently.
 - Gate proxy startup on application readiness and bound graceful shutdown.
@@ -66,12 +62,17 @@
   after demotion.
 - Preserve committed credential changes when automatic sign-in fails, and warn
   before discarding unacknowledged recovery words.
-- Verify receipt context before cached acceptance or result decryption, load
-  public verification keys on direct visits, and decode PNGs under the site's
-  content security policy.
+- Verify receipt context before cached acceptance or result decryption and load
+  public verification keys on direct visits.
 - Handle response timestamps and unreadable encrypted responses in results/exports.
 - Preserve issuance retry bytes restored from PostgreSQL JSONB and count only
   committed responses.
+
+### Removed
+
+- Standalone receipt verification, receipt PNG/QR downloads and imports, and
+  public signing-key import/export controls. Signed receipts remain internal to
+  submission confirmation, retries, and reviewer validation.
 
 ### Security
 
@@ -81,8 +82,7 @@
 - Pad authenticated issuance pending objects to a fixed plaintext size to prevent
   direct response-length linkage for new objects. Previously retained objects,
   timing correlation, and other [trust limitations](SECURITY.md) remain out of scope.
-- Restrict the receipt QR test server to fixed asset routes and use inert HTML
-  parsing in responsive checks.
+- Use inert HTML parsing in responsive checks.
 - Raise review limits to 500 questions, 512 KiB of plaintext, and 64 KiB
   descriptions; expose bounded operator-configurable limits to browser validation.
 - Increase descriptor and response ceilings to 768 KiB and 512 KiB, with

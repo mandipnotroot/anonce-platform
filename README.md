@@ -38,8 +38,10 @@ production-readiness claim is made; see the
   signed encrypted reviews for members approved at publication.
 - Obtain blind response authorizations through approved membership.
 - Submit encrypted answers anonymously; only the review creator decrypts and exports responses.
-- Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
-  access on another device.
+- Change passwords or recover access on another device.
+- If response delivery is uncertain, use **Check status** or retry the saved pending
+  response in the original browser; do not create a new response just because a
+  network request failed.
 
 Owners and admins can see member emails, but addresses are not mailbox-verified
 and a matching domain does not establish membership. Invitations do not send email.
@@ -139,7 +141,6 @@ for check details, browser E2E setup, and required coverage.
 - [Architecture and threat boundaries](docs/architecture.md)
 - [Cryptographic protocol and formats](docs/protocol.md)
 - [OpenAPI contract](docs/openapi.yaml)
-- [Saving and verifying receipts](docs/receipts.md)
 - [Operations and local HTTPS](docs/operations.md)
 - [Testing and release gates](CONTRIBUTING.md#verification-and-release-gates)
 

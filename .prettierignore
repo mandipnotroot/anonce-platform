@@ -7,9 +7,6 @@ node_modules/
 /web/crypto.bundle.js
 /web/crypto.bundle.js.map
 /web/crypto.bundle.js.LEGAL.txt
-/web/receipt-qr.bundle.js
-/web/receipt-qr.bundle.js.map
-/web/receipt-qr.bundle.js.LEGAL.txt
 
 # Supplied logo artwork: preserve original SVG bytes and embedded metadata.
 /web/assets/branding/*.svg
