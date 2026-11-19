@@ -89,16 +89,16 @@ func TestIntegrationChallengeAtomicityAndEpoch(t *testing.T) {
 	if ok != 1 {
 		t.Fatalf("login minted %d", ok)
 	}
-	// Migration reruns are no-ops and preserve deployment/key/account state.
+	// Repeated initialization preserves deployment/key/account state.
 	before := protocol.B64(s.deployment)
 	for range 2 {
-		if e := db.Migrate(ctx, s.member); e != nil {
+		if e := db.Init(ctx, s.member); e != nil {
 			t.Fatal(e)
 		}
 	}
 	var dep []byte
 	if e := s.member.QueryRow(ctx, "SELECT value FROM member.settings WHERE name='deployment'").Scan(&dep); e != nil || protocol.B64(dep) != before {
-		t.Fatal("migration lost deployment")
+		t.Fatal("initialization lost deployment")
 	}
 	result(t, request(h, "GET", "/api/member/me", nil, u), 200)
 }

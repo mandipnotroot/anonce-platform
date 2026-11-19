@@ -251,12 +251,15 @@ func (s *Server) params(w http.ResponseWriter, r *http.Request) {
 	}
 	write(w, 200, map[string]any{"account_id": id, "credential_epoch": strconv.FormatInt(epoch, 10), "password_kdf": kd, "recovery_salt": salt})
 }
+
+type challengeRequest struct {
+	Account string `json:"account_id"`
+	Action  string `json:"action"`
+	Hash    string `json:"payload_hash"`
+}
+
 func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
-	var p struct {
-		Account string `json:"account_id"`
-		Action  string `json:"action"`
-		Hash    string `json:"payload_hash"`
-	}
+	var p challengeRequest
 	if e := body(r, &p); e != nil {
 		fail(w, e)
 		return

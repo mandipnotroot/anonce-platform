@@ -82,7 +82,7 @@
 - Build a Go standard-library-first modular monolith with explicit boundaries.
   Justify external dependencies; established cryptographic libraries are required
   where the standard library lacks the prescribed primitive.
-- Use PostgreSQL, parameterized SQL, and transactional migrations. Never build
+- Use PostgreSQL, parameterized SQL, and transactional schema initialization. Never build
   SQL by interpolating untrusted values.
 - Browser stack: HTML, CSS, and vanilla JavaScript ES modules by default. A
   lightweight frontend-only framework requires a documented need and review of

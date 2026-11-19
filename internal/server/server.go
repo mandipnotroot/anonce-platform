@@ -114,7 +114,7 @@ func New(ctx context.Context, c Config) (*Server, error) {
 	if role != "anonce_member" || super {
 		return fail(errors.New("member connection must use non-superuser anonce_member"))
 	}
-	if e = db.Migrate(ctx, s.member); e != nil {
+	if e = db.Init(ctx, s.member); e != nil {
 		return fail(e)
 	}
 	s.anonymous, e = pgxpool.New(ctx, c.AnonymousURL)
@@ -293,11 +293,7 @@ func (s *Server) Handler() http.Handler {
 					}
 					return
 				}
-				var p struct {
-					Account string `json:"account_id"`
-					Action  string `json:"action"`
-					Hash    string `json:"payload_hash"`
-				}
+				var p challengeRequest
 				if e = protocol.StrictJSON(b, &p); e != nil {
 					reject(bad("invalid_json"))
 					return

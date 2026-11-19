@@ -43,7 +43,7 @@ when reviewing updates.
 | Go (`.go`)                             | `gofmt`, through `make fmt` and `make fmt-check`.                                                                      |
 | JavaScript (`.js`, `.mjs`), HTML, CSS  | Local Prettier, with explicit file paths.                                                                              |
 | JSON, YAML (`.yaml`, `.yml`), Markdown | Local Prettier, with explicit file paths.                                                                              |
-| PostgreSQL (`.sql`)                    | No automated formatter configured. Preserve surrounding SQL style and transactional migration boundaries.              |
+| PostgreSQL (`.sql`)                    | No automated formatter configured. Preserve surrounding SQL style and transactional schema initialization boundaries.  |
 | Shell (`.sh`)                          | No automated formatter configured. Preserve surrounding shell style; validate syntax with `bash -n path/to/script.sh`. |
 | `Caddyfile`, `Caddyfile.local`         | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing these files.                          |
 | `Dockerfile`, `Makefile`, ignore files | Preserve surrounding style; keep required Make recipe tabs. No automated formatter configured.                         |
@@ -122,6 +122,11 @@ Required standards:
 - CI's disposable PostgreSQL job uses the repository's role setup script and sets
   `ANONCE_REQUIRE_DATABASE_TESTS=1`: missing either database URL fails tests instead of skipping them.
 - Set the same flag for local checks that must include database coverage.
+- Schema initialization tests additionally require `ANONCE_TEST_INIT_DATABASE_URL`,
+  pointing to a separate disposable database owned by the member role, with the
+  anonymous role available. These tests reset its application schemas and version
+  tables; never reuse the server integration database or a database containing data
+  you need. The required-test flag also fails if this URL is missing.
 - The separate container job validates both Compose configurations and builds
   application and proxy images without publishing or starting the deployment.
 - These jobs do not establish live HTTPS, backup recovery, or independent security-review evidence.

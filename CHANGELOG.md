@@ -45,6 +45,9 @@
 
 ### Changed
 
+- Replace incremental database migrations with one current schema and transactional,
+  version-checked initialization. Older databases require a fresh database; no
+  automatic upgrade or data transfer is provided.
 - Center the organization selector beneath the logo and account row on mobile.
 - Refine the browser theme with a subtle background glow, softer cards, more
   spacious page headings, and greater emphasis on primary actions while retaining

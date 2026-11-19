@@ -35,10 +35,15 @@
 - PostgreSQL 18 uses backend-owned initialization scripts in `db/init` by default; `ANONCE_DB_INIT_DIR` can override that directory.
 - Before startup, confirm it contains nonempty reviewed scripts, not an empty placeholder.
 - They must create distinct member and anonymous login roles using the supplied role passwords, with no superuser, database creation, or role creation permissions.
-- Restrict anonymous grants to its contract; no membership tables. `DATABASE_URL` uses the migration/member role, never `anonce_admin`; `ANON_DATABASE_URL` uses the restricted anonymous role.
+- Restrict anonymous grants to its contract; no membership tables. `DATABASE_URL` uses the member role, never `anonce_admin`; `ANON_DATABASE_URL` uses the restricted anonymous role.
 - No shared-role fallback is acceptable.
 - Initialization runs only on empty volumes.
-- Backend owns transactional, versioned migrations guarded by an advisory lock.
+- Backend installs the current `db/schema.sql` in one transaction, guarded by an
+  advisory lock. A schema-version marker makes repeated startup a no-op.
+- This unreleased app has no database upgrade migrations. Databases from the old
+  migration runner or with an unsupported schema version are rejected, not modified.
+  Use a new, unused `ANONCE_DB_VOLUME` for a fresh database; existing data is not
+  transferred. Preserve the old volume and backups if its data matters.
 - The role names are `anonce_member` and `anonce_anon`, using `ANONCE_MEMBER_DB_PASSWORD` and `ANONCE_ANON_DB_PASSWORD`, respectively.
 - Confirm actual grants against the backend contract before deployment.
 
@@ -55,18 +60,18 @@
 Copy `.env.example` to `.env`; fill every blank with strong distinct credentials,
 correct role URLs (URL-encode passwords), public domain, and reviewed init path.
 
-| Variable                                               | Required / default                                           | Purpose                                                                           |
-| ------------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `ANONCE_DOMAIN`                                        | Required; example `feedback.example.org`                     | Public host; Compose derives `ANONCE_ORIGIN=https://<host>`                       |
-| `ANONCE_SOURCE_URL`                                    | Required                                                     | Exact complete corresponding deployed source                                      |
-| `POSTGRES_PASSWORD`                                    | Required; blank example                                      | Database administrator password                                                   |
-| `ANONCE_MEMBER_DB_PASSWORD`, `ANONCE_ANON_DB_PASSWORD` | Required; blank example                                      | Distinct initialization role passwords                                            |
-| `DATABASE_URL`, `ANON_DATABASE_URL`                    | Required; blank example                                      | Matching member/migration and restricted anonymous URLs; percent-encode passwords |
-| `ANONCE_DB_INIT_DIR`                                   | Default `./db/init`                                          | Reviewed nonempty initialization scripts                                          |
-| `ANONCE_DB_VOLUME`                                     | Optional; `<Compose project>_pgdata`                         | Persistent database volume; a new unused name initializes empty data              |
-| `ANONCE_SERVER_KEY_FILE`                               | Required; example `./secrets/server_key`                     | Host master-key file                                                              |
-| `ANONCE_RECEIPT_TRUST_FILE`                            | Optional; empty                                              | Container path to separately mounted public trust document                        |
-| `ANONCE_ADDR`, `ANONCE_WEB_DIR`, `ANONCE_KEY_FILE`     | Compose fixes `:8080`, `/app/web`, `/run/secrets/server_key` | Internal runtime settings, not `.env` overrides in this Compose file              |
+| Variable                                               | Required / default                                           | Purpose                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `ANONCE_DOMAIN`                                        | Required; example `feedback.example.org`                     | Public host; Compose derives `ANONCE_ORIGIN=https://<host>`             |
+| `ANONCE_SOURCE_URL`                                    | Required                                                     | Exact complete corresponding deployed source                            |
+| `POSTGRES_PASSWORD`                                    | Required; blank example                                      | Database administrator password                                         |
+| `ANONCE_MEMBER_DB_PASSWORD`, `ANONCE_ANON_DB_PASSWORD` | Required; blank example                                      | Distinct initialization role passwords                                  |
+| `DATABASE_URL`, `ANON_DATABASE_URL`                    | Required; blank example                                      | Matching member and restricted anonymous URLs; percent-encode passwords |
+| `ANONCE_DB_INIT_DIR`                                   | Default `./db/init`                                          | Reviewed nonempty initialization scripts                                |
+| `ANONCE_DB_VOLUME`                                     | Optional; `<Compose project>_pgdata`                         | Persistent database volume; a new unused name initializes empty data    |
+| `ANONCE_SERVER_KEY_FILE`                               | Required; example `./secrets/server_key`                     | Host master-key file                                                    |
+| `ANONCE_RECEIPT_TRUST_FILE`                            | Optional; empty                                              | Container path to separately mounted public trust document              |
+| `ANONCE_ADDR`, `ANONCE_WEB_DIR`, `ANONCE_KEY_FILE`     | Compose fixes `:8080`, `/app/web`, `/run/secrets/server_key` | Internal runtime settings, not `.env` overrides in this Compose file    |
 
 Generate the server key locally using an operator CLI:
 
@@ -200,7 +205,8 @@ docker compose exec -T db pg_restore -U anonce_admin -d anonce --exit-on-error <
 ```
 
 - Restore into a fresh initialized database, not over live data.
-- Verify grants, integrity, migration versions, and application behavior before reopening access.
+- Restore only a backup matching the current schema version; startup does not upgrade it.
+- Verify grants, integrity, schema version, and application behavior before reopening access.
 
 ### Key continuity and rotation limits
 
