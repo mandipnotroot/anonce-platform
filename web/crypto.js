@@ -134,6 +134,43 @@ export async function hashBytes(bytes) {
   return sha256(requireBytes(bytes));
 }
 let config;
+export const DEFAULT_LIMITS = Object.freeze({
+  max_questions: 500,
+  max_review_bytes: 524288,
+  max_description_bytes: 65536,
+  max_response_bytes: 524288,
+  max_descriptor_bytes: 786432,
+  pending_padding_bytes: 1048576,
+  anonymous_request_bytes: 1048576,
+  max_question_label_bytes: 2000,
+  max_choices: 100,
+  max_choice_label_bytes: 1000,
+});
+export const getLimits = () =>
+  Object.freeze({ ...(config?.limits ?? DEFAULT_LIMITS) });
+function configuredLimits(limits) {
+  if (limits === undefined) return DEFAULT_LIMITS;
+  exactKeys(limits, Object.keys(DEFAULT_LIMITS));
+  const minimums = {
+    max_questions: 1,
+    max_review_bytes: 1024,
+    max_description_bytes: 1,
+    max_response_bytes: 1024,
+  };
+  for (const [key, ceiling] of Object.entries(DEFAULT_LIMITS)) {
+    check(
+      Number.isSafeInteger(limits[key]) &&
+        limits[key] <= ceiling &&
+        limits[key] >= (minimums[key] ?? ceiling),
+      "INVALID_LIMITS",
+    );
+  }
+  check(
+    limits.max_description_bytes <= limits.max_review_bytes,
+    "INVALID_LIMITS",
+  );
+  return Object.freeze({ ...limits });
+}
 const deployment = () => {
   check(config, "NOT_INITIALIZED");
   return config.deploymentId;
@@ -160,9 +197,11 @@ export async function initCrypto({
   caCertificate,
   receiptKeys,
   receiptKeyId,
+  limits,
 }) {
   config = undefined;
   return guard(async () => {
+    const effectiveLimits = configuredLimits(limits);
     requireBytes(deploymentId, 32);
     requireBytes(receiptKeyId, 32);
     const receiptTrust = validateReceiptTrust({
@@ -189,7 +228,13 @@ export async function initCrypto({
     // Trust anchor/profile/signature validation, not a claim about publication
     // time or current membership. Expired certificates must remain decryptable.
     check(await ca.verify({ signatureOnly: true }, crypto), "INVALID_CA");
-    config = { deploymentId: deploymentId.slice(), origin, ca, receiptTrust };
+    config = {
+      deploymentId: deploymentId.slice(),
+      origin,
+      ca,
+      receiptTrust,
+      limits: effectiveLimits,
+    };
   });
 }
 
@@ -747,7 +792,10 @@ function exactKeys(object, keys) {
   );
 }
 function parseJSON(bytes) {
-  check(bytes.length <= 1048576, "INPUT_TOO_LARGE");
+  check(
+    bytes.length <= DEFAULT_LIMITS.anonymous_request_bytes,
+    "INPUT_TOO_LARGE",
+  );
   const text = decoder.decode(bytes);
   const result = JSON.parse(text);
   // Native JSON.parse validates grammar but silently overwrites duplicate keys.
@@ -780,18 +828,18 @@ function boundedText(value, min, max) {
     "INVALID_CONTENT_STRING",
   );
 }
-function validateQuestions(questions, publish) {
+function validateQuestions(questions, publish, limits) {
   check(
     Array.isArray(questions) &&
       questions.length >= (publish ? 1 : 0) &&
-      questions.length <= 100,
+      questions.length <= limits.max_questions,
     "INVALID_QUESTIONS",
   );
   const ids = new Set();
   for (const q of questions) {
     exactKeys(q, ["id", "type", "label", "required", "choices"]);
     boundedText(q.id, 1, 100);
-    boundedText(q.label, 1, 2000);
+    boundedText(q.label, 1, limits.max_question_label_bytes);
     check(
       !ids.has(q.id) && typeof q.required === "boolean",
       "INVALID_QUESTION",
@@ -805,14 +853,14 @@ function validateQuestions(questions, publish) {
     check(
       q.type === "text"
         ? q.choices.length === 0
-        : q.choices.length >= 2 && q.choices.length <= 100,
+        : q.choices.length >= 2 && q.choices.length <= limits.max_choices,
       "INVALID_CHOICES",
     );
     const choices = new Set();
     for (const c of q.choices) {
       exactKeys(c, ["id", "label"]);
       boundedText(c.id, 1, 100);
-      boundedText(c.label, 1, 1000);
+      boundedText(c.label, 1, limits.max_choice_label_bytes);
       check(!choices.has(c.id), "INVALID_CHOICES");
       choices.add(c.id);
     }
@@ -820,12 +868,18 @@ function validateQuestions(questions, publish) {
 }
 // Drafts allow no questions; publication and responses require at least one.
 export function validateReviewContent(content, { publish = false } = {}) {
+  return validateContent(content, publish, getLimits());
+}
+function validateContent(content, publish, limits) {
   exactKeys(content, ["v", "title", "description", "questions"]);
   check(content.v === 1, "INVALID_VERSION");
   boundedText(content.title, 1, 300);
-  boundedText(content.description, 0, 10000);
-  validateQuestions(content.questions, publish);
-  check(utf8(JSON.stringify(content)).length <= 32768, "CONTENT_TOO_LARGE");
+  boundedText(content.description, 0, limits.max_description_bytes);
+  validateQuestions(content.questions, publish, limits);
+  check(
+    utf8(JSON.stringify(content)).length <= limits.max_review_bytes,
+    "CONTENT_TOO_LARGE",
+  );
   return structuredClone(content);
 }
 // Invitation content keys are random and independent of response recipient keys.
@@ -850,7 +904,8 @@ function validateContentEnvelope(envelope) {
   decode(envelope.nonce, 12);
   const ciphertext = decode(envelope.ciphertext);
   check(
-    ciphertext.length >= 16 && ciphertext.length <= 32784,
+    ciphertext.length >= 16 &&
+      ciphertext.length <= DEFAULT_LIMITS.max_review_bytes + 16,
     "CONTENT_TOO_LARGE",
   );
   return ciphertext;
@@ -889,7 +944,7 @@ export async function openDraftContent({
       decode(encryptedContent.nonce, 12),
       contentAAD(reviewId, orgId),
     ).decrypt(ciphertext);
-    return validateReviewContent(parseJSON(plaintext));
+    return validateContent(parseJSON(plaintext), false, DEFAULT_LIMITS);
   });
 }
 export async function openDescriptorContent({ descriptor, contentKey }) {
@@ -901,7 +956,7 @@ export async function openDescriptorContent({ descriptor, contentKey }) {
       contentKey,
       encryptedContent: descriptor.encrypted_content,
     });
-    validateReviewContent(content, { publish: true });
+    validateContent(content, true, DEFAULT_LIMITS);
     trustedDescriptor(descriptor);
     state.content = structuredClone(content);
     return content;
@@ -985,7 +1040,10 @@ export async function verifyDescriptor({
 }) {
   return guard(async () => {
     const bytes = requireBytes(descriptorBytes).slice();
-    check(bytes.length <= 65536, "DESCRIPTOR_TOO_LARGE");
+    check(
+      bytes.length <= DEFAULT_LIMITS.max_descriptor_bytes,
+      "DESCRIPTOR_TOO_LARGE",
+    );
     const d = parseJSON(bytes);
     exactKeys(d, descriptorKeys);
     check(
@@ -1120,7 +1178,12 @@ function validateAnswers(d, answers) {
     }
     const a = answers[id];
     if (q.type === "text")
-      check(typeof a === "string" && a.length <= 100000, "INVALID_ANSWER");
+      check(
+        typeof a === "string" &&
+          a.isWellFormed() &&
+          utf8(a).length <= DEFAULT_LIMITS.max_response_bytes,
+        "INVALID_ANSWER",
+      );
     else if (q.type === "single")
       check(
         typeof a === "string" &&
@@ -1157,7 +1220,10 @@ export async function encryptResponse({
         answers,
       }),
     );
-    check(plaintext.length + 16 <= 262144, "RESPONSE_TOO_LARGE");
+    check(
+      plaintext.length + 16 <= getLimits().max_response_bytes,
+      "RESPONSE_TOO_LARGE",
+    );
     const publicKey = await suite.kem.deserializePublicKey(
       decode(descriptor.recipient_public_key, 32),
     );
@@ -1186,7 +1252,8 @@ export async function decryptResponse({
     check(state.content, "CONTENT_NOT_OPENED");
     requireBytes(ciphertext);
     check(
-      ciphertext.length >= 16 && ciphertext.length <= 262144,
+      ciphertext.length >= 16 &&
+        ciphertext.length <= DEFAULT_LIMITS.max_response_bytes,
       "RESPONSE_TOO_LARGE",
     );
     requireBytes(recipientPrivateKey, 32);
@@ -1252,7 +1319,8 @@ export async function responseHash({
   return guard(() => {
     requireBytes(ciphertext);
     check(
-      ciphertext.length >= 16 && ciphertext.length <= 262144,
+      ciphertext.length >= 16 &&
+        ciphertext.length <= DEFAULT_LIMITS.max_response_bytes,
       "RESPONSE_TOO_LARGE",
     );
     return sha256(

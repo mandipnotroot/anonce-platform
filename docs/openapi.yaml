@@ -19,7 +19,7 @@ info:
     Sign the protocol.md challenge transcript, not the JSON directly. Most member
     actions require membership_sig. Specialized proofs are stated per operation.
     Decoded payload limit is 1536 KiB. HTTP body limits are 2304 KiB under
-    /api/member/ and 512 KiB for other API paths.
+    /api/member/ and 1 MiB for other API paths.
 
     Every unsafe API method requires exact configured Origin and Content-Type
     application/json (media-type parameters permitted), including bodyless logout.
@@ -1523,7 +1523,7 @@ components:
             $ref: "#/components/schemas/Binary",
             minLength: 22,
             maxLength: 1398102,
-            description: Decodes to 16..1048576 bytes.,
+            description: Decodes to 16..1048592 bytes; issuance pending objects require exactly 1048592 bytes.,
           }
     VaultWrite:
       type: object
@@ -1945,16 +1945,16 @@ components:
     ReviewContent:
       type: object
       additionalProperties: false
-      description: Browser-only plaintext, at most 32768 UTF-8 JSON bytes. Drafts may have zero questions; publication and responding require at least one. Never sent to the server in plaintext.
+      description: Browser-only plaintext, at most 524288 UTF-8 JSON bytes, subject to effective public-config limits. Drafts may have zero questions; publication and responding require at least one. Never sent to the server in plaintext.
       required: [v, title, description, questions]
       properties:
         v: { const: 1 }
         title: { type: string, minLength: 1, maxLength: 300 }
-        description: { type: string, maxLength: 10000 }
+        description: { type: string, maxLength: 65536 }
         questions:
           {
             type: array,
-            maxItems: 100,
+            maxItems: 500,
             items: { $ref: "#/components/schemas/Question" },
           }
     EncryptedReviewContent:
@@ -1972,7 +1972,7 @@ components:
         ciphertext:
           {
             $ref: "#/components/schemas/Binary",
-            description: Canonical base64url of 16..32784 bytes including authentication tag.,
+            description: Canonical base64url of 16..524304 bytes including authentication tag; new writes obey max_review_bytes plus 16.,
           }
     ReviewCreate:
       type: object
@@ -2018,7 +2018,7 @@ components:
     Descriptor:
       type: object
       additionalProperties: false
-      description: At most 65536 decoded strict JSON bytes. Publication compares encrypted envelope, membership, and issuer fields with stored review. No account IDs, quotas, schedules, plaintext content, or question skeleton. Versions 1 and 2 are unsupported. Quotas/schedules remain plaintext server-side for enforcement.
+      description: At most 786432 decoded strict JSON bytes. Publication compares encrypted envelope, membership, and issuer fields with stored review. No account IDs, quotas, schedules, plaintext content, or question skeleton. Versions 1 and 2 are unsupported. Quotas/schedules remain plaintext server-side for enforcement.
       required:
         [
           v,
@@ -2256,7 +2256,7 @@ components:
             $ref: "#/components/schemas/Binary",
             minLength: 22,
             maxLength: 349526,
-            description: Decodes to 16..262144 bytes including 16-byte tag. HPKE X25519/HKDF-SHA-256/ChaCha20-Poly1305.,
+            description: Decodes to 16..524288 bytes including 16-byte tag; new submissions obey max_response_bytes. HPKE X25519/HKDF-SHA-256/ChaCha20-Poly1305.,
           }
     ReceiptLookup:
       {
@@ -2309,6 +2309,7 @@ components:
           receipt_keys,
           receipt_key_id,
           source_url,
+          limits,
         ]
       properties:
         v: { const: 2 }
@@ -2338,6 +2339,38 @@ components:
             description: Current receipt signer key ID.,
           }
         source_url: { type: string }
+        limits: { $ref: "#/components/schemas/Limits" }
+    Limits:
+      type: object
+      additionalProperties: false
+      description: Effective admission limits; byte counts precede base64url expansion except anonymous_request_bytes. Description must not exceed review bytes. Fixed protocol ceilings support historical decoding.
+      required:
+        [
+          max_questions,
+          max_review_bytes,
+          max_description_bytes,
+          max_response_bytes,
+          max_descriptor_bytes,
+          pending_padding_bytes,
+          anonymous_request_bytes,
+          max_question_label_bytes,
+          max_choices,
+          max_choice_label_bytes,
+        ]
+      properties:
+        max_questions: { type: integer, minimum: 1, maximum: 500, default: 500 }
+        max_review_bytes:
+          { type: integer, minimum: 1024, maximum: 524288, default: 524288 }
+        max_description_bytes:
+          { type: integer, minimum: 1, maximum: 65536, default: 65536 }
+        max_response_bytes:
+          { type: integer, minimum: 1024, maximum: 524288, default: 524288 }
+        max_descriptor_bytes: { const: 786432 }
+        pending_padding_bytes: { const: 1048576 }
+        anonymous_request_bytes: { const: 1048576 }
+        max_question_label_bytes: { const: 2000 }
+        max_choices: { const: 100 }
+        max_choice_label_bytes: { const: 1000 }
     MembershipList:
       {
         type: object,

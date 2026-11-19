@@ -77,3 +77,10 @@
   timing correlation, and other [trust limitations](SECURITY.md) remain out of scope.
 - Restrict the receipt QR test server to fixed asset routes and use inert HTML
   parsing in responsive checks.
+- Raise review limits to 500 questions, 512 KiB of plaintext, and 64 KiB
+  descriptions; expose bounded operator-configurable limits to browser validation.
+- Increase descriptor and response ceilings to 768 KiB and 512 KiB, with
+  consistent 1 MiB pending padding and anonymous request bounds.
+- Pin compact pending recovery records to public descriptor hashes; remote
+  recovery requires the immutable descriptor to remain available. Schema version
+  3 requires a fresh pre-release database; existing data is not migrated.

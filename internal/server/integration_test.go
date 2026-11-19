@@ -71,6 +71,11 @@ func fakeWrapper() wrapper {
 func fakeObject() object {
 	return object{1, protocol.ID(), "1", protocol.B64(protocol.Random(12)), protocol.B64(protocol.Random(48))}
 }
+func fakePendingObject() object {
+	o := fakeObject()
+	o.Ciphertext = protocol.B64(make([]byte, protocol.PendingPaddingBytes+16))
+	return o
+}
 func newUser(t *testing.T, s *Server, h http.Handler) *testUser {
 	t.Helper()
 	_, pw, _ := ed25519.GenerateKey(rand.Reader)
@@ -260,7 +265,7 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	requests := make([]issuance, 2)
 	for i := range requests {
 		req := protocol.ID()
-		p := map[string]any{"request_id": req, "issuer_key_id": d.Issuer, "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}
+		p := map[string]any{"request_id": req, "issuer_key_id": d.Issuer, "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakePendingObject()}}
 		requests[i] = issuance{signed(t, s, h, u, "issue", p, false), req}
 	}
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {

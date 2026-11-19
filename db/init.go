@@ -37,14 +37,14 @@ func Init(ctx context.Context, p *pgxpool.Pool) error {
 	if err = tx.QueryRow(ctx, "SELECT count(*), COALESCE(min(version), 0) FROM public.anonce_schema_version").Scan(&count, &version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if count > 1 || (count == 1 && version != 2) {
+	if count > 1 || (count == 1 && version != 3) {
 		return fmt.Errorf("unsupported schema version (rows=%d, version=%d): unreleased database must be recreated", count, version)
 	}
 	if count == 0 {
 		if _, err = tx.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("initialize schema: %w", err)
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO public.anonce_schema_version(version) VALUES(2)"); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO public.anonce_schema_version(version) VALUES(3)"); err != nil {
 			return fmt.Errorf("record schema version: %w", err)
 		}
 	}

@@ -3,13 +3,21 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mandipnotroot/anonce-platform/internal/protocol"
 )
+
+func TestSchemaResponseCeiling(t *testing.T) {
+	if !strings.Contains(schema, fmt.Sprintf("octet_length(ciphertext) BETWEEN 16 AND %d", protocol.MaxResponseBytes)) {
+		t.Fatal("schema ciphertext ceiling differs from protocol")
+	}
+}
 
 func TestInit(t *testing.T) {
 	// DESTRUCTIVE: this explicitly separate disposable database is reset between cases.
@@ -60,6 +68,13 @@ func TestInit(t *testing.T) {
 			}
 		}
 		exec("INSERT INTO member.challenges(id,account_id,action,epoch,payload_hash,nonce,expires) VALUES('c','a','test',1,''::bytea,''::bytea,1); INSERT INTO member.invites(id_hash,expires_at) VALUES(''::bytea,now()); INSERT INTO member.settings VALUES('sentinel','value'::bytea)")
+		exec("INSERT INTO anon.reviews(id,issuer_key_id,issuer_public,descriptor,descriptor_hash,descriptor_signature,state) VALUES('boundary','issuer','','','','','published')")
+		for _, size := range []int{protocol.MaxResponseBytes, protocol.MaxResponseBytes + 1} {
+			_, err := p.Exec(t.Context(), "INSERT INTO anon.submissions(review_id,issuer_key_id,token_hash,submission_hash,prepared_message,signature,enc,ciphertext,receipt) VALUES('boundary','issuer',$1,'','','',$2,$3,'{}')", []byte(fmt.Sprint(size)), make([]byte, 32), make([]byte, size))
+			if (err == nil) != (size == protocol.MaxResponseBytes) {
+				t.Fatalf("database ciphertext boundary %d: %v", size, err)
+			}
+		}
 		var used bool
 		var role string
 		if err := p.QueryRow(t.Context(), "SELECT used FROM member.challenges WHERE id='c'").Scan(&used); err != nil || used {
@@ -81,14 +96,14 @@ func TestInit(t *testing.T) {
 			t.Fatal(err)
 		}
 		var preserved bool
-		if err := p.QueryRow(t.Context(), "SELECT (SELECT value='value'::bytea FROM member.settings WHERE name='sentinel') AND (SELECT count(*)=1 AND min(version)=2 FROM public.anonce_schema_version)").Scan(&preserved); err != nil || !preserved {
+		if err := p.QueryRow(t.Context(), "SELECT (SELECT value='value'::bytea FROM member.settings WHERE name='sentinel') AND (SELECT count(*)=1 AND min(version)=3 FROM public.anonce_schema_version)").Scan(&preserved); err != nil || !preserved {
 			t.Fatalf("repeat lost state: %v", err)
 		}
 	})
 	for _, tc := range []struct {
 		name, setup, want string
 	}{
-		{"unsupported", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(3)", "unsupported schema version"},
+		{"unsupported", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(2)", "unsupported schema version"},
 		{"multiple versions", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(1),(2)", "unsupported schema version"},
 		{"legacy", "CREATE TABLE public.anonce_migrations(version text PRIMARY KEY); INSERT INTO public.anonce_migrations VALUES('001_initial.sql')", "must be recreated"},
 		{"rollback", "CREATE SCHEMA member; CREATE TABLE member.accounts(sentinel text); INSERT INTO member.accounts VALUES('preserve')", "initialize schema"},
@@ -103,7 +118,7 @@ func TestInit(t *testing.T) {
 			query := "SELECT to_regclass('member.settings') IS NULL AND to_regclass('anon.reviews') IS NULL"
 			switch tc.name {
 			case "unsupported":
-				query += " AND (SELECT count(*)=1 AND min(version)=3 FROM public.anonce_schema_version)"
+				query += " AND (SELECT count(*)=1 AND min(version)=2 FROM public.anonce_schema_version)"
 			case "multiple versions":
 				query += " AND (SELECT count(*)=2 FROM public.anonce_schema_version)"
 			case "legacy":

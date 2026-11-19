@@ -92,12 +92,12 @@ func TestReceiptVector(t *testing.T) {
 			t.Fatal("accepted invalid response field", index)
 		}
 	}
-	for _, size := range []int{16, 262144} {
+	for _, size := range []int{16, MaxResponseBytes} {
 		if _, err := ResponseHash(fields[0], fields[1], fields[2], fields[3], fields[4], make([]byte, size)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, size := range []int{15, 262145} {
+	for _, size := range []int{15, MaxResponseBytes + 1} {
 		if _, err := ResponseHash(fields[0], fields[1], fields[2], fields[3], fields[4], make([]byte, size)); err == nil {
 			t.Fatal("ciphertext bound")
 		}

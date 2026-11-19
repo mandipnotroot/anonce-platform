@@ -93,7 +93,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 		if _, e := s.member.Exec(ctx, "UPDATE member.reviews SET opens_at=$2,closes_at=$3 WHERE id=$1", id, window.opens, window.closes); e != nil {
 			t.Fatal(e)
 		}
-		p := map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}
+		p := map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakePendingObject()}}
 		result(t, request(h, "POST", path+"/issuances", signed(t, s, h, other, "issue", p, false), other), 410)
 	}
 	if _, e := s.member.Exec(ctx, "UPDATE member.reviews SET opens_at=NULL,closes_at=NULL WHERE id=$1", id); e != nil {
@@ -106,7 +106,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	jobs := []job{}
 	for _, actor := range []*testUser{u, other} {
 		for range 3 {
-			p := map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}
+			p := map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakePendingObject()}}
 			jobs = append(jobs, job{actor, signed(t, s, h, actor, "issue", p, false)})
 		}
 	}
@@ -135,7 +135,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	if _, e = s.member.Exec(ctx, "UPDATE member.reviews SET max_responses=3 WHERE id=$1", id); e != nil {
 		t.Fatal(e)
 	}
-	issueEnv := signed(t, s, h, u, "issue", map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakeObject()}}, false)
+	issueEnv := signed(t, s, h, u, "issue", map[string]any{"request_id": protocol.ID(), "issuer_key_id": v["issuer_key_id"], "blinded_message": protocol.B64(blinded), "pending_state": vaultWrite{"0", fakePendingObject()}}, false)
 	closeEnv := signed(t, s, h, u, "review-close", revisionRequest{protocol.ID(), "1"}, false)
 	var issueResponse, closeResponse *httptest.ResponseRecorder
 	wg.Go(func() { issueResponse = request(h, "POST", path+"/issuances", issueEnv, u) })

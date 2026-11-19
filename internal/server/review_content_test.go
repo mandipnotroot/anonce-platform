@@ -36,10 +36,10 @@ func fakeReviewCreate(max int64) map[string]any {
 }
 
 func TestEncryptedContentFraming(t *testing.T) {
-	for _, n := range []int{0, 15, 16, 32784, 32785} {
+	for _, n := range []int{0, 15, 16, 524304, 524305} {
 		c := fakeContent()
 		c.Ciphertext = protocol.B64(make([]byte, n))
-		if c.valid() != (n >= 16 && n <= 32784) {
+		if c.valid() != (n >= 16 && n <= 524304) {
 			t.Errorf("ciphertext length %d", n)
 		}
 	}
@@ -119,10 +119,10 @@ func TestDescriptorFraming(t *testing.T) {
 	if _, err := decodeDescriptor(missing); err == nil {
 		t.Fatal("accepted missing descriptor field")
 	}
-	if _, err := decodeDescriptor(append(b, bytes.Repeat([]byte(" "), 65537-len(b))...)); err == nil {
+	if _, err := decodeDescriptor(append(b, bytes.Repeat([]byte(" "), protocol.MaxDescriptorBytes+1-len(b))...)); err == nil {
 		t.Fatal("accepted oversized descriptor")
 	}
-	if _, err := decodeDescriptor(append(b, bytes.Repeat([]byte(" "), 65536-len(b))...)); err != nil {
+	if _, err := decodeDescriptor(append(b, bytes.Repeat([]byte(" "), protocol.MaxDescriptorBytes-len(b))...)); err != nil {
 		t.Fatalf("rejected maximum descriptor size: %v", err)
 	}
 }

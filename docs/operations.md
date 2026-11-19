@@ -42,6 +42,8 @@
   advisory lock. A schema-version marker makes repeated startup a no-op.
 - This unreleased app has no database upgrade migrations. Databases from the old
   migration runner or with an unsupported schema version are rejected, not modified.
+  The current schema version is 3; version 2's smaller ciphertext constraint is
+  unsupported.
   Use a new, unused `ANONCE_DB_VOLUME` for a fresh database; existing data is not
   transferred. Preserve the old volume and backups if its data matters.
 - The role names are `anonce_member` and `anonce_anon`, using `ANONCE_MEMBER_DB_PASSWORD` and `ANONCE_ANON_DB_PASSWORD`, respectively.
@@ -72,6 +74,29 @@ correct role URLs (URL-encode passwords), public domain, and reviewed init path.
 | `ANONCE_SERVER_KEY_FILE`                               | Required; example `./secrets/server_key`                     | Host master-key file                                                    |
 | `ANONCE_RECEIPT_TRUST_FILE`                            | Optional; empty                                              | Container path to separately mounted public trust document              |
 | `ANONCE_ADDR`, `ANONCE_WEB_DIR`, `ANONCE_KEY_FILE`     | Compose fixes `:8080`, `/app/web`, `/run/secrets/server_key` | Internal runtime settings, not `.env` overrides in this Compose file    |
+
+### Review and response limits
+
+- Limits are optional; the browser receives effective values from `/api/public/config`.
+- Text and JSON limits measure UTF-8 bytes, not characters. Response limits include
+  the 16-byte authentication tag, before base64url encoding.
+
+| Variable                       | Default / maximum | Minimum |
+| ------------------------------ | ----------------: | ------: |
+| `ANONCE_MAX_QUESTIONS`         |               500 |       1 |
+| `ANONCE_MAX_REVIEW_BYTES`      |            524288 |    1024 |
+| `ANONCE_MAX_DESCRIPTION_BYTES` |             65536 |       1 |
+| `ANONCE_MAX_RESPONSE_BYTES`    |            524288 |    1024 |
+
+- Only reductions within these protocol ceilings are supported. Description bytes
+  must not exceed review bytes. Invalid settings fail startup before database access.
+- Omit a setting to use its default; empty or malformed values are invalid.
+- Question labels remain capped at 2000 bytes; each question permits at most 100
+  choices with 1000-byte labels. The aggregate review limit still applies.
+- Dependent protocol ceilings are fixed: descriptors 768 KiB, anonymous/public API
+  bodies 1 MiB, and authenticated pending plaintext padding exactly 1 MiB.
+- Lowering limits can prevent updates or new submissions using existing larger
+  objects. Coordinate changes with active reviews and outstanding retries.
 
 Generate the server key locally using an operator CLI:
 

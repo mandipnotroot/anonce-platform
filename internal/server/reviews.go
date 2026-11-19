@@ -21,9 +21,13 @@ type encryptedContent struct {
 }
 
 func (c encryptedContent) valid() bool {
+	return c.validWithLimits(protocol.Defaults())
+}
+
+func (c encryptedContent) validWithLimits(l protocol.Limits) bool {
 	_, ne := protocol.Decode(c.Nonce, 12)
 	b, ce := protocol.Decode(c.Ciphertext, -1)
-	return c.V == 1 && ne == nil && ce == nil && len(b) >= 16 && len(b) <= 32784
+	return c.V == 1 && ne == nil && ce == nil && len(b) >= 16 && len(b) <= l.Effective().MaxReviewBytes+16
 }
 
 type review struct {
@@ -171,7 +175,7 @@ func (s *Server) createReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, idErr := protocol.Decode(p.Review, 16)
-	if p.Max < 1 || p.Max > 100 || idErr != nil || !p.Content.valid() || p.Vault.Expected != "0" || p.Vault.Object.ID != p.Review || !p.Vault.Object.valid(0) {
+	if p.Max < 1 || p.Max > 100 || idErr != nil || !p.Content.validWithLimits(s.cfg.Limits) || p.Vault.Expected != "0" || p.Vault.Object.ID != p.Review || !p.Vault.Object.valid(0) {
 		fail(w, bad("invalid_review"))
 		return
 	}
@@ -248,7 +252,7 @@ func (s *Server) updateReview(w http.ResponseWriter, r *http.Request) {
 	rev, e := decimal(p.Expected)
 	opens, oe := nullableDecimal(p.Opens)
 	closes, ce := nullableDecimal(p.Closes)
-	if e != nil || oe != nil || ce != nil || (closes != nil && opens != nil && *closes <= *opens) || p.Max < 1 || p.Max > 100 || !p.Content.valid() {
+	if e != nil || oe != nil || ce != nil || (closes != nil && opens != nil && *closes <= *opens) || p.Max < 1 || p.Max > 100 || !p.Content.validWithLimits(s.cfg.Limits) {
 		fail(w, bad("invalid_review"))
 		return
 	}
@@ -373,7 +377,7 @@ type descriptor struct {
 
 func decodeDescriptor(b []byte) (descriptor, error) {
 	var d descriptor
-	if len(b) > 65536 || protocol.StrictJSON(b, &d) != nil || d.V != 3 || !d.Content.valid() {
+	if len(b) > protocol.MaxDescriptorBytes || protocol.StrictJSON(b, &d) != nil || d.V != 3 || !d.Content.valid() {
 		return d, bad("invalid_descriptor")
 	}
 	var fields map[string]json.RawMessage
@@ -500,6 +504,10 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	blind, e := protocol.Decode(p.Blinded, 384)
 	if e != nil {
 		fail(w, bad("invalid_blinded_message"))
+		return
+	}
+	if _, err := protocol.Decode(p.Pending.Object.Ciphertext, protocol.PendingPaddingBytes+16); err != nil {
+		fail(w, bad("invalid_pending_state"))
 		return
 	}
 	v, e := s.loadReview(r, x.Session, false)

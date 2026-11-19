@@ -41,7 +41,7 @@ CREATE TABLE member.publication_recipients (
 );
 CREATE TABLE member.issuances (review_id text REFERENCES member.reviews(id), membership_id text REFERENCES member.memberships(id), request_id text NOT NULL, request_hash bytea NOT NULL, blind_signature bytea NOT NULL, pending_object jsonb NOT NULL, slot integer NOT NULL CHECK(slot>0), PRIMARY KEY(review_id,membership_id,request_id), UNIQUE(review_id,membership_id,slot));
 CREATE TABLE anon.reviews (id text PRIMARY KEY, issuer_key_id text NOT NULL, issuer_public bytea NOT NULL, descriptor bytea NOT NULL, descriptor_hash bytea NOT NULL, descriptor_signature bytea NOT NULL, state text NOT NULL CHECK(state IN ('published','closed')), opens_at bigint, closes_at bigint, accepted_count bigint NOT NULL DEFAULT 0);
-CREATE TABLE anon.submissions (review_id text NOT NULL REFERENCES anon.reviews(id), issuer_key_id text NOT NULL, token_hash bytea NOT NULL, submission_hash bytea NOT NULL, prepared_message bytea NOT NULL, signature bytea NOT NULL, enc bytea NOT NULL CHECK(octet_length(enc)=32), ciphertext bytea NOT NULL CHECK(octet_length(ciphertext) BETWEEN 16 AND 262144), receipt jsonb NOT NULL, PRIMARY KEY(review_id,issuer_key_id,token_hash));
+CREATE TABLE anon.submissions (review_id text NOT NULL REFERENCES anon.reviews(id), issuer_key_id text NOT NULL, token_hash bytea NOT NULL, submission_hash bytea NOT NULL, prepared_message bytea NOT NULL, signature bytea NOT NULL, enc bytea NOT NULL CHECK(octet_length(enc)=32), ciphertext bytea NOT NULL CHECK(octet_length(ciphertext) BETWEEN 16 AND 524288), receipt jsonb NOT NULL, PRIMARY KEY(review_id,issuer_key_id,token_hash));
 REVOKE ALL ON SCHEMA member FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA member FROM PUBLIC;
 REVOKE ALL ON SCHEMA anon FROM PUBLIC;

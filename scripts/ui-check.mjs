@@ -48,6 +48,7 @@ let mockRole = "owner";
 let reviewHold=null,reviewResolve=null,pendingHold=null,pendingResolve=null,reviewStarted=0,pendingStarted=0;
 let failPending=false;
 let failReviews=false;
+let mockLimits={max_questions:500,max_description_bytes:65536,max_question_label_bytes:2000};
 export const holdOverview=()=>{reviewHold=new Promise(resolve=>reviewResolve=resolve);pendingHold=new Promise(resolve=>pendingResolve=resolve);reviewStarted=0;pendingStarted=0};
 export const overviewCalls=()=>({reviewStarted,pendingStarted});
 export const failPendingResponses=value=>failPending=value;
@@ -58,6 +59,8 @@ export const memberCalls=[];
 const organizationRole=id=>id==="respondent-org"?"respondent":id==="reviewer-org"?"reviewer":mockRole;
 const phrase = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"];
 export const getSourceURL=()=>"https://example.invalid/source";
+export const getLimits=()=>mockLimits;
+export const setMockLimits=limits=>mockLimits={...mockLimits,...limits};
 export const getSession=async()=>active;
 export const invalidateSession=()=>setActive(null);
 export const getSessionStatus=async()=>{statusCalls++;statusListeners.splice(0).forEach(resolve=>resolve());return statusHold?await statusHold:active};
@@ -1034,6 +1037,14 @@ try {
     "review UI must not expose content keys in links",
   );
   await captures("results");
+  await page.evaluate(async () => {
+    const api = await import("/app.js");
+    api.setMockLimits({
+      max_questions: 2,
+      max_description_bytes: 65536,
+      max_question_label_bytes: 2000,
+    });
+  });
   await page.evaluate(() => {
     location.hash = "#/review/new/edit";
   });
@@ -1043,7 +1054,41 @@ try {
   await page.getByRole("button", { name: "Create draft" }).click();
   await page.getByRole("heading", { name: "Draft review" }).waitFor();
   await captures("review-edit");
+  assert.equal(
+    await page
+      .locator('textarea[name="description"]')
+      .getAttribute("maxlength"),
+    "65536",
+  );
+  assert.equal(
+    await page.locator('[name="qtext"]').first().getAttribute("maxlength"),
+    "2000",
+  );
+  await page.locator('textarea[name="description"]').fill("d".repeat(65536));
+  await page.locator('[name="qtext"]').first().fill("q".repeat(2000));
+  assert.equal(
+    await page
+      .locator('textarea[name="description"]')
+      .inputValue()
+      .then((value) => value.length),
+    65536,
+  );
+  assert.equal(
+    await page
+      .locator('[name="qtext"]')
+      .first()
+      .inputValue()
+      .then((value) => value.length),
+    2000,
+  );
+  await page.locator('textarea[name="description"]').fill("");
+  await page.locator('[name="qtext"]').first().fill("First question");
   await page.getByRole("button", { name: "Add question" }).click();
+  assert.equal(await page.locator("#questions .question").count(), 2);
+  assert.equal(
+    await page.getByRole("button", { name: "Add question" }).isDisabled(),
+    true,
+  );
   await page.locator('[name="qtext"]').last().fill("What would help?");
   await page
     .locator('textarea[name="description"]')

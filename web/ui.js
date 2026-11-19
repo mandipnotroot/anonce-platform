@@ -1274,6 +1274,10 @@ async function renderReview(id, tab, isCurrent = () => true) {
   }
   const canManage = isReviewOwner(review);
   const canReviewResponses = canManage;
+  const limits = await api.getLimits();
+  const maxDescriptionBytes = limits.max_description_bytes;
+  const maxQuestions = limits.max_questions;
+  const maxQuestionLabelBytes = limits.max_question_label_bytes;
   if (!canManage && !canReviewResponses) {
     if (review.status === "published" || review.status === "open") {
       go(`/respond/${encodeURIComponent(id)}`);
@@ -1294,7 +1298,7 @@ async function renderReview(id, tab, isCurrent = () => true) {
   }
   if (!isCurrent()) return;
   frame(
-    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}</div>`)}${canManage && status === "draft" ? '<p class="member-help">Publishing gives all currently approved organization members access to the questions. Members approved later need a future review.</p>' : ""}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="2000">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><div id="questions">${(review.questions || []).map(questionHTML).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : ""}`,
+    `${headWithBadge(review.title || "Untitled review", statusBadge(status), review.revision !== undefined ? "Revision " + review.revision : "Review workspace", `<div class="toolbar">${canManage ? (status === "draft" ? '<button class="button" id="publish">Publish review</button>' : '<button class="button secondary" id="close">Close review</button>') : ""}</div>`)}${canManage && status === "draft" ? '<p class="member-help">Publishing gives all currently approved organization members access to the questions. Members approved later need a future review.</p>' : ""}<div class="tabs">${canManage ? `<a href="#/review/${encodeURIComponent(id)}/edit" class="${tab === "edit" ? "active" : ""}">Build</a>` : ""}${canReviewResponses ? `<a href="#/review/${encodeURIComponent(id)}/results" class="${tab === "results" ? "active" : ""}">Responses</a>` : ""}</div>${tab === "results" && canReviewResponses ? `<div id="response-results" aria-live="polite" tabindex="-1">${renderResponseResults(responseResult, responseError, review)}</div>` : canManage ? `<section class="card form-card"><form id="edit-review"><div class="field"><label>Title</label><input name="title" required maxlength="160" value="${esc(review.title)}"></div><div class="field"><label>Description</label><textarea name="description" maxlength="${maxDescriptionBytes}">${esc(review.description)}</textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="${esc(review.maxResponses || 1)}" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt" value="${dt(review.opensAt)}"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt" value="${dt(review.closesAt)}"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><p id="question-limit" class="help" aria-live="polite"></p><div id="questions">${(review.questions || []).map((question) => questionHTML(question, maxQuestionLabelBytes)).join("")}</div><p class="form-error"></p><div class="toolbar"><button class="button" type="submit">Save draft</button><button class="button secondary" type="button" id="preview">Preview</button></div></form></section><div id="preview-area"></div><div class="footnote">Draft changes are saved to this review only when you select Save draft.</div>` : ""}`,
     "Review",
   );
   if (responseError) toast(responseError);
@@ -1382,17 +1386,35 @@ async function renderReview(id, tab, isCurrent = () => true) {
     toast("Review draft saved.", "success");
     load();
   });
-  document.querySelector("#add-question")?.addEventListener("click", () => {
+  const addQuestionButton = document.querySelector("#add-question");
+  const updateQuestionLimit = () => {
+    const count = document.querySelectorAll("#questions .question").length;
+    if (addQuestionButton) addQuestionButton.disabled = count >= maxQuestions;
+    const status = document.querySelector("#question-limit");
+    if (status) status.textContent = `${count} of ${maxQuestions} questions`;
+  };
+  updateQuestionLimit();
+  addQuestionButton?.addEventListener("click", () => {
+    if (
+      document.querySelectorAll("#questions .question").length >= maxQuestions
+    )
+      return;
     document
       .querySelector("#questions")
       .insertAdjacentHTML(
         "beforeend",
-        questionHTML({ text: "", type: "text", required: false, options: [] }),
+        questionHTML(
+          { text: "", type: "text", required: false, options: [] },
+          maxQuestionLabelBytes,
+        ),
       );
+    updateQuestionLimit();
   });
   document.querySelector("#questions")?.addEventListener("click", (e) => {
-    if (e.target.matches("[data-remove]"))
+    if (e.target.matches("[data-remove]")) {
       e.target.closest(".question").remove();
+      updateQuestionLimit();
+    }
   });
   document.querySelector("#preview")?.addEventListener("click", () => {
     let f = document.querySelector("#edit-review"),
@@ -1467,8 +1489,8 @@ function renderResponseResults(result, error, r) {
       "",
     )}</div>${result.next ? '<button class="button secondary load-more" id="load-more-responses">Load more responses</button>' : ""}<div class="toolbar export-toolbar"><button class="button secondary" id="export-json">Export JSON</button><button class="button secondary" id="export-csv">Export CSV</button></div>`;
 }
-function questionHTML(q = {}) {
-  return `<div class="question"><div class="question-top"><strong>Question</strong><button class="icon-btn" type="button" data-remove aria-label="Remove question">${icon("trash-2")}</button></div><div class="field"><label>Question text</label><input name="qtext" required maxlength="500" value="${esc(q.text)}"></div><div class="inline"><div class="field"><label>Answer type</label><select name="qtype"><option value="text" ${q.type === "text" ? "selected" : ""}>Text</option><option value="single" ${q.type === "single" ? "selected" : ""}>Choose one</option><option value="multiple" ${q.type === "multiple" ? "selected" : ""}>Choose multiple</option></select></div><label class="check"><input name="qrequired" type="checkbox" ${q.required ? "checked" : ""}> Required</label></div><div class="field"><label>Choices <span class="help">(one per line, for choice questions)</span></label><textarea name="qoptions">${esc((q.options || []).join("\n"))}</textarea></div></div>`;
+function questionHTML(q = {}, maxLabelBytes) {
+  return `<div class="question"><div class="question-top"><strong>Question</strong><button class="icon-btn" type="button" data-remove aria-label="Remove question">${icon("trash-2")}</button></div><div class="field"><label>Question text</label><input name="qtext" required maxlength="${maxLabelBytes}" value="${esc(q.text)}"></div><div class="inline"><div class="field"><label>Answer type</label><select name="qtype"><option value="text" ${q.type === "text" ? "selected" : ""}>Text</option><option value="single" ${q.type === "single" ? "selected" : ""}>Choose one</option><option value="multiple" ${q.type === "multiple" ? "selected" : ""}>Choose multiple</option></select></div><label class="check"><input name="qrequired" type="checkbox" ${q.required ? "checked" : ""}> Required</label></div><div class="field"><label>Choices <span class="help">(one per line, for choice questions)</span></label><textarea name="qoptions">${esc((q.options || []).join("\n"))}</textarea></div></div>`;
 }
 function dt(v) {
   if (!v) return "";

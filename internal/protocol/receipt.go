@@ -38,7 +38,7 @@ func ResponseHash(deploymentID, reviewID, descriptorHash, issuerKeyID, enc, ciph
 			return nil, errors.New("invalid response field length")
 		}
 	}
-	if len(ciphertext) < 16 || len(ciphertext) > 262144 {
+	if len(ciphertext) < 16 || len(ciphertext) > MaxResponseBytes {
 		return nil, errors.New("invalid ciphertext length")
 	}
 	return Hash(E("accepted-response-v2", fields...)), nil

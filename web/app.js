@@ -240,6 +240,7 @@ async function initialize() {
       caCertificate: bytes(config.ca_certificate),
       receiptKeys: config.receipt_keys,
       receiptKeyId: bytes(config.receipt_key_id),
+      limits: config.limits,
     });
   }
   return config;
@@ -1243,10 +1244,20 @@ async function local(objectId) {
       }),
     ),
   );
-  if (p.authorization) {
-    const descriptor = JSON.parse(
-      new TextDecoder().decode(bytes(p.descriptor)),
-    );
+  if (p.kind === "issuance-pending") {
+    validateCompactPending(p, objectId);
+    const published = await publicDescriptor(p.reviewId);
+    if (
+      C.toBase64url(await C.hashBytes(published.descriptorBytes)) !==
+      p.descriptorHash
+    )
+      throw new APIError(
+        "INVALID_RESPONSE",
+        "Pending descriptor does not match.",
+      );
+    p.descriptor = C.toBase64url(published.descriptorBytes);
+    p.descriptorSignature = published.descriptor_signature;
+    const descriptor = published.descriptor;
     // Restore sealVaultObject's property order after JSONB storage reorders keys.
     const issuanceObject = {
       v: object.v,
@@ -1261,6 +1272,8 @@ async function local(objectId) {
       blinded_message: p.authorization.blindedMessage,
       pending_state: { expected_revision: "0", object: issuanceObject },
     };
+  } else if (p.pendingId) {
+    throw new APIError("INVALID_RESPONSE", "Invalid remote pending response.");
   }
   await pendingSave(p);
   return p;
@@ -1389,7 +1402,7 @@ async function prepareStagedPublication(reviewId, expectedRevision) {
     issuer_public_key: r.issuer_public_key,
   };
   const descriptorBytes = jsonBytes(descriptor);
-  if (descriptorBytes.length > 65536)
+  if (descriptorBytes.length > C.getLimits().max_descriptor_bytes)
     throw new APIError("INVALID_CONTENT", "Review descriptor is too large.");
   const payload = toWire({
     request_id: id(),
@@ -1511,9 +1524,82 @@ async function pendingSave(p) {
   await seal(p.pendingId, p, String(p.revision || 1));
 }
 // Only the authenticated issuance copy is padded; local pending objects stay unchanged.
+export const getLimits = () => C.getLimits();
+function validateCompactPending(p, objectId) {
+  const fail = () => {
+    throw new APIError("INVALID_RESPONSE", "Invalid remote pending response.");
+  };
+  const exact = (value, keys) =>
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(",") === keys.sort().join(",");
+  const encoded = (value, min, max = min) => {
+    if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value))
+      return false;
+    const decoded = bytes(value);
+    return (
+      decoded.length >= min &&
+      decoded.length <= max &&
+      C.toBase64url(decoded) === value
+    );
+  };
+  if (
+    !exact(p, [
+      "v",
+      "kind",
+      "pendingId",
+      "reviewId",
+      "requestId",
+      "descriptorHash",
+      "title",
+      "authorization",
+      "encrypted",
+      "revision",
+    ]) ||
+    p.v !== 1 ||
+    p.kind !== "issuance-pending" ||
+    p.pendingId !== objectId ||
+    !encoded(p.pendingId, 16) ||
+    !encoded(p.reviewId, 16) ||
+    !encoded(p.requestId, 16) ||
+    !encoded(p.descriptorHash, 32) ||
+    typeof p.title !== "string" ||
+    new TextEncoder().encode(p.title).length > 300 ||
+    new TextDecoder().decode(new TextEncoder().encode(p.title)) !== p.title ||
+    p.revision !== 1 ||
+    !exact(p.authorization, [
+      "serial",
+      "preparedMessage",
+      "blindedMessage",
+      "inverse",
+    ]) ||
+    !encoded(p.authorization.serial, 32) ||
+    !encoded(p.authorization.preparedMessage, 32, 4096) ||
+    !encoded(p.authorization.blindedMessage, 384) ||
+    !encoded(p.authorization.inverse, 384) ||
+    !exact(p.encrypted, ["enc", "ciphertext"]) ||
+    !encoded(p.encrypted.enc, 32) ||
+    !encoded(p.encrypted.ciphertext, 16, C.DEFAULT_LIMITS.max_response_bytes)
+  )
+    fail();
+}
 async function sealIssuancePending(p) {
-  const plaintext = jsonBytes(toWire(p)),
-    size = 524288;
+  const compact = {
+    v: 1,
+    kind: "issuance-pending",
+    pendingId: p.pendingId,
+    reviewId: p.reviewId,
+    requestId: p.requestId,
+    descriptorHash: C.toBase64url(await C.hashBytes(bytes(p.descriptor))),
+    title: p.title,
+    authorization: p.authorization,
+    encrypted: p.encrypted,
+    revision: 1,
+  };
+  validateCompactPending(compact, p.pendingId);
+  const plaintext = jsonBytes(toWire(compact)),
+    size = C.getLimits().pending_padding_bytes;
   if (plaintext.length > size)
     throw new APIError(
       "INVALID_RESPONSE",

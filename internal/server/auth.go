@@ -185,7 +185,7 @@ func (v object) valid(expected int64) bool {
 	_, a := protocol.Decode(v.ID, 16)
 	_, b := protocol.Decode(v.Nonce, 12)
 	c, e := protocol.Decode(v.Ciphertext, -1)
-	return v.V == 1 && a == nil && b == nil && e == nil && len(c) >= 16 && len(c) <= 1048576 && v.Revision == strconv.FormatInt(expected+1, 10)
+	return v.V == 1 && a == nil && b == nil && e == nil && len(c) >= 16 && len(c) <= protocol.PendingPaddingBytes+16 && v.Revision == strconv.FormatInt(expected+1, 10)
 }
 func decimal(s string) (int64, error) {
 	n, e := strconv.ParseInt(s, 10, 64)

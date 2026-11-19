@@ -94,7 +94,7 @@
 - Encrypt UTF-8 JSON with the established ChaCha20-Poly1305 implementation using the content key and a fresh random 12-byte nonce.
 - AAD is `E('review-content',deployment_id,org_id,review_id,U64(1))`.
 - The envelope contains exactly `{v:1,nonce,ciphertext}`; ciphertext includes the 16-byte tag.
-- Plaintext is at most 32768 bytes; ciphertext is 16–32784 bytes.
+- Plaintext is at most 524288 bytes; ciphertext is 16–524304 bytes.
 
 - The creator's vault object uses the review ID as its object ID.
 - Its plaintext contains exactly `{v:1,kind:'review-keys',review_id,content_key,recipient_private_key}`.
@@ -103,17 +103,21 @@
 - Updates reuse keys with fresh content nonces.
 - Publication reuses the exact saved content envelope.
 
-- Browser content validation requires a 1–300-byte title, a description of at most 10000 bytes, and 0–100 draft questions.
+- Browser content validation requires a 1–300-byte title, a description of at most 65536 bytes, and 0–500 draft questions.
 - Publication and responding require at least one question.
 - Question IDs are unique and 1–100 bytes; labels are 1–2000 bytes. `required` is boolean.
 - Text questions have no choices; single and multiple choice questions have 2–100 choices.
 - Choice IDs are unique within their question and 1–100 bytes; choice labels are 1–1000 bytes.
 - These bounds measure UTF-8 bytes, and the aggregate plaintext bound also applies.
 - The server can validate envelope framing, not question semantics.
+- Operators may reduce question, aggregate plaintext, description, and response
+  limits within the [configuration bounds](operations.md#review-and-response-limits).
+  `/api/public/config` exposes effective `limits`; browsers use them for new content
+  and response validation. Protocol ceilings remain fixed for historical decoding.
 
 ### Descriptor v3
 
-Descriptor is base64url exact JSON bytes, at most 65536 decoded bytes, containing exactly:
+Descriptor is base64url exact JSON bytes, at most 786432 decoded bytes, containing exactly:
 
 `{v:3,deployment_id,review_id,org_id,reviewer_membership_id,reviewer_certificate,encrypted_content,recipient_public_key,issuer_key_id,issuer_public_key}`.
 
@@ -178,8 +182,16 @@ Use established libraries, not homegrown primitives.
 - Preserve exact prepared message, unblinding state and later exact submission for retries.
 
 - The authenticated pending object also includes the encrypted response.
-- Pad serialized UTF-8 JSON plaintext with ASCII spaces to exactly 524288 bytes before vault encryption; reject larger plaintext.
-- Ciphertext is 524304 bytes including the authentication tag.
+- Its compact recovery record pins the SHA-256 hash of the exact signed
+  descriptor bytes instead of embedding the descriptor. It retains the pending,
+  review, and request IDs, authorization state, encrypted response, revision,
+  and bounded display metadata; it excludes nested issuance payloads and receipts.
+- Remote recovery fetches and verifies the immutable public descriptor and
+  compares its exact-byte hash with the authenticated pin before restoring local
+  state. Recovery fails closed if that descriptor is unavailable or mismatched.
+  Complete local pending records retain their descriptor.
+- Pad serialized UTF-8 JSON plaintext with ASCII spaces to exactly 1048576 bytes before vault encryption; reject larger plaintext.
+- Ciphertext is 1048592 bytes including the authentication tag.
 - JSON readers accept the trailing whitespace.
 - Reuse the exact encrypted object on issuance retries.
 - Padding prevents direct answer-length linkage for new issuance objects, not previously stored objects, timing, or other metadata.
@@ -191,11 +203,12 @@ Use established libraries, not homegrown primitives.
 - Plaintext JSON: `{v:1,review_id,descriptor_hash,answers:{question_id:string|array}}`.
 - Validate answers against the authenticated decrypted descriptor content in the browser; server cannot inspect plaintext.
 
-| Size boundary                           |  Bytes | Meaning                                                      |
-| --------------------------------------- | -----: | ------------------------------------------------------------ |
-| Authenticated pending-object plaintext  | 524288 | Fixed space-padded JSON before vault encryption              |
-| Authenticated pending-object ciphertext | 524304 | Padded plaintext plus authentication tag                     |
-| Anonymous response ciphertext maximum   | 262144 | HPKE ciphertext including tag, excluding base64url expansion |
+| Size boundary                           |   Bytes | Meaning                                                      |
+| --------------------------------------- | ------: | ------------------------------------------------------------ |
+| Authenticated pending-object plaintext  | 1048576 | Fixed space-padded JSON before vault encryption              |
+| Authenticated pending-object ciphertext | 1048592 | Padded plaintext plus authentication tag                     |
+| Anonymous response ciphertext maximum   |  524288 | HPKE ciphertext including tag, excluding base64url expansion |
+| Anonymous/public API request body       | 1048576 | Complete JSON including base64url expansion                  |
 
 - These are different objects and limits.
 - Before issuance, the browser preflights the exact response plaintext UTF-8 length plus the 16-byte tag; the server rejects oversized response ciphertext.

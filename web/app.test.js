@@ -4,6 +4,24 @@ import assert from "node:assert/strict";
 import * as app from "./app.js";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { createHash } from "node:crypto";
+const b64 = (n) => Buffer.alloc(n).toString("base64url");
+const pendingFixture = () => ({
+  pendingId: b64(16),
+  reviewId: b64(16),
+  requestId: b64(16),
+  descriptor: "e30",
+  descriptorSignature: "",
+  title: "Review",
+  authorization: {
+    serial: b64(32),
+    preparedMessage: b64(128),
+    blindedMessage: b64(384),
+    inverse: b64(384),
+  },
+  encrypted: { enc: b64(32), ciphertext: b64(16) },
+  revision: 1,
+});
 
 // Run the service with inert providers, without loading cryptographic dependencies.
 async function service(overrides = {}) {
@@ -30,11 +48,20 @@ async function service(overrides = {}) {
     Blob,
     URL,
     URLSearchParams,
+    location: { origin: "https://example.test" },
     crypto: { getRandomValues: (value) => value.fill(++randomCounter) },
     APIError: MockAPIError,
     jsonBytes: (value) => new TextEncoder().encode(JSON.stringify(value)),
     toWire: wire,
     C: {
+      DEFAULT_LIMITS: { max_response_bytes: 524288 },
+      getLimits: () => ({
+        max_descriptor_bytes: 786432,
+        max_response_bytes: 524288,
+        pending_padding_bytes: 1048576,
+      }),
+      hashBytes: async (value) =>
+        new Uint8Array(createHash("sha256").update(value).digest()),
       fromBase64url: (value) => new Uint8Array(Buffer.from(value, "base64url")),
       toBase64url: (value) => Buffer.from(value).toString("base64url"),
       ...overrides.C,
@@ -53,7 +80,7 @@ async function service(overrides = {}) {
   vm.runInContext(
     source +
       `;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
+    globalThis.service={initialize,getLimits,sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,verifySavedReceipt,getReceiptTrust,loadReceiptTrust,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
     globalThis.setState=value=>{state=value;};
     globalThis.setLogin=value=>{login=value;};
     globalThis.setCredentials=value=>{credentials=value;};
@@ -74,6 +101,28 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+test("initialization forwards deployed limits and app exposes effective crypto limits", async () => {
+  const limits = { max_response_bytes: 1024 };
+  let effective;
+  const context = await service({
+    C: {
+      initCrypto: async (options) => {
+        effective = options.limits;
+      },
+      getLimits: () => effective,
+    },
+    request: async () => ({
+      deployment_id: b64(16),
+      ca_certificate: "YQ",
+      receipt_key_id: b64(32),
+      limits,
+    }),
+  });
+  await context.service.initialize();
+  assert.equal(effective, limits);
+  assert.equal(context.service.getLimits(), limits);
+});
 
 test("rate-limited publication batch retains exact payload and cursor for resume", async () => {
   const context = await service();
@@ -777,23 +826,32 @@ test("issuance padding has fixed byte length, whitespace roundtrip, and fits req
       },
     },
   });
-  for (const length of [0, 1, 1024, 262144]) {
+  for (const length of [16, 1024, 262144, 524288]) {
     const pending = {
-      pendingId: "Yg",
-      descriptor: Buffer.alloc(65536).toString("base64url"),
-      encrypted: { ciphertext: Buffer.alloc(length).toString("base64url") },
-      answer: "日本語",
+      ...pendingFixture(),
+      descriptor: b64(786432),
+      encrypted: { enc: b64(32), ciphertext: b64(Math.max(16, length)) },
     };
     const object = await context.service.sealIssuancePending(pending);
     const options = sealed.at(-1);
-    assert.equal(options.plaintext.length, 524288);
+    assert.equal(options.plaintext.length, 1048576);
     assert.equal(options.revision, "1");
-    assert.deepEqual(
-      JSON.parse(new TextDecoder().decode(options.plaintext)),
-      pending,
-    );
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(options.plaintext)), {
+      v: 1,
+      kind: "issuance-pending",
+      pendingId: pending.pendingId,
+      reviewId: pending.reviewId,
+      requestId: pending.requestId,
+      descriptorHash: createHash("sha256")
+        .update(Buffer.from(pending.descriptor, "base64url"))
+        .digest("base64url"),
+      title: pending.title,
+      authorization: pending.authorization,
+      encrypted: pending.encrypted,
+      revision: 1,
+    });
     assert.equal(options.plaintext.at(-1), 32);
-    assert.ok(Buffer.byteLength(object.ciphertext) < 1048576);
+    assert.ok(Buffer.byteLength(object.ciphertext) < 1536 * 1024);
     const payload = JSON.stringify({
       pending_state: { expected_revision: "0", object },
     });
@@ -810,12 +868,121 @@ test("issuance padding has fixed byte length, whitespace roundtrip, and fits req
   }
   await assert.rejects(
     context.service.sealIssuancePending({
-      pendingId: "Yg",
-      value: "x".repeat(524288),
+      ...pendingFixture(),
+      encrypted: { enc: b64(32), ciphertext: b64(524289) },
     }),
     (e) => e.code === "INVALID_RESPONSE" && !e.message.includes("xxxxx"),
   );
   assert.equal(sealed.length, 4);
+});
+
+test("compact recovery accepts historical ciphertext above reduced admission limits", async () => {
+  const pending = pendingFixture();
+  pending.encrypted.ciphertext = b64(524288);
+  let compact;
+  const object = {
+    v: 1,
+    id: pending.pendingId,
+    revision: "1",
+    nonce: b64(12),
+    ciphertext: "YQ",
+  };
+  const context = await service({
+    C: {
+      getLimits: () => ({
+        max_response_bytes: 1024,
+        pending_padding_bytes: 1048576,
+      }),
+      sealVaultObject: async ({ plaintext }) => {
+        compact = JSON.parse(new TextDecoder().decode(plaintext));
+        return object;
+      },
+      openVaultObject: async () =>
+        new TextEncoder().encode(JSON.stringify(compact)),
+      verifyDescriptor: async () => ({ issuer_key_id: "issuer" }),
+    },
+    loadSealed: async () => undefined,
+    request: async (path) =>
+      path === "/api/member/vault"
+        ? { objects: [object] }
+        : { descriptor: pending.descriptor, descriptor_signature: "" },
+  });
+  await context.service.sealIssuancePending(pending);
+  const restored = await context.service.local(pending.pendingId);
+  assert.equal(restored.encrypted.ciphertext, pending.encrypted.ciphertext);
+  context.setSigned(async () => {
+    throw Error("current admission rejected");
+  });
+  await assert.rejects(
+    context.service.finishPending(restored),
+    /current admission rejected/,
+  );
+});
+
+test("compact pending titles enforce UTF-8 bytes and reject unpaired surrogates", async () => {
+  const context = await service({
+    C: { sealVaultObject: async () => ({}) },
+  });
+  for (const title of ["é".repeat(151), "\ud800"]) {
+    await assert.rejects(
+      context.service.sealIssuancePending({ ...pendingFixture(), title }),
+      { code: "INVALID_RESPONSE" },
+    );
+  }
+  await context.service.sealIssuancePending({
+    ...pendingFixture(),
+    title: "é".repeat(150),
+  });
+});
+
+test("compact remote recovery fails closed and remains retryable", async () => {
+  for (const failure of ["hash", "shape", "id", "fetch"]) {
+    const pending = pendingFixture();
+    let compact,
+      broken = true,
+      saves = 0;
+    const object = {
+      v: 1,
+      id: pending.pendingId,
+      revision: "1",
+      nonce: b64(12),
+      ciphertext: "YQ",
+    };
+    const context = await service({
+      C: {
+        sealVaultObject: async ({ plaintext }) => {
+          compact = JSON.parse(new TextDecoder().decode(plaintext));
+          return object;
+        },
+        openVaultObject: async () => {
+          const value = structuredClone(compact);
+          if (broken && failure === "hash") value.descriptorHash = b64(32);
+          if (broken && failure === "shape") value.submission = {};
+          if (broken && failure === "id")
+            value.pendingId = Buffer.alloc(16, 1).toString("base64url");
+          return new TextEncoder().encode(JSON.stringify(value));
+        },
+        verifyDescriptor: async () => ({ issuer_key_id: "issuer" }),
+      },
+      loadSealed: async () => undefined,
+      saveSealed: async () => {
+        saves++;
+      },
+      request: async (path, options) => {
+        if (path === "/api/member/vault") return { objects: [object] };
+        assert.equal(options.anonymous, true);
+        if (broken && failure === "fetch") throw Error("unavailable");
+        return { descriptor: pending.descriptor, descriptor_signature: "" };
+      },
+    });
+    await context.service.sealIssuancePending(pending);
+    await assert.rejects(context.service.local(pending.pendingId));
+    assert.equal(saves, 0);
+    broken = false;
+    const restored = await context.service.local(pending.pendingId);
+    assert.equal(restored.descriptor, pending.descriptor);
+    assert.equal(saves, 1);
+  }
 });
 
 test("issuance retries and reload preserve the exact sealed payload", async () => {
@@ -842,16 +1009,7 @@ test("issuance retries and reload preserve the exact sealed payload", async () =
     payloads.push(JSON.stringify(payload));
     throw Error("retry");
   });
-  const pending = {
-    pendingId: "Yg",
-    reviewId: "Yw",
-    requestId: "request",
-    descriptor: "e30",
-    descriptorSignature: "",
-    authorization: { blindedMessage: "YQ" },
-    encrypted: { ciphertext: "YQ" },
-    revision: 1,
-  };
+  const pending = pendingFixture();
   await assert.rejects(context.service.finishPending(pending), /retry/);
   await assert.rejects(context.service.finishPending(pending), /retry/);
   await assert.rejects(context.service.finishPending(saved), /retry/);
@@ -861,19 +1019,10 @@ test("issuance retries and reload preserve the exact sealed payload", async () =
 
 test("remote recovery restores exact issuance bytes after JSONB key reordering", async () => {
   const descriptor = { org_id: "org", issuer_key_id: "issuer" };
-  const pending = {
-    pendingId: "Yg",
-    reviewId: "Yw",
-    requestId: "request",
-    descriptor: Buffer.from(JSON.stringify(descriptor)).toString("base64url"),
-    descriptorSignature: "",
-    authorization: { blindedMessage: "YQ" },
-    encrypted: { ciphertext: "YQ" },
-    revision: 1,
-  };
+  const pending = pendingFixture();
   const object = {
     v: 1,
-    id: "Yg",
+    id: pending.pendingId,
     revision: "1",
     nonce: "bm9uY2U",
     ciphertext: "Y2lwaGVydGV4dA",
@@ -887,22 +1036,26 @@ test("remote recovery restores exact issuance bytes after JSONB key reordering",
     revision: object.revision,
   };
   const payloads = [];
-  let seals = 0;
+  let seals = 0,
+    compact;
   const context = await service({
     C: {
       verifyDescriptor: async () => descriptor,
-      sealVaultObject: async () => {
+      sealVaultObject: async ({ plaintext }) => {
+        compact = JSON.parse(new TextDecoder().decode(plaintext));
         seals++;
         return object;
       },
       openVaultObject: async ({ object: received }) => {
         assert.equal(received, remoteObject);
-        return new TextEncoder().encode(JSON.stringify(pending));
+        return new TextEncoder().encode(JSON.stringify(compact));
       },
     },
     loadSealed: async () => undefined,
     request: async (path) =>
-      path === "/api/member/vault" ? { objects: [remoteObject] } : {},
+      path === "/api/member/vault"
+        ? { objects: [remoteObject] }
+        : { descriptor: pending.descriptor, descriptor_signature: "" },
   });
   context.setSigned(async (_path, _action, payload) => {
     payloads.push(JSON.stringify(payload));

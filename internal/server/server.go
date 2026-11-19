@@ -22,7 +22,10 @@ import (
 	"time"
 )
 
-type Config struct{ DatabaseURL, AnonymousURL, Origin, KeyFile, WebDir, SourceURL, ReceiptTrustFile string }
+type Config struct {
+	DatabaseURL, AnonymousURL, Origin, KeyFile, WebDir, SourceURL, ReceiptTrustFile string
+	Limits                                                                          protocol.Limits
+}
 type Server struct {
 	member, anonymous                    *pgxpool.Pool
 	cfg                                  Config
@@ -90,6 +93,10 @@ func sessionChallenge(action string) bool {
 }
 
 func New(ctx context.Context, c Config) (*Server, error) {
+	c.Limits = c.Limits.Effective()
+	if err := c.Limits.Validate(); err != nil {
+		return nil, err
+	}
 	u, e := url.Parse(c.Origin)
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("ANONCE_ORIGIN must be an HTTPS origin")
@@ -214,7 +221,7 @@ func (s *Server) Handler() http.Handler {
 		write(w, 200, map[string]string{"status": "ready"})
 	})
 	m.HandleFunc("GET /api/public/config", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]any{"v": 2, "deployment_id": protocol.B64(s.deployment), "origin": s.cfg.Origin, "ca_certificate": protocol.B64(s.caDER), "receipt_keys": s.receiptTrust.ReceiptKeys, "receipt_key_id": protocol.B64(s.receiptID), "source_url": s.cfg.SourceURL})
+		write(w, 200, map[string]any{"v": 2, "deployment_id": protocol.B64(s.deployment), "origin": s.cfg.Origin, "ca_certificate": protocol.B64(s.caDER), "receipt_keys": s.receiptTrust.ReceiptKeys, "receipt_key_id": protocol.B64(s.receiptID), "source_url": s.cfg.SourceURL, "limits": s.cfg.Limits.Public()})
 	})
 	m.HandleFunc("GET /api/public/reviews/{id}", s.publicReview)
 	m.HandleFunc("POST /api/anon/submissions", s.submit)
@@ -258,7 +265,7 @@ func (s *Server) Handler() http.Handler {
 				}
 				fail(w, e)
 			}
-			limit := int64(512 * 1024)
+			limit := int64(protocol.AnonymousRequestBytes)
 			if strings.HasPrefix(r.URL.Path, "/api/member/") {
 				limit = 2304 * 1024
 			}

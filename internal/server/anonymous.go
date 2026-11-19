@@ -65,7 +65,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ct, e := protocol.Decode(p.Ciphertext, -1)
-	if e != nil || len(ct) < 16 || len(ct) > 262144 {
+	if e != nil || len(ct) < 16 || len(ct) > s.cfg.Limits.Effective().MaxResponseBytes {
 		fail(w, bad("invalid_ciphertext"))
 		return
 	}

@@ -143,7 +143,7 @@ code or network/timing correlation.
 - Another browser or cleared local state may show no completion.
 - There is no named completion API or join between issuance and submissions.
 
-- Authenticated issuance pending objects use fixed 512 KiB plaintext padding before vault encryption to prevent direct response-length linkage.
+- Authenticated issuance pending objects use fixed 1 MiB plaintext padding before vault encryption to prevent direct response-length linkage.
 - Older retained objects remain exposed to that linkage.
 - Response lengths, timing and other deployment metadata remain observable.
 - Before decrypting a reviewer result, the browser verifies a receipt binding the encrypted envelope to its deployment, review, descriptor, and issuer.

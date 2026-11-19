@@ -81,6 +81,169 @@ try {
   globalThis.location = savedLocation;
 }
 await c.initCrypto(init);
+test("limits require the complete safe public contract and return frozen copies", async () => {
+  const isolated = await import("./crypto.js?limits");
+  assert.deepEqual(isolated.getLimits(), c.DEFAULT_LIMITS);
+  assert.ok(Object.isFrozen(c.DEFAULT_LIMITS));
+  const limits = {
+    ...c.DEFAULT_LIMITS,
+    max_questions: 2,
+    max_review_bytes: 2048,
+    max_description_bytes: 12,
+    max_response_bytes: 1024,
+  };
+  await isolated.initCrypto({ ...init, limits });
+  limits.max_questions = 1;
+  assert.equal(isolated.getLimits().max_questions, 2);
+  assert.ok(Object.isFrozen(isolated.getLimits()));
+  assert.notEqual(isolated.getLimits(), isolated.getLimits());
+  const question = {
+    id: "q",
+    type: "text",
+    label: "Q",
+    required: false,
+    choices: [],
+  };
+  const review = {
+    v: 1,
+    title: "T",
+    description: "界".repeat(4),
+    questions: [question, { ...question, id: "q2" }],
+  };
+  isolated.validateReviewContent(review);
+  assert.throws(
+    () =>
+      isolated.validateReviewContent({
+        ...review,
+        description: review.description + "x",
+      }),
+    isolated.CryptoError,
+  );
+  assert.throws(
+    () =>
+      isolated.validateReviewContent({
+        ...review,
+        questions: [...review.questions, { ...question, id: "q3" }],
+      }),
+    isolated.CryptoError,
+  );
+  const key = bytes(32);
+  const large = { ...review, description: "x".repeat(100) };
+  const encryptedContent = await c.sealReviewContent({
+    reviewId,
+    orgId: accountId,
+    contentKey: key,
+    content: large,
+  });
+  assert.deepEqual(
+    await isolated.openDraftContent({
+      reviewId,
+      orgId: accountId,
+      contentKey: key,
+      encryptedContent,
+    }),
+    large,
+  );
+  await assert.rejects(
+    isolated.sealReviewContent({
+      reviewId,
+      orgId: accountId,
+      contentKey: key,
+      content: large,
+    }),
+    isolated.CryptoError,
+  );
+  for (const invalid of [
+    null,
+    {},
+    { ...c.DEFAULT_LIMITS, extra: 1 },
+    ...Object.keys(c.DEFAULT_LIMITS).flatMap((key) => [
+      { ...c.DEFAULT_LIMITS, [key]: c.DEFAULT_LIMITS[key] + 1 },
+      { ...c.DEFAULT_LIMITS, [key]: 0 },
+      { ...c.DEFAULT_LIMITS, [key]: "1" },
+      { ...c.DEFAULT_LIMITS, [key]: 1.5 },
+      { ...c.DEFAULT_LIMITS, [key]: Number.MAX_SAFE_INTEGER + 1 },
+    ]),
+    { ...c.DEFAULT_LIMITS, max_review_bytes: 1024 },
+    { ...c.DEFAULT_LIMITS, max_response_bytes: 1023 },
+  ]) {
+    await assert.rejects(
+      isolated.initCrypto({ ...init, limits: invalid }),
+      isolated.CryptoError,
+    );
+  }
+});
+test("protocol content byte and count ceilings accept exact boundaries", () => {
+  const question = {
+    id: "q",
+    type: "single",
+    label: "界".repeat(666) + "xx",
+    required: false,
+    choices: Array.from({ length: 100 }, (_, i) => ({
+      id: String(i),
+      label: "界".repeat(333) + "x",
+    })),
+  };
+  const review = {
+    v: 1,
+    title: "T",
+    description: "x".repeat(65536),
+    questions: [question],
+  };
+  c.validateReviewContent(review);
+  for (const changed of [
+    { ...question, label: question.label + "x" },
+    {
+      ...question,
+      choices: [...question.choices, { id: "extra", label: "X" }],
+    },
+    {
+      ...question,
+      choices: [
+        { id: "a", label: "x".repeat(1001) },
+        { id: "b", label: "B" },
+      ],
+    },
+  ])
+    assert.throws(
+      () => c.validateReviewContent({ ...review, questions: [changed] }),
+      CryptoError,
+    );
+  c.validateReviewContent({
+    ...review,
+    description: "",
+    questions: Array.from({ length: 500 }, (_, i) => ({
+      id: String(i),
+      type: "text",
+      label: "Q",
+      required: false,
+      choices: [],
+    })),
+  });
+  const exact = {
+    ...review,
+    description: "",
+    questions: Array.from({ length: 250 }, (_, i) => ({
+      id: String(i),
+      type: "text",
+      label: "x".repeat(1950),
+      required: false,
+      choices: [],
+    })),
+  };
+  const remaining =
+    c.DEFAULT_LIMITS.max_review_bytes - c.utf8(JSON.stringify(exact)).length;
+  exact.description = "x".repeat(remaining);
+  c.validateReviewContent(exact);
+  assert.throws(
+    () =>
+      c.validateReviewContent({
+        ...exact,
+        description: exact.description + "x",
+      }),
+    CryptoError,
+  );
+});
 const membership = await c.generateMembershipKey();
 const memberPublicKey = await crypto.subtle.importKey(
   "raw",
@@ -425,8 +588,8 @@ test("content validation enforces exact schema, UTF8 byte bounds and draft versu
     { ...content, title: "" },
     { ...content, title: "界".repeat(101) },
     { ...content, title: "\ud800" },
-    { ...content, description: "x".repeat(10001) },
-    { ...content, questions: Array(101).fill(q) },
+    { ...content, description: "x".repeat(65537) },
+    { ...content, questions: Array(501).fill(q) },
     { ...content, questions: [q, q] },
     ...[
       { id: "" },
@@ -452,7 +615,7 @@ test("content validation enforces exact schema, UTF8 byte bounds and draft versu
     },
     {
       ...content,
-      questions: Array.from({ length: 20 }, (_, i) => ({
+      questions: Array.from({ length: 270 }, (_, i) => ({
         ...q,
         id: String(i),
         label: "x".repeat(2000),
@@ -921,9 +1084,9 @@ async function withQuestions(questions) {
 
 test("aggregate UTF8 byte bounds reject multibyte and oversized encrypted responses", async () => {
   const args = { descriptorBytes, descriptor };
-  // 90000 characters are within the per-text limit but need 270000 UTF8 bytes.
+  // Multibyte answers exceed the aggregate ciphertext ceiling.
   await assert.rejects(
-    c.encryptResponse({ ...args, answers: { q1: "界".repeat(90000) } }),
+    c.encryptResponse({ ...args, answers: { q1: "界".repeat(174750) } }),
     (e) => e.code === "RESPONSE_TOO_LARGE",
   );
   const multi = await withQuestions(
@@ -939,10 +1102,10 @@ test("aggregate UTF8 byte bounds reject multibyte and oversized encrypted respon
     c.encryptResponse({
       ...multi,
       answers: {
-        q0: "x".repeat(70000),
-        q1: "x".repeat(70000),
-        q2: "x".repeat(70000),
-        q3: "x".repeat(70000),
+        q0: "x".repeat(140000),
+        q1: "x".repeat(140000),
+        q2: "x".repeat(140000),
+        q3: "x".repeat(140000),
       },
     }),
     (e) => e.code === "RESPONSE_TOO_LARGE",
@@ -952,13 +1115,13 @@ test("aggregate UTF8 byte bounds reject multibyte and oversized encrypted respon
       ...args,
       recipientPrivateKey: recipient.privateKey,
       enc: bytes(32),
-      ciphertext: new Uint8Array(262145),
+      ciphertext: new Uint8Array(524289),
     }),
     (e) => e.code === "RESPONSE_TOO_LARGE",
   );
   await assert.rejects(
     c.verifyDescriptor({
-      descriptorBytes: new Uint8Array(65537),
+      descriptorBytes: new Uint8Array(786433),
       signature: descriptorSignature,
       expectedReviewId: reviewId,
     }),
@@ -1260,7 +1423,7 @@ test("accepted response hash binds valid replacement HPKE envelopes and every co
       hash,
     );
   }
-  for (const ciphertext of [bytes(15), bytes(262145)])
+  for (const ciphertext of [bytes(15), bytes(524289)])
     await assert.rejects(
       c.responseHash({ ...context, ciphertext }),
       CryptoError,
