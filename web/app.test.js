@@ -57,7 +57,6 @@ async function service(overrides = {}) {
     globalThis.setState=value=>{state=value;};
     globalThis.setLogin=value=>{login=value;};
     globalThis.setCredentials=value=>{credentials=value;};
-    globalThis.setPublishBuilder=value=>{publishWithRosterRetry=value;};
     globalThis.setReviewKeys=value=>{reviewKeys=value;};
     globalThis.lifecycle={createReview,updateReview,publishReview,deleteReview};
     globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'member',certificate:'certificate'});};
@@ -75,6 +74,148 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+test("rate-limited publication batch retains exact payload and cursor for resume", async () => {
+  const context = await service();
+  context.configureLifecycle();
+  const batch = {
+    request_id: "batch",
+    publication_id: "snapshot",
+    content_key_envelopes: [{ ciphertext: "randomized" }],
+  };
+  const pending = {
+    start: { request_id: "start", expected_revision: "2" },
+    publicationId: "snapshot",
+    count: 2,
+    uploaded: 1,
+    after: "previous",
+    next: null,
+    batch,
+  };
+  const state = { pendingReviewPublishes: { review: pending } };
+  context.setState(state);
+  let limited = true;
+  const sent = [];
+  context.setSigned(async (_path, action, body) => {
+    if (action === "review-publication-envelopes") {
+      sent.push(JSON.stringify(body));
+      if (limited) throw Object.assign(Error("rate limit"), { status: 429 });
+      return { ok: true };
+    }
+    return { state: "published" };
+  });
+  await assert.rejects(context.service.sendPublication("review", pending), {
+    status: 429,
+  });
+  assert.equal(state.pendingReviewPublishes.review, pending);
+  assert.equal(pending.batch, batch);
+  assert.equal(pending.after, "previous");
+  assert.equal(pending.uploaded, 1);
+  limited = false;
+  await context.service.sendPublication("review", pending);
+  assert.equal(sent[0], sent[1]);
+  assert.equal(state.pendingReviewPublishes.review, undefined);
+});
+
+test("publication rejects an empty snapshot without discarding the exact start", async () => {
+  const context = await service();
+  context.configureLifecycle();
+  const pending = { start: { request_id: "start" }, uploaded: 0 };
+  const state = { pendingReviewPublishes: { review: pending } };
+  context.setState(state);
+  context.setSigned(async () => ({
+    publication_id: Buffer.alloc(16, 1).toString("base64url"),
+    recipient_count: 0,
+    expires_at: "9999999999",
+  }));
+  await assert.rejects(context.service.sendPublication("review", pending), {
+    code: "KEY_UNAVAILABLE",
+  });
+  assert.equal(pending.publicationId, undefined);
+  assert.equal(state.pendingReviewPublishes.review, pending);
+});
+
+test("frozen publication bounds pages and crypto concurrency and retries exact unacknowledged batches", async () => {
+  const ids = Array.from({ length: 201 }, (_, i) => {
+    const value = Buffer.alloc(16);
+    value.writeUInt32BE(i + 1, 12);
+    return value.toString("base64url");
+  }).sort();
+  const paths = [],
+    batches = [];
+  let inflight = 0,
+    peak = 0,
+    calls = 0;
+  const context = await service({
+    request: async (path) => {
+      paths.push(path);
+      const url = new URL(path, "https://example.test");
+      assert.equal(url.searchParams.get("publication_id"), ids[0]);
+      const after = url.searchParams.get("after");
+      const offset = after ? ids.indexOf(after) + 1 : 0;
+      const page = ids.slice(offset, offset + 100);
+      return {
+        items: page.map((membership_id) => ({ membership_id })),
+        next: offset + page.length < ids.length ? page.at(-1) : null,
+      };
+    },
+    C: {
+      verifyContentRecipient: async ({ recipient }) => ({
+        membershipId: recipient.membership_id,
+        encryptionPublicKey: new Uint8Array(32),
+      }),
+      sealReviewContentKey: async ({ membershipId }) => {
+        peak = Math.max(peak, ++inflight);
+        await Promise.resolve();
+        inflight--;
+        return { membership_id: membershipId, ciphertext: `random-${++calls}` };
+      },
+    },
+  });
+  context.configureLifecycle();
+  context.setReviewKeys(async () => ({ contentKey: new Uint8Array(32) }));
+  const pending = {
+    start: { descriptor: "YQ", expected_revision: "2" },
+    orgId: "YQ",
+    uploaded: 0,
+  };
+  const state = { pendingReviewPublishes: { review: pending } };
+  context.setState(state);
+  let malformed = true;
+  context.setSigned(async (_path, action, payload) => {
+    if (action === "review-publication-start")
+      return {
+        publication_id: ids[0],
+        recipient_count: 201,
+        expires_at: "9999999999",
+      };
+    if (action === "review-publication-envelopes") {
+      batches.push(JSON.stringify(payload));
+      if (malformed) return {};
+      return { ok: true };
+    }
+    assert.deepEqual(Object.keys(payload).sort(), [
+      "expected_revision",
+      "publication_id",
+      "request_id",
+    ]);
+    return { state: "published" };
+  });
+  await assert.rejects(context.service.sendPublication("review", pending));
+  assert.equal(pending.uploaded, 0);
+  assert.equal(calls, 100);
+  malformed = false;
+  await context.service.sendPublication("review", pending);
+  assert.equal(batches[0], batches[1]);
+  assert.deepEqual(
+    batches.slice(1).map((b) => JSON.parse(b).content_key_envelopes.length),
+    [100, 100, 1],
+  );
+  assert.equal(paths.length, 3);
+  assert.equal(calls, 201);
+  assert.ok(peak <= 8);
+  assert.equal(state.pendingReviewPublishes.review, undefined);
+});
 
 async function authService(overrides = {}) {
   const context = await service(overrides);
@@ -1397,12 +1538,14 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
   const context = await service({
     request: async (path) => {
       if (path.includes("/content-recipients"))
-        return { items: [], next: null };
+        return { items: [{ membership_id: orgId }], next: null };
       if (path === "/api/member/vault")
         return { objects: [stored.vault_write.object] };
       return serverReview();
     },
     C: {
+      verifyContentRecipient: async ({ recipient }) => recipient,
+      sealReviewContentKey: async () => ({ ciphertext: "opaque-key" }),
       validateReviewContent: (value) => clone(value),
       generateRecipientKey: async () => {
         recipientCalls++;
@@ -1490,6 +1633,14 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
       throw Error("uncertain create");
     }
     if (action === "review-update") stored = { ...stored, ...clone(payload) };
+    if (action === "review-publication-start")
+      return {
+        publication_id: orgId,
+        recipient_count: 1,
+        expires_at: "9999999999",
+      };
+    if (action === "review-publish") return { state: "published" };
+    if (action === "review-publication-envelopes") return { ok: true };
     return serverReview();
   });
   await assert.rejects(
@@ -1562,7 +1713,6 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
       "expected_revision",
       "descriptor",
       "descriptor_signature",
-      "content_key_envelopes",
     ].sort(),
   );
   assert.equal(recipientCalls, 1);
@@ -1594,21 +1744,46 @@ test("recipient directory fetches all pages and rejects duplicate IDs and repeat
     C: { verifyContentRecipient: async ({ recipient }) => recipient },
   });
   assert.equal(
-    (await context.service.contentRecipients("review", "YQ")).length,
-    2,
+    (
+      await context.service.contentRecipients(
+        "review",
+        "YQ",
+        "snapshot",
+        undefined,
+        2,
+      )
+    ).recipients.length,
+    1,
   );
-  assert.ok(paths[1].endsWith("?after=" + first));
+  await context.service.contentRecipients("review", "YQ", "snapshot", first, 1);
+  assert.ok(paths[1].endsWith("&after=" + first));
   for (const page of [
     { items: [{ membership_id: first }, { membership_id: first }], next: null },
     { items: [{ membership_id: first }], next: "bad" },
+    { items: [{ membership_id: first }], next: null },
+    { items: [], next: first },
+    { items: Array(101).fill({ membership_id: first }), next: first },
+    {
+      items: [{ membership_id: first }, { membership_id: second }],
+      next: second,
+    },
   ]) {
     const invalid = await service({
       request: async () => page,
       C: { verifyContentRecipient: async ({ recipient }) => recipient },
     });
-    await assert.rejects(invalid.service.contentRecipients("review", "YQ"), {
-      code: "KEY_UNAVAILABLE",
-    });
+    await assert.rejects(
+      invalid.service.contentRecipients(
+        "review",
+        "YQ",
+        "snapshot",
+        undefined,
+        2,
+      ),
+      {
+        code: "KEY_UNAVAILABLE",
+      },
+    );
   }
 });
 test("completion ignores issuance and invalid local receipts", async () => {
@@ -1629,33 +1804,26 @@ test("completion ignores issuance and invalid local receipts", async () => {
   assert.equal(await context.service.completedHere("review"), false);
 });
 
-test("publication allows one roster rebuild, clears conflicts, and preserves uncertain payloads", async () => {
+test("publication clears definitive failures and preserves uncertain start payloads", async () => {
   const context = await service();
   context.configureLifecycle();
-  const payload = { request_id: "first", expected_revision: "2" };
-  const next = { request_id: "second", expected_revision: "2" };
+  const payload = { start: { request_id: "first", expected_revision: "2" } };
   const state = { pendingReviewPublishes: { review: payload } };
   context.setState(state);
   const sent = [];
   context.setSigned(async (_path, _action, body) => {
     sent.push(body);
-    throw Object.assign(Error("roster"), { code: "recipient_set_conflict" });
-  });
-  context.setPublishBuilder(async (reviewId, revision, allowed) => {
-    assert.equal(allowed, false);
-    assert.equal(revision, "2");
-    state.pendingReviewPublishes[reviewId] = next;
-    return context.service.sendPublication(reviewId, next, allowed);
+    throw Object.assign(Error("expired"), { status: 410 });
   });
   await assert.rejects(
     context.service.sendPublication("review", payload, true),
-    { code: "recipient_set_conflict" },
+    { status: 410 },
   );
-  assert.deepEqual(sent, [payload, next]);
+  assert.deepEqual(sent, [payload.start]);
   assert.equal(state.pendingReviewPublishes.review, undefined);
   state.pendingReviewPublishes.review = payload;
   context.setSigned(async (_path, _action, body) => {
-    assert.equal(body, payload);
+    assert.equal(body, payload.start);
     throw Object.assign(Error("network"), { code: "NETWORK_ERROR" });
   });
   await assert.rejects(
@@ -1846,7 +2014,12 @@ test("rejected publication rebuilds corrected revision while unknown outcomes re
   const context = await service({
     request: async (path) =>
       path.includes("content-recipients")
-        ? { items: [], next: null }
+        ? {
+            items: [
+              { membership_id: Buffer.alloc(16, 1).toString("base64url") },
+            ],
+            next: null,
+          }
         : {
             org_id: "YQ",
             encrypted_content: {},
@@ -1854,6 +2027,8 @@ test("rejected publication rebuilds corrected revision while unknown outcomes re
             issuer_public_key: "public",
           },
     C: {
+      verifyContentRecipient: async ({ recipient }) => recipient,
+      sealReviewContentKey: async () => ({ ciphertext: "opaque-key" }),
       openDraftContent: async () => ({}),
       validateReviewContent: () => {},
       recipientPublicKey: async () => new Uint8Array(32),
@@ -1875,7 +2050,15 @@ test("rejected publication rebuilds corrected revision while unknown outcomes re
   context.setSigned(async (_path, _action, payload) => {
     sent.push(payload);
     if (error) throw error;
-    return {};
+    return _action === "review-publication-start"
+      ? {
+          publication_id: Buffer.alloc(16, 1).toString("base64url"),
+          recipient_count: 1,
+          expires_at: "9999999999",
+        }
+      : _action === "review-publication-envelopes"
+        ? { ok: true }
+        : { state: "published" };
   });
   await assert.rejects(
     context.lifecycle.publishReview({ reviewId: "Yg", expectedRevision: "1" }),
@@ -1892,7 +2075,7 @@ test("rejected publication rebuilds corrected revision while unknown outcomes re
   );
   assert.equal(sent[1].expected_revision, "2");
   assert.notEqual(sent[0].request_id, sent[1].request_id);
-  assert.equal(state.pendingReviewPublishes.Yg, sent[1]);
+  assert.equal(state.pendingReviewPublishes.Yg.start, sent[1]);
   error = Object.assign(Error("reply"), { code: "INVALID_RESPONSE" });
   await assert.rejects(
     context.lifecycle.publishReview({ reviewId: "Yg", expectedRevision: "3" }),

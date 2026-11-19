@@ -24,6 +24,21 @@ CREATE TABLE member.invites (id_hash bytea PRIMARY KEY, org_id text REFERENCES m
 CREATE TABLE member.reviews (id text PRIMARY KEY, org_id text REFERENCES member.orgs(id), account_id text REFERENCES member.accounts(id), membership_id text REFERENCES member.memberships(id), encrypted_content jsonb NOT NULL, issuer_private bytea NOT NULL, issuer_public bytea NOT NULL, issuer_key_id text NOT NULL, state text NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','published','closed')), revision bigint NOT NULL DEFAULT 1, max_responses integer NOT NULL CHECK(max_responses BETWEEN 1 AND 100), opens_at bigint, closes_at bigint, descriptor bytea, descriptor_signature bytea, issued_count bigint NOT NULL DEFAULT 0);
 CREATE TABLE member.operations(account_id text NOT NULL REFERENCES member.accounts(id), request_id text NOT NULL, payload_hash bytea NOT NULL, result jsonb NOT NULL, PRIMARY KEY(account_id,request_id));
 CREATE TABLE member.review_content_keys (review_id text NOT NULL REFERENCES member.reviews(id), membership_id text NOT NULL REFERENCES member.memberships(id), encryption_key_id bytea NOT NULL CHECK(octet_length(encryption_key_id)=32), enc bytea NOT NULL CHECK(octet_length(enc)=32), ciphertext bytea NOT NULL CHECK(octet_length(ciphertext)=48), PRIMARY KEY(review_id,membership_id));
+CREATE INDEX approved_membership_roster ON member.memberships(org_id,id COLLATE "C") WHERE state='approved';
+CREATE TABLE member.review_publications (
+ review_id text PRIMARY KEY REFERENCES member.reviews(id) ON DELETE CASCADE,
+ id text UNIQUE NOT NULL, revision bigint NOT NULL, descriptor bytea NOT NULL,
+ descriptor_signature bytea NOT NULL CHECK(octet_length(descriptor_signature)=64),
+ expires_at timestamptz NOT NULL, recipient_count integer NOT NULL CHECK(recipient_count BETWEEN 1 AND 100000)
+);
+CREATE TABLE member.publication_recipients (
+ publication_id text NOT NULL REFERENCES member.review_publications(id) ON DELETE CASCADE,
+ membership_id text COLLATE "C" NOT NULL, account_id text NOT NULL REFERENCES member.accounts(id),
+ certificate text NOT NULL, encryption_key_id bytea NOT NULL CHECK(octet_length(encryption_key_id)=32),
+ enc bytea CHECK(octet_length(enc)=32), ciphertext bytea CHECK(octet_length(ciphertext)=48),
+ CHECK ((enc IS NULL) = (ciphertext IS NULL)),
+ PRIMARY KEY(publication_id,membership_id)
+);
 CREATE TABLE member.issuances (review_id text REFERENCES member.reviews(id), membership_id text REFERENCES member.memberships(id), request_id text NOT NULL, request_hash bytea NOT NULL, blind_signature bytea NOT NULL, pending_object jsonb NOT NULL, slot integer NOT NULL CHECK(slot>0), PRIMARY KEY(review_id,membership_id,request_id), UNIQUE(review_id,membership_id,slot));
 CREATE TABLE anon.reviews (id text PRIMARY KEY, issuer_key_id text NOT NULL, issuer_public bytea NOT NULL, descriptor bytea NOT NULL, descriptor_hash bytea NOT NULL, descriptor_signature bytea NOT NULL, state text NOT NULL CHECK(state IN ('published','closed')), opens_at bigint, closes_at bigint, accepted_count bigint NOT NULL DEFAULT 0);
 CREATE TABLE anon.submissions (review_id text NOT NULL REFERENCES anon.reviews(id), issuer_key_id text NOT NULL, token_hash bytea NOT NULL, submission_hash bytea NOT NULL, prepared_message bytea NOT NULL, signature bytea NOT NULL, enc bytea NOT NULL CHECK(octet_length(enc)=32), ciphertext bytea NOT NULL CHECK(octet_length(ciphertext) BETWEEN 16 AND 262144), receipt jsonb NOT NULL, PRIMARY KEY(review_id,issuer_key_id,token_hash));

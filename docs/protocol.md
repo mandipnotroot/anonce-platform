@@ -146,8 +146,9 @@ Descriptor is base64url exact JSON bytes, at most 65536 decoded bytes, containin
 - Authenticated review access obtains only the caller's HPKE envelope; anonymous submission remains credential-free.
 
 - The [member key-delivery contract](member-key-delivery.md) defines normative account bindings, paginated recipient discovery, HPKE transcripts, atomic publication coverage, and browser-local completion.
-- Publication includes all currently approved memberships.
-- Later approvals have no historical key.
+- Publication start freezes all then-approved memberships and their encryption-key bindings.
+- The browser verifies and encrypts frozen recipient pages, uploads bounded batches, and finalizes only complete coverage; see the linked contract for payloads and expiry.
+- Approvals after snapshot creation have no historical key.
 - Missing or corrupt keys lock only the affected review.
 - Content-key access never grants answer decryption or response authorization.
 - Published content is immutable; there is no key rotation.

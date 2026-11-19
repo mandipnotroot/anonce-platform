@@ -945,9 +945,13 @@ paths:
     parameters: [{ $ref: "#/components/parameters/ID" }]
     get:
       operationId: listContentRecipients
-      summary: Page approved memberships and authenticated encryption keys
-      description: Full session, approved organization member, and review creator only. Pages contain at most 100 memberships, including creator, ordered bytewise by canonical membership ID. next is the last returned ID or null. Browser verifies certificates and signed key bindings before wrapping content keys. Publication rechecks the complete current roster atomically.
+      summary: Page frozen publication recipients and authenticated encryption keys
+      description: Full session, approved organization member, and review creator only. Pages contain at most 100 frozen snapshot recipients, including creator, ordered bytewise by canonical membership ID. next is the last returned ID or null. Browser verifies certificates and signed key bindings before wrapping content keys. Later membership changes do not alter this snapshot.
       parameters:
+        - name: publication_id
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/ID" }
         - name: after
           in: query
           schema: { $ref: "#/components/schemas/ID" }
@@ -970,13 +974,73 @@ paths:
                       - { $ref: "#/components/schemas/ID" }
                       - { type: "null" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         <<: *AuthorizedReadErrors
+  /api/member/reviews/{id}/publication:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      operationId: startReviewPublication
+      summary: Validate descriptor and freeze approved recipient snapshot
+      description: SignedEnvelope payload decodes to ReviewPublicationStart. Full session, approved creator, membership_sig. Validates descriptor v3 against the saved draft and current certificate under organization then review locks. Freezes at most 100000 recipients for 24 hours. Only one active snapshot per review; stale or expired snapshots may be replaced. No content keys are exposed by staging.
+      x-challenge-action: review-publication-start
+      x-payload-schema: "#/components/schemas/ReviewPublicationStart"
+      parameters:
+        [
+          { $ref: "#/components/parameters/Origin" },
+          { $ref: "#/components/parameters/CSRF" },
+        ]
+      requestBody: { $ref: "#/components/requestBodies/Signed" }
+      responses:
+        "200":
+          description: Frozen publication snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [publication_id, recipient_count, expires_at]
+                properties:
+                  publication_id: { $ref: "#/components/schemas/ID" }
+                  recipient_count:
+                    { type: integer, minimum: 1, maximum: 100000 }
+                  expires_at: { $ref: "#/components/schemas/Decimal" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        <<: *AuthenticatedWriteErrors
+  /api/member/reviews/{id}/publication/envelopes:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      operationId: uploadReviewPublicationEnvelopes
+      summary: Atomically stage up to 100 recipient envelopes
+      description: SignedEnvelope payload decodes to ReviewPublicationEnvelopes. Full session, approved creator, membership_sig. Every membership and key ID must match the frozen snapshot. Reject duplicate coverage and conflicting request IDs; exact retries return the original acknowledgment. Staged envelopes are not readable through review views.
+      x-challenge-action: review-publication-envelopes
+      x-payload-schema: "#/components/schemas/ReviewPublicationEnvelopes"
+      parameters:
+        [
+          { $ref: "#/components/parameters/Origin" },
+          { $ref: "#/components/parameters/CSRF" },
+        ]
+      requestBody: { $ref: "#/components/requestBodies/Signed" }
+      responses:
+        "200":
+          description: Batch committed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok]
+                properties:
+                  ok: { const: true }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        <<: *AuthenticatedWriteErrors
   /api/member/reviews/{id}/publish:
     parameters: [{ $ref: "#/components/parameters/ID" }]
     post:
       operationId: publishReview
-      summary: Freeze signed descriptor and atomically save member content-key envelopes
-      description: 'SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Validates descriptor v3 matches saved encrypted content, deployment, reviewer membership, current certificate, and issuer. Creator association and quota/schedule enforcement remain internal. descriptor_signature signs protocol E("review-descriptor", descriptor bytes). Atomically freezes descriptor and persists exactly one content-key envelope per currently approved membership under the organization lock and review revision CAS. Roster/key mismatch returns 409 recipient_set_conflict. No vault write at publication; server cannot validate encrypted question semantics or prove wrapped keys are correct.'
+      summary: Atomically publish a complete recipient snapshot
+      description: SignedEnvelope payload decodes to ReviewPublish. Action review-publish; creator and approved member, full session, membership_sig. Requires an unexpired snapshot, matching draft revision, current creator certificate authorization, and exactly one staged envelope per frozen recipient. Atomically publishes the saved signed descriptor and envelopes. No vault write at publication; server cannot validate encrypted question semantics or prove wrapped keys are correct.
       x-challenge-action: review-publish
       x-content-key-contract: member-key-delivery.md
       x-payload-schema: "#/components/schemas/ReviewPublish"
@@ -2014,17 +2078,11 @@ components:
         ciphertext:
           $ref: "#/components/schemas/Binary"
           description: Exactly 48 decoded bytes including authentication tag.
-    ReviewPublish:
+    ReviewPublicationStart:
       type: object
       additionalProperties: false
       required:
-        [
-          request_id,
-          expected_revision,
-          descriptor,
-          descriptor_signature,
-          content_key_envelopes,
-        ]
+        [request_id, expected_revision, descriptor, descriptor_signature]
       properties:
         request_id: { $ref: "#/components/schemas/ID" }
         expected_revision: { $ref: "#/components/schemas/Decimal" }
@@ -2035,11 +2093,27 @@ components:
             x-decoded-schema: "#/components/schemas/Descriptor",
           }
         descriptor_signature: { $ref: "#/components/schemas/Signature" }
+    ReviewPublicationEnvelopes:
+      type: object
+      additionalProperties: false
+      required: [request_id, publication_id, content_key_envelopes]
+      properties:
+        request_id: { $ref: "#/components/schemas/ID" }
+        publication_id: { $ref: "#/components/schemas/ID" }
         content_key_envelopes:
           type: array
           minItems: 1
+          maxItems: 100
           items: { $ref: "#/components/schemas/ContentKeyEnvelope" }
-          description: Exactly one envelope for every currently approved membership, including creator. Roster/key mismatch returns 409 recipient_set_conflict; rebuild with a new request ID. Exact network retries reuse unchanged payload bytes.
+          description: Unique recipients from the frozen snapshot with matching encryption-key IDs. Exact network retries reuse unchanged payload bytes and request ID.
+    ReviewPublish:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, publication_id]
+      properties:
+        request_id: { $ref: "#/components/schemas/ID" }
+        expected_revision: { $ref: "#/components/schemas/Decimal" }
+        publication_id: { $ref: "#/components/schemas/ID" }
     Review:
       type: object
       additionalProperties: false

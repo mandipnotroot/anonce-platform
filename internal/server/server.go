@@ -70,6 +70,7 @@ func memberRateRoute(pattern string) bool {
 		"POST /api/member/orgs/{org}/reviews", "GET /api/member/reviews/{id}",
 		"GET /api/member/reviews/{id}/content-recipients", "PUT /api/member/reviews/{id}",
 		"DELETE /api/member/reviews/{id}", "POST /api/member/reviews/{id}/publish",
+		"POST /api/member/reviews/{id}/publication", "POST /api/member/reviews/{id}/publication/envelopes",
 		"POST /api/member/reviews/{id}/close", "POST /api/member/reviews/{id}/issuances",
 		"GET /api/member/reviews/{id}/issuances/{request}", "GET /api/member/reviews/{id}/submissions":
 		return true
@@ -82,7 +83,7 @@ func sessionChallenge(action string) bool {
 	case "vault-write", "password-change", "recovery-rotate", "credential-reset",
 		"org-create", "member-add", "member-role", "invite-create", "invite-accept",
 		"member-approve", "member-revoke", "certificate-renew", "review-create",
-		"review-update", "review-delete", "review-publish", "review-close", "issue":
+		"review-update", "review-delete", "review-publish", "review-publication-start", "review-publication-envelopes", "review-close", "issue":
 		return true
 	}
 	return false

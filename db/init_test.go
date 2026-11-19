@@ -81,14 +81,14 @@ func TestInit(t *testing.T) {
 			t.Fatal(err)
 		}
 		var preserved bool
-		if err := p.QueryRow(t.Context(), "SELECT (SELECT value='value'::bytea FROM member.settings WHERE name='sentinel') AND (SELECT count(*)=1 AND min(version)=1 FROM public.anonce_schema_version)").Scan(&preserved); err != nil || !preserved {
+		if err := p.QueryRow(t.Context(), "SELECT (SELECT value='value'::bytea FROM member.settings WHERE name='sentinel') AND (SELECT count(*)=1 AND min(version)=2 FROM public.anonce_schema_version)").Scan(&preserved); err != nil || !preserved {
 			t.Fatalf("repeat lost state: %v", err)
 		}
 	})
 	for _, tc := range []struct {
 		name, setup, want string
 	}{
-		{"unsupported", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(2)", "unsupported schema version"},
+		{"unsupported", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(3)", "unsupported schema version"},
 		{"multiple versions", "CREATE TABLE public.anonce_schema_version(version integer PRIMARY KEY); INSERT INTO public.anonce_schema_version VALUES(1),(2)", "unsupported schema version"},
 		{"legacy", "CREATE TABLE public.anonce_migrations(version text PRIMARY KEY); INSERT INTO public.anonce_migrations VALUES('001_initial.sql')", "must be recreated"},
 		{"rollback", "CREATE SCHEMA member; CREATE TABLE member.accounts(sentinel text); INSERT INTO member.accounts VALUES('preserve')", "initialize schema"},
@@ -103,7 +103,7 @@ func TestInit(t *testing.T) {
 			query := "SELECT to_regclass('member.settings') IS NULL AND to_regclass('anon.reviews') IS NULL"
 			switch tc.name {
 			case "unsupported":
-				query += " AND (SELECT count(*)=1 AND min(version)=2 FROM public.anonce_schema_version)"
+				query += " AND (SELECT count(*)=1 AND min(version)=3 FROM public.anonce_schema_version)"
 			case "multiple versions":
 				query += " AND (SELECT count(*)=2 FROM public.anonce_schema_version)"
 			case "legacy":

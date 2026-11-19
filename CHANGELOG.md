@@ -30,6 +30,8 @@
 
 ### Changed
 
+- Freeze publication recipients before paged key encryption and bounded envelope
+  uploads; finalize complete snapshots atomically instead of sending one full-roster payload.
 - Use one current schema with transactional, version-checked initialization.
   Older databases require a fresh database; automatic upgrades and data transfer
   are not supported.

@@ -209,13 +209,12 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	d := descriptor{V: 3, Deployment: protocol.B64(s.deployment), Review: id, Org: org, Membership: cert["membership_id"].(string), Certificate: cert["certificate"].(string), Content: content, Recipient: protocol.B64(protocol.Random(32)), Issuer: v["issuer_key_id"].(string), Public: v["issuer_public_key"].(string)}
 	desc, _ := json.Marshal(d)
 	publish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(desc), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", desc)))}
-	publish["content_key_envelopes"] = testContentEnvelopes(t, h, u, id)
 	// A correctly signed descriptor cannot substitute a different encrypted envelope.
 	mismatch := d
 	mismatch.Content = fakeContent()
 	mismatchBytes, _ := json.Marshal(mismatch)
 	mismatchPayload := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(mismatchBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", mismatchBytes)))}
-	result(t, request(h, "POST", path+"/publish", signed(t, s, h, u, "review-publish", mismatchPayload, false), u), 400)
+	result(t, request(h, "POST", path+"/publication", signed(t, s, h, u, "review-publication-start", mismatchPayload, false), u), 400)
 	// An otherwise exact, genuinely CA-signed but expired leaf cannot publish.
 	expired := expiredCert(t, s, org, d.Membership, u.member.Public().(ed25519.PublicKey))
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", expired, d.Membership); e != nil {
@@ -225,12 +224,14 @@ func TestIntegrationWholeFlowConcurrent(t *testing.T) {
 	badD.Certificate = expired
 	badBytes, _ := json.Marshal(badD)
 	badPublish := map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "descriptor": protocol.B64(badBytes), "descriptor_signature": protocol.B64(ed25519.Sign(u.member, protocol.E("review-descriptor", badBytes)))}
-	badEnv := signed(t, s, h, u, "review-publish", badPublish, false)
-	result(t, request(h, "POST", path+"/publish", badEnv, u), 400)
+	badEnv := signed(t, s, h, u, "review-publication-start", badPublish, false)
+	result(t, request(h, "POST", path+"/publication", badEnv, u), 400)
 	if _, e := s.member.Exec(ctx, "UPDATE member.memberships SET certificate=$1 WHERE id=$2", d.Certificate, d.Membership); e != nil {
 		t.Fatal(e)
 	}
-	env = signed(t, s, h, u, "review-publish", publish, false)
+	publication := result(t, request(h, "POST", path+"/publication", signed(t, s, h, u, "review-publication-start", publish, false), u), 200)["publication_id"].(string)
+	result(t, request(h, "POST", path+"/publication/envelopes", signed(t, s, h, u, "review-publication-envelopes", map[string]any{"request_id": protocol.ID(), "publication_id": publication, "content_key_envelopes": testContentEnvelopes(t, h, u, id, publication)}, false), u), 200)
+	env = signed(t, s, h, u, "review-publish", map[string]any{"request_id": protocol.ID(), "expected_revision": "2", "publication_id": publication}, false)
 	result(t, request(h, "POST", path+"/publish", env, u), 200)
 	result(t, request(h, "POST", path+"/publish", env, u), 200)
 	pub, e := x509.ParsePKIXPublicKey(mustDecode(d.Public))

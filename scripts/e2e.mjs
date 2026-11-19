@@ -269,6 +269,26 @@ try {
   assert.equal(createPayload.review_id, reviewId);
   assert.equal(createPayload.encrypted_content.v, 1);
   assert.equal(createPayload.vault_write.object.id, reviewId);
+  const publicationStart = traffic.find(
+    (item) =>
+      item.method === "POST" &&
+      item.path === `/api/member/reviews/${reviewId}/publication`,
+  );
+  assert.ok(publicationStart, "captured publication start");
+  const startPayload = JSON.parse(
+    Buffer.from(
+      JSON.parse(publicationStart.text).payload,
+      "base64url",
+    ).toString("utf8"),
+  );
+  assert.deepEqual(Object.keys(startPayload).sort(), [
+    "descriptor",
+    "descriptor_signature",
+    "expected_revision",
+    "request_id",
+  ]);
+  assert.ok(startPayload.descriptor);
+  assert.ok(startPayload.descriptor_signature);
   const publishRequest = traffic.find(
     (item) =>
       item.method === "POST" &&
@@ -285,11 +305,54 @@ try {
     false,
     "publication reuses saved vault keys",
   );
+  assert.deepEqual(Object.keys(publishPayload).sort(), [
+    "expected_revision",
+    "publication_id",
+    "request_id",
+  ]);
+  const recipientPages = traffic.filter(
+    (item) =>
+      item.path === `/api/member/reviews/${reviewId}/content-recipients` &&
+      item.text.startsWith(origin),
+  );
+  assert.ok(recipientPages.length, "captured publication recipient pagination");
+  for (const page of recipientPages) {
+    assert.equal(
+      new URL(page.text).searchParams.get("publication_id"),
+      publishPayload.publication_id,
+    );
+  }
+  const uploads = traffic
+    .filter(
+      (item) =>
+        item.method === "POST" &&
+        item.path === `/api/member/reviews/${reviewId}/publication/envelopes`,
+    )
+    .map((item) =>
+      JSON.parse(
+        Buffer.from(JSON.parse(item.text).payload, "base64url").toString(
+          "utf8",
+        ),
+      ),
+    );
+  assert.ok(uploads.length, "captured staged envelope upload");
+  for (const upload of uploads) {
+    assert.deepEqual(Object.keys(upload).sort(), [
+      "content_key_envelopes",
+      "publication_id",
+      "request_id",
+    ]);
+    assert.equal(upload.publication_id, publishPayload.publication_id);
+    assert.ok(upload.content_key_envelopes.length <= 100);
+  }
   assert.equal(invitationURL.origin, new URL(origin).origin);
   assert.equal(invitationURL.pathname, "/");
   assert.equal(invitationURL.search, "");
   assert.equal(invitationURL.hash, `#/respond/${reviewId}`);
-  assert.equal(publishPayload.content_key_envelopes.length, 2);
+  assert.equal(
+    uploads.flatMap((upload) => upload.content_key_envelopes).length,
+    2,
+  );
   await reviewer.evaluate(
     async ({ reviewId, invitation }) => {
       const a = await import("/app.js");

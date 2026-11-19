@@ -6,7 +6,7 @@
 
 ## Access policy
 
-- Publication snapshots every approved organization membership, including the creator and all roles.
+- Publication start snapshots every approved organization membership, including the creator and all roles.
 - Later approvals receive no historical content keys.
 - Published content stays immutable.
 - Revoked members cannot fetch envelopes, but cannot unlearn keys or content already obtained.
@@ -48,8 +48,8 @@ Membership vault plaintext:
 
 ## Recipient directory
 
-- `GET /api/member/reviews/{id}/content-recipients?after=<membership_id>` requires a full session, approved membership, and review creator authorization.
-- It returns pages of 100 approved memberships with `items` and `next`:
+- `GET /api/member/reviews/{id}/content-recipients?publication_id=<id>&after=<membership_id>` requires a full session, approved membership, and review creator authorization.
+- It returns pages of at most 100 frozen snapshot recipients with `items` and `next`:
 
 ```json
 {
@@ -67,7 +67,7 @@ Membership vault plaintext:
 ```
 
 - Use bytewise canonical membership-ID string ordering and last-returned-ID cursors.
-- Fetch every page; reject duplicate IDs and repeated cursors.
+- Process and upload one page at a time; reject duplicate or unordered IDs and repeated cursors.
 - Do not reuse the manager-only, capped organization member list.
 
 - Browser verifies the certificate CA signature/profile, deployment, organization, membership ID, and encryption-key binding using its Ed25519 public key.
@@ -93,20 +93,28 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 
 ## Atomic publication and storage
 
-- Signed `review-publish` payload includes `content_key_envelopes: [envelope, ...]`.
-- Under the organization lock and review transaction, validate creator, revision, descriptor signature, and saved content.
-- Require exactly one envelope for every current approved membership, including creator, with matching key ID.
-- Reject missing, duplicate, extra, pending, revoked, or foreign recipients.
-- Persist all envelopes, publication, public descriptor, and idempotent result atomically.
-- Roster mismatch is `409 recipient_set_conflict`.
+1. Start with signed `review-publication-start` at `POST /api/member/reviews/{id}/publication`: `{request_id,expected_revision,descriptor,descriptor_signature}`.
+   Under the organization lock followed by the review lock, validate creator, revision, descriptor signature, and saved content; freeze recipient membership and key bindings.
+2. Page recipients using the returned `publication_id`. Snapshots contain at most 100000 recipients and expire after 24 hours; only one snapshot per review is active.
+3. Upload signed `review-publication-envelopes` at `POST /api/member/reviews/{id}/publication/envelopes`: `{request_id,publication_id,content_key_envelopes}` with 1–100 envelopes.
+   Validate each recipient and key ID against the snapshot; reject duplicates, foreign recipients, and conflicting retries atomically.
+4. Finalize with signed `review-publish` at `POST /api/member/reviews/{id}/publish`: `{request_id,expected_revision,publication_id}`.
+   Require complete snapshot coverage, current creator authorization, and matching draft revision. Make envelopes, publication, public descriptor, and idempotent result available atomically.
 
-- On roster conflict, browser refetches and rebuilds envelopes with a new request ID.
-- Uncertain-network retries reuse the exact payload and request ID.
-- Changed payload with reused ID remains `request_conflict`.
-- Keep the 1536*1024-byte decoded payload limit; reject excess explicitly, never truncate.
+- Approvals after snapshot creation do not change its recipients. Current revocation checks still restrict envelope retrieval.
+- Staging never makes a draft's envelopes available through member review views.
+- Uncertain-network retries reuse the exact current operation payload and request ID; changed payload with reused ID remains `request_conflict`.
+- Browser retains only the current page's envelopes and progress, not the complete directory or publication payload.
+- HTTP 429 retains progress for a later retry. Publication remains subject to
+  member/challenge rate limits; batching does not bypass them.
+- Losing the encrypted browser progress cache does not cancel the active snapshot.
+  A new start must wait for expiry or a changed draft revision; cross-device
+  resume and explicit cancellation are not implemented.
+- Retain the 1536*1024-byte decoded payload limit and the tighter upload item limit; reject excess explicitly, never truncate.
 
 - Account schema requires `encryption_public` (32 bytes) and `encryption_key_signature` (64 bytes).
 - Member-only `review_content_keys` stores `review_id`, `membership_id`, `encryption_key_id`, `enc`, and `ciphertext` with length checks, foreign keys, and primary key `(review_id, membership_id)`.
+- Envelope uploads use bounded bulk writes rather than one database round trip per recipient.
 - Anonymous database role has no access.
 
 - Authenticated review get/list views return `content_key_envelope`: only caller's envelope, or `null` for drafts and later-approved members.
@@ -148,3 +156,25 @@ with these contract-specific cases:
 - Later-approved/revoked access.
 - Local receipt-based completion.
 - Credential-free anonymous requests.
+
+## Publication scale benchmarks
+
+- Run `npm ci`, then `node scripts/publication-benchmark.mjs --run` for synthetic
+  1000, 10000, and 100000-recipient certificate verification and HPKE measurements.
+- The script uses the actual browser-compatible crypto module in Node, bounded
+  batches, and valid synthetic recipient identities. It reports elapsed time,
+  payload sizes, memory observations, and estimated request counts.
+- This is not a live browser or end-to-end publication benchmark. Fixture
+  generation is reported separately; request estimates exclude real network
+  latency and throttling. Do not treat component timings as deployment capacity.
+- Use only disposable synthetic databases for PostgreSQL benchmarks. Database
+  fixtures and role requirements follow the
+  [verification gates](../CONTRIBUTING.md#verification-and-release-gates).
+- With `ANONCE_TEST_DATABASE_URL` pointing to such a database, run
+  `go test ./internal/server -run '^$' -bench '^BenchmarkPublicationStorage$' -benchtime=1x -benchmem`.
+  This measures snapshot freezing, bounded recipient queries, production envelope
+  validation/storage, and promotion at all three sizes. It excludes fixture
+  setup, HTTP authentication, browser crypto, throttling, and commit durability;
+  each synthetic run rolls back its transaction.
+- Record execution results with machine/resource limits in review or CI
+  artifacts, not as checked-in execution diaries.

@@ -40,53 +40,26 @@ type contentKeyEnvelope struct {
 	Ciphertext string `json:"ciphertext"`
 }
 
+// Bound the snapshot side before joining identity keys, including when planner
+// statistics have not yet caught up with a newly frozen large roster.
+const frozenRecipientPageSQL = `WITH page AS MATERIALIZED (
+ SELECT membership_id FROM member.publication_recipients
+ WHERE publication_id=$1 AND membership_id>$2 COLLATE "C" ORDER BY membership_id LIMIT 101
+)
+SELECT p.membership_id,p.account_id,p.certificate,a.encryption_public,a.encryption_key_signature
+FROM page b CROSS JOIN LATERAL (
+ SELECT membership_id,account_id,certificate FROM member.publication_recipients
+ WHERE publication_id=$1 AND membership_id=b.membership_id OFFSET 0
+) p CROSS JOIN LATERAL (
+ SELECT encryption_public,encryption_key_signature FROM member.accounts WHERE id=p.account_id OFFSET 0
+) a ORDER BY p.membership_id`
+
 func (v contentKeyEnvelope) valid() bool {
 	_, a := protocol.Decode(v.Membership, 16)
 	_, b := protocol.Decode(v.Key, 32)
 	enc, c := protocol.Decode(v.Enc, 32)
 	_, d := protocol.Decode(v.Ciphertext, 48)
 	return v.V == 1 && a == nil && b == nil && c == nil && d == nil && usableX25519(enc)
-}
-
-func saveContentKeys(r *http.Request, tx pgx.Tx, v *review, envelopes []contentKeyEnvelope) error {
-	rows, err := tx.Query(r.Context(), "SELECT m.id,a.encryption_public FROM member.memberships m JOIN member.accounts a ON a.id=m.account_id WHERE m.org_id=$1 AND m.state='approved'", v.Org)
-	if err != nil {
-		return err
-	}
-	roster := map[string]string{}
-	for rows.Next() {
-		var id string
-		var public []byte
-		if err = rows.Scan(&id, &public); err != nil {
-			rows.Close()
-			return err
-		}
-		roster[id] = protocol.B64(protocol.Hash(public))
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if len(roster) != len(envelopes) {
-		return problem{409, "recipient_set_conflict"}
-	}
-	for _, envelope := range envelopes {
-		if !envelope.valid() {
-			return bad("invalid_content_key_envelope")
-		}
-		if key, ok := roster[envelope.Membership]; !ok || key != envelope.Key {
-			return problem{409, "recipient_set_conflict"}
-		}
-		delete(roster, envelope.Membership)
-	}
-	for _, envelope := range envelopes {
-		_, err = tx.Exec(r.Context(), "INSERT INTO member.review_content_keys(review_id,membership_id,encryption_key_id,enc,ciphertext) VALUES($1,$2,$3,$4,$5)", v.ID, envelope.Membership, mustDecode(envelope.Key), mustDecode(envelope.Enc), mustDecode(envelope.Ciphertext))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Server) contentRecipients(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +80,22 @@ func (s *Server) contentRecipients(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := s.member.Query(r.Context(), `SELECT m.id,m.account_id,m.certificate,a.encryption_public,a.encryption_key_signature FROM member.memberships m JOIN member.accounts a ON a.id=m.account_id WHERE m.org_id=$1 AND m.state='approved' AND m.id COLLATE "C">$2 COLLATE "C" ORDER BY m.id COLLATE "C" LIMIT 101`, v.Org, after)
+	publication := r.URL.Query().Get("publication_id")
+	if _, err = protocol.Decode(publication, 16); err != nil {
+		fail(w, bad("invalid_publication"))
+		return
+	}
+	var valid bool
+	err = s.member.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM member.review_publications WHERE review_id=$1 AND id=$2 AND revision=$3 AND expires_at>now())", v.ID, publication, v.Revision).Scan(&valid)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if !valid || v.State != "draft" {
+		fail(w, problem{409, "publication_conflict"})
+		return
+	}
+	rows, err := s.member.Query(r.Context(), frozenRecipientPageSQL, publication, after)
 	if err != nil {
 		fail(w, err)
 		return
@@ -137,6 +125,9 @@ func (s *Server) contentRecipients(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) reviewView(r *http.Request, v *review, account string) (map[string]any, error) {
 	result := v.view(account)
+	if v.State == "draft" {
+		return result, nil
+	}
 	var id string
 	var key, enc, ciphertext []byte
 	err := s.member.QueryRow(r.Context(), "SELECT k.membership_id,k.encryption_key_id,k.enc,k.ciphertext FROM member.review_content_keys k JOIN member.memberships m ON m.id=k.membership_id WHERE k.review_id=$1 AND m.account_id=$2 AND m.org_id=$3 AND m.state='approved'", v.ID, account, v.Org).Scan(&id, &key, &enc, &ciphertext)

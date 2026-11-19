@@ -22,11 +22,18 @@ accDescr: Creator publishes encrypted questions and member key envelopes. An app
     participant M as Same approved member browser
     participant S as Go service
     participant D as PostgreSQL
-    Note over C,M: Approved memberships, including creator, get content-key envelopes at publication. Later approvals do not.
+    Note over C,M: Memberships approved at snapshot start get content-key envelopes. Later approvals do not.
     Note over C,S: Phase 1 — publication
         C->>C: Encrypt questions and retain answer private key in creator vault
-        C->>S: Authenticated publish: encrypted content and envelopes
-        S->>D: Atomically store publication and envelopes
+        C->>S: Authenticated publication start: signed encrypted descriptor
+        S->>D: Freeze approved recipient snapshot
+        loop Frozen recipient pages
+            S-->>C: At most 100 authenticated recipient keys
+            C->>S: Authenticated bounded envelope upload
+            S->>D: Bulk stage validated envelopes
+        end
+        C->>S: Authenticated finalize
+        S->>D: Atomically publish complete snapshot and descriptor
     Note over M,S: Phase 2 — approved member access and issuance
         M->>S: Authenticated review access
         S-->>M: Encrypted questions and own content-key envelope

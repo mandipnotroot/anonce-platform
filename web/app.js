@@ -1313,54 +1313,55 @@ export async function listPendingResponses() {
     next: null,
   };
 }
-async function contentRecipients(reviewId, orgId) {
-  const recipients = [],
-    ids = new Set(),
-    cursors = new Set();
-  let after;
-  let previous;
-  do {
-    const page = await request(
-      `/api/member/reviews/${reviewId}/content-recipients${after ? "?after=" + encodeURIComponent(after) : ""}`,
-    );
-    if (!Array.isArray(page.items)) throw keyUnavailable();
-    for (const recipient of page.items) {
-      if (
-        !canonical(recipient.membership_id, 16) ||
-        ids.has(recipient.membership_id) ||
-        (previous !== undefined && recipient.membership_id <= previous)
-      )
-        throw keyUnavailable();
-      previous = recipient.membership_id;
-      ids.add(recipient.membership_id);
-      recipients.push(
-        await C.verifyContentRecipient({ orgId: bytes(orgId), recipient }),
-      );
-    }
-    const next = page.next;
+async function contentRecipients(
+  reviewId,
+  orgId,
+  publicationId,
+  after,
+  remaining,
+) {
+  const page = await request(
+    `/api/member/reviews/${reviewId}/content-recipients?publication_id=${encodeURIComponent(publicationId)}${after ? "&after=" + encodeURIComponent(after) : ""}`,
+  );
+  if (
+    !Array.isArray(page.items) ||
+    page.items.length > 100 ||
+    page.items.length > remaining
+  )
+    throw keyUnavailable();
+  const recipients = [];
+  let previous = after;
+  for (const recipient of page.items) {
     if (
-      next != null &&
-      (!page.items.length ||
-        next !== page.items.at(-1).membership_id ||
-        cursors.has(next))
+      !canonical(recipient.membership_id, 16) ||
+      (previous !== undefined && recipient.membership_id <= previous)
     )
       throw keyUnavailable();
-    if (next != null) cursors.add(next);
-    after = next;
-  } while (after != null);
-  return recipients;
+    previous = recipient.membership_id;
+    recipients.push(
+      await C.verifyContentRecipient({ orgId: bytes(orgId), recipient }),
+    );
+  }
+  const next = page.next;
+  if (next !== null && typeof next !== "string") throw keyUnavailable();
+  if (
+    next != null &&
+    (!page.items.length ||
+      next !== page.items.at(-1).membership_id ||
+      (after !== undefined && next <= after))
+  )
+    throw keyUnavailable();
+  if ((next == null) !== (page.items.length === remaining))
+    throw keyUnavailable();
+  return { recipients, next };
 }
 export async function publishReview({ reviewId, expectedRevision }) {
-  return publishWithRosterRetry(reviewId, expectedRevision, true);
+  return prepareStagedPublication(reviewId, expectedRevision);
 }
-async function publishWithRosterRetry(
-  reviewId,
-  expectedRevision,
-  rebuildAllowed,
-) {
+async function prepareStagedPublication(reviewId, expectedRevision) {
   const s = active();
   const existing = s.pendingReviewPublishes?.[reviewId];
-  if (existing) return sendPublication(reviewId, existing, rebuildAllowed);
+  if (existing) return sendPublication(reviewId, existing);
   const r = await request(`/api/member/reviews/${reviewId}`),
     cert = await ensureCertificate(r.org_id);
   const keys = await reviewKeys(reviewId);
@@ -1390,19 +1391,6 @@ async function publishWithRosterRetry(
   const descriptorBytes = jsonBytes(descriptor);
   if (descriptorBytes.length > 65536)
     throw new APIError("INVALID_CONTENT", "Review descriptor is too large.");
-  const content_key_envelopes = [];
-  for (const recipient of await contentRecipients(reviewId, r.org_id)) {
-    content_key_envelopes.push(
-      await C.sealReviewContentKey({
-        descriptorBytes,
-        orgId: bytes(r.org_id),
-        reviewId: bytes(reviewId),
-        membershipId: recipient.membershipId,
-        encryptionPublicKey: recipient.encryptionPublicKey,
-        contentKey: keys.contentKey,
-      }),
-    );
-  }
   const payload = toWire({
     request_id: id(),
     expected_revision: String(expectedRevision),
@@ -1411,22 +1399,99 @@ async function publishWithRosterRetry(
       descriptorBytes,
       membershipSeed: s.membershipSeed,
     }),
-    content_key_envelopes,
   });
   if (jsonBytes(payload).length > 1536 * 1024)
     throw new APIError("INVALID_CONTENT", "Publication payload is too large.");
-  (s.pendingReviewPublishes ||= {})[reviewId] = payload;
+  const pending = { start: payload, orgId: r.org_id, uploaded: 0 };
+  (s.pendingReviewPublishes ||= {})[reviewId] = pending;
   await cacheState();
-  return sendPublication(reviewId, payload, rebuildAllowed);
+  return sendPublication(reviewId, pending);
 }
-async function sendPublication(reviewId, payload, rebuildAllowed) {
+async function sendPublication(reviewId, pending) {
   const s = active();
   try {
+    const base = `/api/member/reviews/${reviewId}`;
+    if (!pending.publicationId) {
+      const result = await signed(
+        `${base}/publication`,
+        "review-publication-start",
+        pending.start,
+      );
+      if (
+        !canonical(result?.publication_id, 16) ||
+        !Number.isSafeInteger(result.recipient_count) ||
+        result.recipient_count < 1 ||
+        result.recipient_count > 100000 ||
+        typeof result.expires_at !== "string" ||
+        !/^[0-9]+$/.test(result.expires_at)
+      )
+        throw keyUnavailable();
+      pending.publicationId = result.publication_id;
+      pending.count = result.recipient_count;
+      pending.expiresAt = result.expires_at;
+      await cacheState();
+    }
+    while (pending.uploaded < pending.count || pending.batch) {
+      if (!pending.batch) {
+        const { recipients, next } = await contentRecipients(
+          reviewId,
+          pending.orgId,
+          pending.publicationId,
+          pending.after,
+          pending.count - pending.uploaded,
+        );
+        const keys = await reviewKeys(reviewId);
+        const envelopes = [];
+        for (let i = 0; i < recipients.length; i += 8) {
+          envelopes.push(
+            ...(await Promise.all(
+              recipients.slice(i, i + 8).map((recipient) =>
+                C.sealReviewContentKey({
+                  descriptorBytes: bytes(pending.start.descriptor),
+                  orgId: bytes(pending.orgId),
+                  reviewId: bytes(reviewId),
+                  membershipId: recipient.membershipId,
+                  encryptionPublicKey: recipient.encryptionPublicKey,
+                  contentKey: keys.contentKey,
+                }),
+              ),
+            )),
+          );
+        }
+        pending.batch = toWire({
+          request_id: id(),
+          publication_id: pending.publicationId,
+          content_key_envelopes: envelopes,
+        });
+        pending.next = next;
+        await cacheState();
+      }
+      const ack = await signed(
+        `${base}/publication/envelopes`,
+        "review-publication-envelopes",
+        pending.batch,
+      );
+      if (!ack || ack.ok !== true) throw keyUnavailable();
+      pending.uploaded += pending.batch.content_key_envelopes.length;
+      pending.after = pending.next;
+      delete pending.batch;
+      delete pending.next;
+      await cacheState();
+    }
+    if (!pending.finalize) {
+      pending.finalize = {
+        request_id: id(),
+        expected_revision: pending.start.expected_revision,
+        publication_id: pending.publicationId,
+      };
+      await cacheState();
+    }
     const result = await signed(
       `/api/member/reviews/${reviewId}/publish`,
       "review-publish",
-      payload,
+      pending.finalize,
     );
+    if (!result || result.state !== "published") throw keyUnavailable();
     delete s.pendingReviewPublishes[reviewId];
     await cacheState();
     return result;
@@ -1434,16 +1499,7 @@ async function sendPublication(reviewId, payload, rebuildAllowed) {
     const status = e.status ?? e.statusCode;
     // Unknown outcomes keep the exact request, including malformed success replies.
     if (status >= 500) throw e;
-    if (["recipient_set_conflict", "RECIPIENT_SET_CONFLICT"].includes(e.code)) {
-      delete s.pendingReviewPublishes[reviewId];
-      await cacheState();
-      if (rebuildAllowed)
-        return publishWithRosterRetry(
-          reviewId,
-          payload.expected_revision,
-          false,
-        );
-    } else if (status >= 400 && status < 500) {
+    if (status >= 400 && status < 500 && status !== 429) {
       delete s.pendingReviewPublishes[reviewId];
       await cacheState();
     }

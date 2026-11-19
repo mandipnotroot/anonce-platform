@@ -67,6 +67,8 @@ func (s *Server) reviewRoutes(m *http.ServeMux) {
 	m.HandleFunc("PUT /api/member/reviews/{id}", s.updateReview)
 	m.HandleFunc("DELETE /api/member/reviews/{id}", s.deleteReview)
 	m.HandleFunc("POST /api/member/reviews/{id}/publish", s.publish)
+	m.HandleFunc("POST /api/member/reviews/{id}/publication", s.startPublication)
+	m.HandleFunc("POST /api/member/reviews/{id}/publication/envelopes", s.publicationEnvelopes)
 	m.HandleFunc("POST /api/member/reviews/{id}/close", s.closeReview)
 	m.HandleFunc("POST /api/member/reviews/{id}/issuances", s.issue)
 	m.HandleFunc("GET /api/member/reviews/{id}/issuances/{request}", s.getIssuance)
@@ -388,11 +390,9 @@ func decodeDescriptor(b []byte) (descriptor, error) {
 
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Request    string               `json:"request_id"`
-		Expected   string               `json:"expected_revision"`
-		Descriptor string               `json:"descriptor"`
-		Signature  string               `json:"descriptor_signature"`
-		Envelopes  []contentKeyEnvelope `json:"content_key_envelopes"`
+		Request     string `json:"request_id"`
+		Expected    string `json:"expected_revision"`
+		Publication string `json:"publication_id"`
 	}
 	x, e := s.verify(r, "review-publish", &p, false)
 	if e != nil {
@@ -407,16 +407,6 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	rev, e := decimal(p.Expected)
 	if e != nil {
 		fail(w, e)
-		return
-	}
-	b, e := protocol.Decode(p.Descriptor, -1)
-	if e != nil {
-		fail(w, bad("invalid_descriptor"))
-		return
-	}
-	d, e := decodeDescriptor(b)
-	if e != nil {
-		fail(w, bad("invalid_descriptor"))
 		return
 	}
 	tx, e := s.member.Begin(r.Context())
@@ -439,22 +429,27 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	var cert string
-	if e = tx.QueryRow(r.Context(), "SELECT certificate FROM member.memberships WHERE id=$1 AND org_id=$2 AND account_id=$3 AND state='approved' FOR SHARE", v.Membership, v.Org, x.Session.Account).Scan(&cert); e != nil {
-		fail(w, problem{403, "forbidden"})
-		return
-	}
-	_, recipientErr := protocol.Decode(d.Recipient, 32)
-	sig, se := protocol.Decode(p.Signature, 64)
-	if d.V != 3 || d.Deployment != protocol.B64(s.deployment) || d.Review != v.ID || d.Org != v.Org || d.Membership != v.Membership || d.Certificate != cert || d.Content != v.Content || !d.Content.valid() || d.Public != protocol.B64(v.Public) || d.Issuer != v.Issuer || recipientErr != nil || se != nil || !s.validCertificate(cert, x.Session.Membership, v.Org, v.Membership) || !checkSig(x.Session.Membership, p.Signature, protocol.E("review-descriptor", b)) {
-		fail(w, bad("descriptor_mismatch"))
-		return
-	}
 	if v.State != "draft" || v.Revision != rev {
 		fail(w, problem{409, "revision_conflict"})
 		return
 	}
-	if e = saveContentKeys(r, tx, v, p.Envelopes); e != nil {
+	var b, sig []byte
+	var count int
+	if e = tx.QueryRow(r.Context(), "SELECT descriptor,descriptor_signature,recipient_count FROM member.review_publications WHERE review_id=$1 AND id=$2 AND revision=$3 AND expires_at>now()", v.ID, p.Publication, rev).Scan(&b, &sig, &count); e != nil {
+		if e == pgx.ErrNoRows {
+			e = problem{409, "publication_conflict"}
+		}
+		fail(w, e)
+		return
+	}
+	// Renewal does not invalidate a still-valid certificate frozen at start.
+	// Expiry of that signing certificate does prevent finalization.
+	d, e := decodeDescriptor(b)
+	if e != nil || !s.validCertificate(d.Certificate, x.Session.Membership, v.Org, v.Membership) || !checkSig(x.Session.Membership, protocol.B64(sig), protocol.E("review-descriptor", b)) {
+		fail(w, bad("descriptor_mismatch"))
+		return
+	}
+	if e = promoteEnvelopes(r, tx, v.ID, p.Publication, count); e != nil {
 		fail(w, e)
 		return
 	}
@@ -466,11 +461,13 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		_, e = tx.Exec(r.Context(), "INSERT INTO anon.reviews(id,issuer_key_id,issuer_public,descriptor,descriptor_hash,descriptor_signature,state,opens_at,closes_at) VALUES($1,$2,$3,$4,$5,$6,'published',$7,$8)", v.ID, v.Issuer, v.Public, b, protocol.Hash(b), sig, v.Opens, v.Closes)
 	}
 	v.State, v.Revision, v.Descriptor, v.Signature = "published", rev+1, b, sig
-	for _, envelope := range p.Envelopes {
-		if envelope.Membership == v.Membership {
-			v.Envelope = &envelope
-			break
-		}
+	if e == nil {
+		var key, enc, ciphertext []byte
+		e = tx.QueryRow(r.Context(), "SELECT encryption_key_id,enc,ciphertext FROM member.review_content_keys WHERE review_id=$1 AND membership_id=$2", v.ID, v.Membership).Scan(&key, &enc, &ciphertext)
+		v.Envelope = &contentKeyEnvelope{1, v.Membership, protocol.B64(key), protocol.B64(enc), protocol.B64(ciphertext)}
+	}
+	if e == nil {
+		_, e = tx.Exec(r.Context(), "DELETE FROM member.review_publications WHERE review_id=$1", v.ID)
 	}
 	if e == nil {
 		e = cache(r, tx, x, p.Request, v.view(x.Session.Account))
