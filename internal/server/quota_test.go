@@ -2,7 +2,6 @@
 package server
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
@@ -23,7 +22,7 @@ func TestIntegrationQuotaPerMemberTwoAndCloseRace(t *testing.T) {
 	h := s.Handler()
 	u := newUser(t, s, h)
 	other := newUser(t, s, h)
-	ctx := context.Background()
+	ctx := t.Context()
 	orgEnv := signed(t, s, h, u, "org-create", map[string]string{"request_id": protocol.ID(), "name": "Quota"}, false)
 	org := result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 201)["id"].(string)
 	env := signed(t, s, h, u, "review-create", fakeReviewCreate(2), false)

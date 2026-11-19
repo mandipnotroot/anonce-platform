@@ -89,8 +89,7 @@ func TestIntegrationReviewCreationDemotion(t *testing.T) {
 	defer tx.Rollback(t.Context())
 	x := &verified{Session: a, Account: a.Account, Epoch: a.Epoch, Payload: mustDecode(env.Payload), Proof: env.Proof}
 	old, err := operation(r, tx, x, p["request_id"].(string))
-	var denied problem
-	if old != nil || !errors.As(err, &denied) || denied != (problem{403, "forbidden"}) {
+	if denied, ok := errors.AsType[problem](err); old != nil || !ok || denied != (problem{403, "forbidden"}) {
 		t.Fatalf("demoted cached creation: result=%s error=%v", old, err)
 	}
 	// Respondents retain transactional authorization for response issuance.

@@ -13,6 +13,15 @@
   `lucide-static` license header. The license text ships in `web/assets/licenses/LUCIDE-LICENSE.txt`.
 - Source package versions are pinned in `package-lock.json`.
 
+## JetBrains modern Go skill
+
+- Source: [JetBrains/go-modern-guidelines](https://github.com/JetBrains/go-modern-guidelines),
+  revision `155dc7ca10da5e1f6c841503086957b1b37f5815`, pinned in `skills-lock.json`.
+- Development-only skill and wrapper scripts in `.agents/skills/use-modern-go`;
+  the wrapper installs CLI version `v0.1.1` into the user's cache on first use.
+- License: Apache-2.0; the unmodified upstream license and copyright notice are
+  included in [`.agents/skills/use-modern-go/LICENSE`](.agents/skills/use-modern-go/LICENSE).
+
 ## @cloudflare/blindrsa-ts 0.4.6
 
 License: Apache-2.0. Source: github:cloudflare/blindrsa-ts.

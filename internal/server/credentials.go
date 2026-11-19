@@ -9,7 +9,10 @@ import (
 )
 
 func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	_, kind, found := strings.CutLast(r.URL.Path, "/")
+	if !found {
+		kind = r.URL.Path
+	}
 	action := map[string]string{"password": "password-change", "recovery": "recovery-rotate", "reset": "credential-reset"}[kind]
 	// Distinct payload types keep unknown-field rejection meaningful per operation.
 	var req, expected, password, recovery, salt string

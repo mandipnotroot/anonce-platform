@@ -170,12 +170,10 @@ func (p problem) Error() string { return p.code }
 func bad(code string) error     { return problem{400, code} }
 func fail(w http.ResponseWriter, e error) {
 	status, code := 500, "internal_error"
-	var p problem
-	if errors.As(e, &p) {
+	if p, ok := errors.AsType[problem](e); ok {
 		status, code = p.status, p.code
 	}
-	var pg *pgconn.PgError
-	if errors.As(e, &pg) {
+	if pg, ok := errors.AsType[*pgconn.PgError](e); ok {
 		switch pg.Code {
 		case "23505":
 			status, code = 409, "conflict"
@@ -193,8 +191,7 @@ func fail(w http.ResponseWriter, e error) {
 func body(r *http.Request, v any) error {
 	b, e := io.ReadAll(r.Body)
 	if e != nil {
-		var max *http.MaxBytesError
-		if errors.As(e, &max) {
+		if _, ok := errors.AsType[*http.MaxBytesError](e); ok {
 			return problem{413, "body_too_large"}
 		}
 		return bad("invalid_body")
@@ -293,8 +290,7 @@ func (s *Server) Handler() http.Handler {
 				// Parse only the bounded body, then restore it for the existing handler.
 				b, e := io.ReadAll(r.Body)
 				if e != nil {
-					var max *http.MaxBytesError
-					if errors.As(e, &max) {
+					if _, ok := errors.AsType[*http.MaxBytesError](e); ok {
 						reject(problem{413, "body_too_large"})
 					} else {
 						reject(bad("invalid_body"))

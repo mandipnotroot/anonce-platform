@@ -9,6 +9,8 @@
 
 ### Added
 
+- Project-local JetBrains `use-modern-go` skill with pinned upstream revision
+  and version-aware Go guidance.
 - Opt-in live-browser publication benchmarks with isolated HTTPS/PostgreSQL
   fixtures, bounded traffic checks, and performance interpretation guidance.
 - Go/PostgreSQL backend and browser flows for encrypted vaults, recovery,
@@ -32,6 +34,8 @@
 
 ### Changed
 
+- Use version-supported modern Go idioms for error matching, path splitting,
+  fixed-count loops, and test contexts without changing protocol formats.
 - Freeze publication recipients before paged key encryption and bounded envelope
   uploads; finalize complete snapshots atomically instead of sending one full-roster payload.
 - Use one current schema with transactional, version-checked initialization.

@@ -275,14 +275,14 @@ func TestRateLimitIntegrationVerifiedSession(t *testing.T) {
 	challenge := map[string]string{"account_id": u.id, "action": "vault-write", "payload_hash": protocol.B64(make([]byte, 32))}
 	result(t, request(h, "POST", "/api/member/challenges", challenge, u), 200)
 	result(t, request(h, "GET", "/api/member/me", nil, &testUser{cookie: protocol.B64(make([]byte, 32))}), 429)
-	if _, err := s.member.Exec(context.Background(), "UPDATE member.sessions SET expires_at=now()-interval '1 second' WHERE id_hash=$1", protocol.Hash(mustDecode(u.cookie))); err != nil {
+	if _, err := s.member.Exec(t.Context(), "UPDATE member.sessions SET expires_at=now()-interval '1 second' WHERE id_hash=$1", protocol.Hash(mustDecode(u.cookie))); err != nil {
 		t.Fatal(err)
 	}
 	result(t, request(h, "GET", "/api/member/me", nil, u), 429)
-	if _, err := s.member.Exec(context.Background(), "UPDATE member.sessions SET expires_at=now()+interval '1 hour' WHERE id_hash=$1", protocol.Hash(mustDecode(u.cookie))); err != nil {
+	if _, err := s.member.Exec(t.Context(), "UPDATE member.sessions SET expires_at=now()+interval '1 hour' WHERE id_hash=$1", protocol.Hash(mustDecode(u.cookie))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.member.Exec(context.Background(), "UPDATE member.accounts SET epoch=epoch+1 WHERE id=$1", u.id); err != nil {
+	if _, err := s.member.Exec(t.Context(), "UPDATE member.accounts SET epoch=epoch+1 WHERE id=$1", u.id); err != nil {
 		t.Fatal(err)
 	}
 	result(t, request(h, "GET", "/api/member/me", nil, u), 429)

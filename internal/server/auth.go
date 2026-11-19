@@ -387,7 +387,7 @@ func mustDecode(s string) []byte { b, _ := protocol.Decode(s, -1); return b }
 // The account field is the third length-prefixed field in the challenge transcript.
 func (x *verified) TranscriptAccount(s *Server) []byte {
 	offset := 7 + 2 + len("challenge") + 2
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		n := int(x.Transcript[offset])<<24 | int(x.Transcript[offset+1])<<16 | int(x.Transcript[offset+2])<<8 | int(x.Transcript[offset+3])
 		offset += 4 + n
 	}

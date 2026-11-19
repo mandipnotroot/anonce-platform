@@ -2,7 +2,6 @@
 package server
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -19,7 +18,7 @@ func TestIntegrationChallengeAtomicityAndEpoch(t *testing.T) {
 	s := testServer(t)
 	h := s.Handler()
 	u := newUser(t, s, h)
-	ctx := context.Background()
+	ctx := t.Context()
 	// Vault CAS failure happens after transactional consumption, so rollback must restore the challenge.
 	o := fakeObject()
 	o.Revision = "3"
@@ -125,7 +124,7 @@ func TestIntegrationCertificateAndRevocation(t *testing.T) {
 	s := testServer(t)
 	h := s.Handler()
 	u := newUser(t, s, h)
-	ctx := context.Background()
+	ctx := t.Context()
 	orgEnv := signed(t, s, h, u, "org-create", map[string]string{"request_id": protocol.ID(), "name": "Certificate test"}, false)
 	orgResult := result(t, request(h, "POST", "/api/member/orgs", orgEnv, u), 201)
 	org, member := orgResult["id"].(string), orgResult["membership_id"].(string)
@@ -178,7 +177,7 @@ func transcript(t *testing.T, s *Server, env envelope) []byte {
 	var account, action string
 	var epoch, expires int64
 	var hash, nonce []byte
-	if e := s.member.QueryRow(context.Background(), "SELECT account_id,action,epoch,payload_hash,nonce,expires FROM member.challenges WHERE id=$1", env.Proof.Challenge).Scan(&account, &action, &epoch, &hash, &nonce, &expires); e != nil {
+	if e := s.member.QueryRow(t.Context(), "SELECT account_id,action,epoch,payload_hash,nonce,expires FROM member.challenges WHERE id=$1", env.Proof.Challenge).Scan(&account, &action, &epoch, &hash, &nonce, &expires); e != nil {
 		t.Fatal(e)
 	}
 	return protocol.E("challenge", s.deployment, []byte(s.cfg.Origin), mustDecode(account), mustDecode(env.Proof.Challenge), []byte(action), protocol.U64(uint64(epoch)), hash, nonce, protocol.U64(uint64(expires)))
