@@ -108,9 +108,8 @@ sudo chmod 0400 secrets/server_key
   rebuilding alone does not change existing volume ownership.
 - Set `ANONCE_SOURCE_URL` to publicly accessible complete corresponding source for the exact deployed version, including modifications and build instructions, to satisfy AGPL network-source obligations.
 - The repository URL alone is insufficient if it does not contain the deployed version.
-- Operators must verify that their configured URL supplies the exact complete corresponding source.
-- The browser visibly offers this configured URL on desktop and mobile; operators
-  must ensure the destination actually supplies their corresponding source.
+- The browser displays this URL on desktop and mobile; verify that it supplies
+  the required source.
 
 ### Local deployment
 
@@ -128,7 +127,6 @@ docker compose -p anonce-local -f compose.yaml -f compose.local.yaml up -d --bui
 - Do not copy `root.key` or the entire volume.
 - Confirm the certificate fingerprint through a trusted operator channel before importing it into each client's trust store.
 - This trusts certificates issued by that local CA; remove trust when done.
-- No preexisting host export is assumed.
 
 - Keep the same project name to preserve Caddy's TLS volumes.
 - A new unused `ANONCE_DB_VOLUME` initializes an empty database; rebuilding does not reset data.

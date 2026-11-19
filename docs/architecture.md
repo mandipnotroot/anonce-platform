@@ -120,7 +120,7 @@ code or network/timing correlation.
 - This version has no content-key rotation.
 - Review content is not padded: ciphertext lengths remain visible.
 - Review/org/creator IDs, certificates, public keys, schedules, quotas, revisions, and counts remain server-visible.
-- Quotas and schedules remain plaintext because the server enforces them; they are no longer public descriptor fields.
+- Quotas and schedules remain plaintext because the server enforces them; public descriptors omit them.
 - Public descriptors omit creator account IDs and retain organization/membership IDs and certificates for trust verification.
 - Member review responses expose an `is_creator` flag instead of account IDs.
 - Only creators receive review settings, revisions, and activity counters.

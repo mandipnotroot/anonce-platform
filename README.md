@@ -41,9 +41,8 @@ production-readiness claim is made; see the
 - Save and [verify receipts locally](docs/receipts.md), change passwords, or recover
   access on another device.
 
-All user workflows run in the browser, not a CLI. Owners and admins can see member
-emails, but addresses are not mailbox-verified and a matching domain does not
-establish membership. Invitations do not send email.
+Owners and admins can see member emails, but addresses are not mailbox-verified
+and a matching domain does not establish membership. Invitations do not send email.
 
 ## Architecture and trust
 
