@@ -9,6 +9,8 @@
 
 ### Added
 
+- Opt-in live-browser publication benchmarks with isolated HTTPS/PostgreSQL
+  fixtures, bounded traffic checks, and performance interpretation guidance.
 - Go/PostgreSQL backend and browser flows for encrypted vaults, recovery,
   organizations, review publication, blind authorizations, anonymous encrypted
   responses, and creator-only decryption/export.

@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Standalone disposable project; never combine with the deployment Compose files.
+# From repository root:
+# docker compose -p anonce-publication-perf -f scripts/compose.publication-benchmark.yaml --env-file /absolute/benchmark.env up -d --build --wait
+# Limits: PostgreSQL 1 CPU/1 GiB, app 1 CPU/512 MiB, proxy 0.5 CPU/256 MiB.
+# Default application rate limits are unchanged. Only loopback ports are exposed.
+name: anonce-publication-perf
+services:
+  db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: anonce_publication_benchmark
+      POSTGRES_USER: anonce_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      ANONCE_MEMBER_DB_PASSWORD: ${ANONCE_MEMBER_DB_PASSWORD:?required}
+      ANONCE_ANON_DB_PASSWORD: ${ANONCE_ANON_DB_PASSWORD:?required}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ../db/init:/docker-entrypoint-initdb.d:ro
+    ports: ["127.0.0.1:15432:5432"]
+    networks: [database]
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          "pg_isready -U anonce_admin -d anonce_publication_benchmark",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    logging:
+      driver: none
+  app:
+    build:
+      context: ..
+    # Match the fixture runner's protected master-key ownership, without chmod.
+    user: "${ANONCE_BENCHMARK_UID:-1000}:${ANONCE_BENCHMARK_GID:-1000}"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?member role URL at db:5432 required}
+      ANON_DATABASE_URL: ${ANON_DATABASE_URL:?anonymous role URL at db:5432 required}
+      ANONCE_ORIGIN: https://localhost:18443
+      ANONCE_ADDR: :8080
+      ANONCE_KEY_FILE: /run/secrets/server_key
+      ANONCE_WEB_DIR: /app/web
+      ANONCE_SOURCE_URL: ${ANONCE_SOURCE_URL:?corresponding source URL required}
+    secrets: [server_key]
+    networks: [database, edge]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [CMD, wget, -q, -O, /dev/null, -T, "3", "http://127.0.0.1:8080/readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    read_only: true
+    tmpfs: ["/tmp:size=16m,noexec,nosuid"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: none
+  caddy:
+    build:
+      context: ..
+      target: proxy
+    user: "1000:1000"
+    ports: ["127.0.0.1:18443:8443"]
+    volumes:
+      - ./Caddyfile.publication-benchmark:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    logging:
+      driver: none
+networks:
+  # Normal bridge permits host-side fixture access via the loopback-only port.
+  database: {}
+  edge: {}
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}
+secrets:
+  server_key:
+    file: ${ANONCE_SERVER_KEY_FILE:?same master key file used by fixture required}

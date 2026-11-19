@@ -159,6 +159,8 @@ with these contract-specific cases:
 
 ## Publication scale benchmarks
 
+- See [publication performance](publication-performance.md) for the live-browser
+  benchmark path, deployment isolation, and interpretation limits.
 - Run `npm ci`, then `node scripts/publication-benchmark.mjs --run` for synthetic
   1000, 10000, and 100000-recipient certificate verification and HPKE measurements.
 - The script uses the actual browser-compatible crypto module in Node, bounded

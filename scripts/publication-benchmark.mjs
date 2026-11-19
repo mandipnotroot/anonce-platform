@@ -204,13 +204,14 @@ for (const recipients of [1000, 10000, 100000]) {
       processLifetimeMaxRSSBytes: process.resourceUsage().maxRSS * 1024,
       requestCountEstimates: {
         label:
-          "Estimates only; no requests sent. Last nonempty recipient page has next:null. Challenge estimates assume one challenge per signed start, upload and finalize.",
+          "Estimates only; no requests sent. Assumes no retries, next:null on the last nonempty page, one challenge per mutation, and current per-page vault reads plus three initial authenticated reads.",
         recipientPages: Math.ceil(recipients / batchSize),
         envelopeUploads: Math.ceil(recipients / batchSize),
         startAndFinalize: 2,
-        applicationRequests: 2 * Math.ceil(recipients / batchSize) + 2,
+        otherAuthenticatedReads: Math.ceil(recipients / batchSize) + 3,
+        applicationRequests: 3 * Math.ceil(recipients / batchSize) + 5,
         signedChallengeRequests: Math.ceil(recipients / batchSize) + 2,
-        overallIncludingChallenges: 3 * Math.ceil(recipients / batchSize) + 4,
+        overallIncludingChallenges: 4 * Math.ceil(recipients / batchSize) + 7,
       },
     }),
   );

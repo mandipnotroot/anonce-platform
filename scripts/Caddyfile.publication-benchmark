@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+{
+	https_port 8443
+	auto_https disable_redirects
+	admin off
+	log {
+		output discard
+	}
+}
+https://localhost {
+	tls internal
+	@anonymous path /api/anon/*
+	handle @anonymous {
+		reverse_proxy app:8080 {
+			header_up -Cookie
+			header_up -Authorization
+			header_up -Forwarded
+			header_up -X-Forwarded-For
+			header_up -X-Real-IP
+			header_up -True-Client-IP
+			header_up -CF-Connecting-IP
+			header_up -X-Client-IP
+		}
+	}
+	handle {
+		reverse_proxy app:8080
+	}
+}
