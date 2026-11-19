@@ -7,7 +7,7 @@
 
 | Prerequisite    | Contract                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------- |
-| Runtime         | Docker Compose v2; PostgreSQL `18.6-alpine3.24`; Go 1.27.3 and Node.js 26.12.1 image build toolchains |
+| Runtime         | Docker Compose v2; PostgreSQL `18.6-alpine3.24`; Go 1.27.3 and Node.js 26.13.1 image build toolchains |
 | Public ingress  | DNS for one domain; inbound TCP 80/443; optionally allow UDP 443 for HTTP/3                           |
 | Published ports | Compose publishes TCP 80/443 and UDP 443 through Caddy only                                           |
 | User flows      | Browser-only, same-origin HTTPS                                                                       |

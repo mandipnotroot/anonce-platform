@@ -95,7 +95,7 @@ Read the [key-delivery contract](docs/member-key-delivery.md),
 ## Quickstart: disposable local HTTPS
 
 Install Docker Compose v2 and use synthetic data only. The stack uses PostgreSQL
-18; host-side checks require Go 1.27.3 and Node.js 26 (CI pins 26.12.1).
+18; host-side checks require Go 1.27.3 and Node.js 26 (CI pins 26.13.1).
 
 1. Copy `.env.example` to `.env`. Follow the
    [operations setup](docs/operations.md#first-setup-review-deployment-prerequisites-first)
