@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
+      - uses: actions/setup-go@v7.1.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -33,7 +33,7 @@ jobs:
       ANONCE_TEST_INIT_DATABASE_URL: postgres://anonce_member:ci-member-only@127.0.0.1:5432/anonce_init?sslmode=disable
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
+      - uses: actions/setup-go@v7.1.0
         with:
           go-version: "1.27.4"
           cache: false
