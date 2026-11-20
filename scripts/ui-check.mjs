@@ -49,6 +49,10 @@ let reviewHold=null,reviewResolve=null,pendingHold=null,pendingResolve=null,revi
 let failPending=false;
 let failReviews=false;
 let mockLimits={max_questions:500,max_description_bytes:65536,max_question_label_bytes:2000};
+export const reviewCreates=[];
+export const reviewUpdates=[];
+let failNextReviewUpdate=false;
+export const failNextUpdate=()=>failNextReviewUpdate=true;
 export const holdOverview=()=>{reviewHold=new Promise(resolve=>reviewResolve=resolve);pendingHold=new Promise(resolve=>pendingResolve=resolve);reviewStarted=0;pendingStarted=0};
 export const overviewCalls=()=>({reviewStarted,pendingStarted});
 export const failPendingResponses=value=>failPending=value;
@@ -82,8 +86,8 @@ export const revokeMember=async()=>{};
 export const changeMemberRole=async()=>{};
 export const listReviews=async()=>{reviewStarted++;if(failReviews)throw new Error("Reviews unavailable");return reviewHold?await reviewHold:{items:[],next:null}};
 export const listPendingResponses=async()=>{pendingStarted++;if(failPending)throw new Error("Pending responses unavailable");return pendingHold?await pendingHold:{items:[]}};
-export const createReview=async()=>({id:"new-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",is_creator:true,revision:1,questions:[]});
-export const updateReview=async()=>({});
+export const createReview=async(input)=>{reviewCreates.push(input);return {id:"created-review",org_id:"org",title:"Draft review",status:"draft",creator_account_id:"acct",is_creator:true,revision:1,questions:[]}};
+export const updateReview=async(input)=>{reviewUpdates.push(input);if(failNextReviewUpdate){failNextReviewUpdate=false;throw new Error("Temporary save failure")}return {}};
 export const publishReview=async()=>({});
 export const prepareResponse=async()=>({pendingId:"pending-response"});
 export const submitResponse=async()=>({status:"accepted",receipt:{version:1,signature:"mock-signed-receipt"}});
@@ -962,24 +966,23 @@ try {
   await page.evaluate(() => {
     location.hash = "#/review/new/edit";
   });
-  await page.getByRole("heading", { name: "Start a new review" }).waitFor();
-  await captures("review-create");
-  await page.getByLabel("Review title").fill("New journey review");
-  await page.getByRole("button", { name: "Create draft" }).click();
-  await page.getByRole("heading", { name: "Draft review" }).waitFor();
-  await captures("review-edit");
+  await page.getByRole("heading", { name: "Create a review" }).waitFor();
+  await captures("review-setup");
+  assert.equal(
+    await page.evaluate(
+      async () => (await import("/app.js")).reviewCreates.length,
+    ),
+    0,
+    "opening the setup must not create a draft",
+  );
   assert.equal(
     await page
       .locator('textarea[name="description"]')
       .getAttribute("maxlength"),
     "65536",
   );
-  assert.equal(
-    await page.locator('[name="qtext"]').first().getAttribute("maxlength"),
-    "2000",
-  );
+  assert.equal(await page.locator("#questions .question").count(), 0);
   await page.locator('textarea[name="description"]').fill("d".repeat(65536));
-  await page.locator('[name="qtext"]').first().fill("q".repeat(2000));
   assert.equal(
     await page
       .locator('textarea[name="description"]')
@@ -987,23 +990,29 @@ try {
       .then((value) => value.length),
     65536,
   );
-  assert.equal(
-    await page
-      .locator('[name="qtext"]')
-      .first()
-      .inputValue()
-      .then((value) => value.length),
-    2000,
-  );
   await page.locator('textarea[name="description"]').fill("");
-  await page.locator('[name="qtext"]').first().fill("First question");
+  await page.getByLabel("Title").fill("New journey review");
+  await page.getByRole("button", { name: "Add question" }).click();
+  assert.equal(await page.locator("#questions .question").count(), 1);
+  assert.equal(
+    await page.getByRole("button", { name: "Add question" }).isDisabled(),
+    false,
+  );
+  assert.equal(
+    await page.locator('[name="qtext"]').first().getAttribute("maxlength"),
+    "2000",
+  );
+  await page.locator('[name="qtext"]').first().fill("What would help?");
   await page.getByRole("button", { name: "Add question" }).click();
   assert.equal(await page.locator("#questions .question").count(), 2);
   assert.equal(
     await page.getByRole("button", { name: "Add question" }).isDisabled(),
     true,
   );
-  await page.locator('[name="qtext"]').last().fill("What would help?");
+  await page.locator('[name="qtext"]').last().fill("Anything else?");
+  await page.locator('[name="maxResponses"]').fill("3");
+  await page.locator('[name="opensAt"]').fill("2026-12-01T09:00");
+  await page.locator('[name="closesAt"]').fill("2026-12-15T17:00");
   await page
     .locator('textarea[name="description"]')
     .fill(
@@ -1011,9 +1020,45 @@ try {
         "https://example.invalid/" +
         "unbroken-content-".repeat(20),
     );
+  await page.evaluate(async () => (await import("/app.js")).failNextUpdate());
+  await page.getByRole("button", { name: "Create review" }).click();
+  await page.getByText(/Could not save the review setup/).waitFor();
+  assert.equal(
+    await page.locator('[name="qtext"]').first().inputValue(),
+    "What would help?",
+  );
+  assert.equal(await page.locator('[name="maxResponses"]').inputValue(), "3");
+  await page.getByRole("button", { name: "Create review" }).click();
+  await page.getByRole("heading", { name: "Draft review" }).waitFor();
+  const saved = await page.evaluate(async () => {
+    const api = await import("/app.js");
+    return { creates: api.reviewCreates, updates: api.reviewUpdates };
+  });
+  assert.equal(saved.creates.length, 1, "retry must not create another draft");
+  assert.equal(saved.updates.length, 2);
+  assert.equal(saved.updates[1].title, "New journey review");
+  assert.equal(saved.updates[1].maxResponses, 3);
+  assert.match(saved.updates[1].description, /^Long feedback context/);
+  assert.deepEqual(
+    saved.updates[1].questions.map((q) => q.text),
+    ["What would help?", "Anything else?"],
+  );
+  assert.equal(
+    saved.updates[1].opensAt,
+    new Date("2026-12-01T09:00").toISOString(),
+  );
+  assert.equal(
+    saved.updates[1].closesAt,
+    new Date("2026-12-15T17:00").toISOString(),
+  );
+  await captures("review-edit");
+  assert.equal(
+    await page.locator('[name="qtext"]').first().getAttribute("maxlength"),
+    "2000",
+  );
+  await page.locator('[name="qtext"]').first().fill("What would help?");
   await page.getByRole("button", { name: "Preview" }).click();
   await page.getByText("What would help?", { exact: true }).waitFor();
-  await captures("review-preview-long-content");
   await page.getByRole("button", { name: "Save draft" }).click();
   await page
     .locator("#toast-region")

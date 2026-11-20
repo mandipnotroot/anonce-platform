@@ -30,6 +30,7 @@
 
 ### Changed
 
+- Combine review setup and question building on one page before creating a draft.
 - Remove redundant interface instructions while retaining actionable validation
   errors and security warnings.
 - Use version-supported modern Go idioms for error matching, path splitting,

@@ -947,25 +947,104 @@ async function renderAccount() {
     }
   };
 }
+function readReviewQuestions() {
+  return [...document.querySelectorAll(".question")].map((question) => ({
+    text: question.querySelector("[name=qtext]").value,
+    type: question.querySelector("[name=qtype]").value,
+    required: question.querySelector("[name=qrequired]").checked,
+    options: question
+      .querySelector("[name=qoptions]")
+      .value.split("\n")
+      .map((option) => option.trim())
+      .filter(Boolean),
+  }));
+}
+function bindQuestionControls(limits) {
+  const addButton = document.querySelector("#add-question");
+  const updateCount = () => {
+    const count = document.querySelectorAll("#questions .question").length;
+    if (addButton) addButton.disabled = count >= limits.max_questions;
+    const status = document.querySelector("#question-limit");
+    if (status)
+      status.textContent = `${count} of ${limits.max_questions} questions`;
+  };
+  updateCount();
+  addButton?.addEventListener("click", () => {
+    if (
+      document.querySelectorAll("#questions .question").length >=
+      limits.max_questions
+    )
+      return;
+    document
+      .querySelector("#questions")
+      .insertAdjacentHTML(
+        "beforeend",
+        questionHTML(
+          { text: "", type: "text", required: false, options: [] },
+          limits.max_question_label_bytes,
+        ),
+      );
+    updateCount();
+  });
+  document.querySelector("#questions")?.addEventListener("click", (event) => {
+    if (event.target.matches("[data-remove]")) {
+      event.target.closest(".question").remove();
+      updateCount();
+    }
+  });
+}
 async function renderReview(id, tab, isCurrent = () => true) {
   if (id === "new") {
     if (session?.scope !== "full" || !canCreateReviews(currentOrg)) {
       go("/");
       return;
     }
+    const limits = await api.getLimits();
+    if (!isCurrent()) return;
+    let createdReview = null;
+    // Keep setup local until submission; navigation must not create a draft.
     frame(
-      `${head("Start a new review", "")}<section class="card form-card"><form id="new-review"><div class="field"><label>Review title</label><input name="title" required maxlength="160" placeholder="What would you like to learn?"></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="1" required></div><p class="form-error"></p><button class="button" type="submit">Create draft</button></form></section>`,
-      "New review",
+      `${head("Create a review", "")}<section class="card form-card"><form id="review-setup"><div class="field"><label>Title</label><input name="title" required maxlength="160" placeholder="What would you like to learn?"></div><div class="field"><label>Description</label><textarea name="description" maxlength="${limits.max_description_bytes}"></textarea></div><div class="field"><label>Responses per member</label><input name="maxResponses" type="number" min="1" value="1" required></div><div class="inline"><div class="field"><label>Opens</label><input type="datetime-local" name="opensAt"></div><div class="field"><label>Closes</label><input type="datetime-local" name="closesAt"></div></div><div class="section-row"><h2 class="section-title">Questions</h2><button type="button" class="button secondary small" id="add-question">Add question</button></div><p id="question-limit" class="help" aria-live="polite"></p><div id="questions"></div><p class="form-error" role="alert"></p><div class="toolbar"><button class="button" type="submit">Create review</button></div></form></section>`,
+      "Create review",
     );
-    bind("#new-review", async (fd) => {
-      let r = await api.createReview({
-        orgId: currentOrg.id,
-        title: fd.get("title"),
-        maxResponses: Number(fd.get("maxResponses")),
-      });
-      toast("Review draft created.", "success");
-      go(`/review/${encodeURIComponent(r.id)}/edit`);
+    bind("#review-setup", async (fd) => {
+      const questions = readReviewQuestions();
+      if (!createdReview)
+        createdReview = await api.createReview({
+          orgId: currentOrg.id,
+          title: fd.get("title"),
+          maxResponses: Number(fd.get("maxResponses")),
+        });
+      try {
+        // Refresh the revision on retries: a timed-out update may have committed.
+        if (createdReview.needsRevisionRefresh) {
+          const latest = await api.getReview({ reviewId: createdReview.id });
+          createdReview.revision = latest.revision;
+        }
+        await api.updateReview({
+          reviewId: createdReview.id,
+          expectedRevision: createdReview.revision,
+          title: fd.get("title"),
+          description: fd.get("description"),
+          maxResponses: Number(fd.get("maxResponses")),
+          opensAt: fd.get("opensAt")
+            ? new Date(fd.get("opensAt")).toISOString()
+            : null,
+          closesAt: fd.get("closesAt")
+            ? new Date(fd.get("closesAt")).toISOString()
+            : null,
+          questions,
+        });
+      } catch (error) {
+        createdReview.needsRevisionRefresh = true;
+        document.querySelector("#review-setup .form-error").textContent =
+          `Could not save the review setup. Your entries are still here; try again. ${say(error)}`;
+        return;
+      }
+      toast("Review created.", "success");
+      go(`/review/${encodeURIComponent(createdReview.id)}/edit`);
     });
+    bindQuestionControls(limits);
     return;
   }
   try {
@@ -1087,16 +1166,7 @@ async function renderReview(id, tab, isCurrent = () => true) {
       }
   });
   bind("#edit-review", async (fd) => {
-    const questions = [...document.querySelectorAll(".question")].map((q) => ({
-      text: q.querySelector("[name=qtext]").value,
-      type: q.querySelector("[name=qtype]").value,
-      required: q.querySelector("[name=qrequired]").checked,
-      options: q
-        .querySelector("[name=qoptions]")
-        .value.split("\n")
-        .map((x) => x.trim())
-        .filter(Boolean),
-    }));
+    const questions = readReviewQuestions();
     await api.updateReview({
       reviewId: id,
       expectedRevision: review.revision,
@@ -1114,36 +1184,7 @@ async function renderReview(id, tab, isCurrent = () => true) {
     toast("Review draft saved.", "success");
     load();
   });
-  const addQuestionButton = document.querySelector("#add-question");
-  const updateQuestionLimit = () => {
-    const count = document.querySelectorAll("#questions .question").length;
-    if (addQuestionButton) addQuestionButton.disabled = count >= maxQuestions;
-    const status = document.querySelector("#question-limit");
-    if (status) status.textContent = `${count} of ${maxQuestions} questions`;
-  };
-  updateQuestionLimit();
-  addQuestionButton?.addEventListener("click", () => {
-    if (
-      document.querySelectorAll("#questions .question").length >= maxQuestions
-    )
-      return;
-    document
-      .querySelector("#questions")
-      .insertAdjacentHTML(
-        "beforeend",
-        questionHTML(
-          { text: "", type: "text", required: false, options: [] },
-          maxQuestionLabelBytes,
-        ),
-      );
-    updateQuestionLimit();
-  });
-  document.querySelector("#questions")?.addEventListener("click", (e) => {
-    if (e.target.matches("[data-remove]")) {
-      e.target.closest(".question").remove();
-      updateQuestionLimit();
-    }
-  });
+  bindQuestionControls(limits);
   document.querySelector("#preview")?.addEventListener("click", () => {
     let f = document.querySelector("#edit-review"),
       data = new FormData(f),

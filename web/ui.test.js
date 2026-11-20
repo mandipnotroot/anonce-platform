@@ -647,7 +647,7 @@ test("successful mutations report success without duplicating password inline fe
     "Member approved.",
     "Membership revoked.",
     "Password updated.",
-    "Review draft created.",
+    "Review created.",
     "Review published.",
     "Review closed.",
     "Review draft saved.",
