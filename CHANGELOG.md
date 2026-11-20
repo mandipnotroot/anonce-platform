@@ -43,8 +43,6 @@
   Later-approved members do not receive historical keys; answer decryption stays
   creator-only.
 - Use normalized email addresses for registration, sign-in, and recovery.
-  Organization owners and admins can see member emails; addresses are not
-  mailbox-verified.
 - Minimize descriptor metadata and restrict review settings and activity counters
   to creators. Operational metadata is not end-to-end encrypted.
 - Bind receipt v2 to the encrypted response, deployment, review, descriptor, and
@@ -76,7 +74,7 @@
 - Build and test with Go 1.27.4, including the standard-library fix for
   CVE-2026-97054.
 - Use the upstream PostgreSQL 18.7 Alpine image with refreshed bundled libraries;
-  unresolved upstream component advisories remain documented in the security review.
+  unresolved upstream component advisories remain.
 - Refresh the application image's OpenSSL libraries to Alpine's fixed
   `3.5.9-r1` packages without modifying third-party service images.
 - Bind in-flight registration, review mutations, encrypted response persistence,

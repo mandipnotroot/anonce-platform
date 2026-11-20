@@ -14,9 +14,8 @@
 - Synthetic membership provisioning, account registration, and draft creation
   are outside the publication timer. Fixture accounts are not usable test users;
   their private keys are discarded after generating valid public bindings.
-- Rate limits remain enabled. The harness can wait after HTTP 429 and retry the
-  same pending publication; this is harness-assisted recovery, not automatic
-  product backoff or cross-device resume.
+- Rate limits remain enabled. The harness handles HTTP 429 by waiting and
+  retrying the same pending publication.
 - One publication at a time measures latency, not concurrent-user capacity.
   Loopback networking does not represent remote networks or mobile devices.
 
@@ -47,8 +46,7 @@
   in its review response. Anonymous database queries against member account,
   membership, and envelope tables were denied.
 - Recipient pages and uploads never exceeded 100 entries. Plaintext marker
-  scans and exact payload-field checks passed. These targeted checks do not
-  prove absence of every possible metadata or plaintext leak.
+  scans and exact payload-field checks passed.
 - At 100000 members, request bodies totaled about 33.39 MB and decoded response
   bodies about 90.49 MB, excluding headers and transport overhead.
 - The 100000-member request count comprises 1000 recipient pages, 1000 uploads,
@@ -64,11 +62,8 @@
   Around 10000 members needs visible progress and reliable retry handling;
   100000 members takes over five minutes and is not a fast interactive
   experience. Product acceptance still needs an explicit latency target.
-- These observations suggest profiling recipient transfer and repeated vault reads before
-  assuming cryptography dominates. Node component timings do not establish
-  the actual browser bottleneck. Reusing authenticated creator keys within one
-  publication is a candidate optimization, not a result established by this
-  reference run.
+- Profile recipient transfer and repeated vault reads before optimizing
+  cryptography.
 
 ## Reproduce a live benchmark
 
@@ -135,6 +130,5 @@
   HTTP headers, TLS framing, and transport overhead are separate.
 - Browser heap observations are not whole-browser peak RSS, and sampled values
   can miss short-lived peaks.
-- A successful publication proves only the exercised path and assertions.
-  It does not establish production readiness, cryptographic audit, broad
-  accessibility coverage, or multiuser throughput.
+- Results apply to the exercised workload, not production readiness or
+  concurrent-user capacity.

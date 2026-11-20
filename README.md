@@ -43,9 +43,6 @@ production-readiness claim is made; see the
   response in the original browser; do not create a new response just because a
   network request failed.
 
-Owners and admins can see member emails, but addresses are not mailbox-verified
-and a matching domain does not establish membership. Invitations do not send email.
-
 ## Architecture and trust
 
 ```mermaid
@@ -91,9 +88,7 @@ Important limits:
 - Public password-derived keys allow offline guessing; use strong unique passwords.
 - Password or phrase rotation does not revoke old vault snapshots.
 
-Read the [key-delivery contract](docs/member-key-delivery.md),
-[security policy](SECURITY.md), [threat boundaries](docs/architecture.md), and
-[protocol limits](docs/protocol.md) before using the application.
+See [architecture and trust boundaries](docs/architecture.md) for details.
 
 ## Quickstart: disposable local HTTPS
 
@@ -120,8 +115,7 @@ The same Compose file and Caddyfile serve local and public deployments; change
 `ANONCE_DOMAIN`, not configuration files. Caddy manages local-CA certificates for
 `.local` names and public certificates for eligible public domains.
 **Published ports listen on all interfaces by default.** Review network exposure
-before starting. `npm run build` builds browser assets; build/test commands alone
-do not start the application.
+before starting.
 
 Follow [operations guidance](docs/operations.md) for public deployment, backups,
 key continuity, and source availability.

@@ -3,7 +3,6 @@
 # Operations (pre-release)
 
 - **Not approved for sensitive production data.** Validate the current revision and deployment against the [release gates](../CONTRIBUTING.md#verification-and-release-gates).
-- Record results in pull requests or CI artifacts; historical checks do not validate a public deployment.
 
 | Prerequisite    | Contract                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------- |
@@ -18,8 +17,7 @@
 - Build and proxy configuration lives in `docker/`: `Dockerfile` and `Caddyfile`.
   The deployment `compose.yaml` and `.dockerignore` stay at the repository
   root; image builds use that root as their context.
-- PostgreSQL and Caddy service code is maintained upstream, not by this project.
-  Do not fork or patch that code unless a documented requirement makes it necessary.
+- PostgreSQL and Caddy service code is maintained upstream.
 - This project maintains the application, Compose configuration, database role
   initialization, Caddy configuration, image pins, and minimal deployment wrappers.
 - PostgreSQL uses the upstream image. Its Compose wrapper checks for nonempty
@@ -27,11 +25,8 @@
 - The Caddy image derives from the pinned upstream image without source patches.
   It only adjusts volume ownership and removes the low-port file capability to
   support the non-root runtime described below.
-- Keep future customizations minimal and document why upstream configuration
-  cannot meet the requirement. Prefer upstream fixes over maintaining a fork.
-- Upstream ownership does not remove integration or operator responsibilities:
-  review security advisories, validate image updates, and maintain deployment
-  security and backups. See the [release gates](../CONTRIBUTING.md#verification-and-release-gates).
+- Operators review security advisories, validate image updates, and maintain
+  deployment security and backups.
 
 ## Deployment contracts
 
@@ -39,7 +34,6 @@
 - Before startup, confirm it contains nonempty reviewed scripts, not an empty placeholder.
 - They must create distinct member and anonymous login roles using the supplied role passwords, with no superuser, database creation, or role creation permissions.
 - Restrict anonymous grants to its contract; no membership tables. `DATABASE_URL` uses the member role, never `anonce_admin`; `ANON_DATABASE_URL` uses the restricted anonymous role.
-- No shared-role fallback is acceptable.
 - Initialization runs only on empty volumes.
 - Backend installs the current `db/schema.sql` in one transaction, guarded by an
   advisory lock. A schema-version marker makes repeated startup a no-op.
@@ -55,7 +49,6 @@
 - That file contains the unpadded base64url encoding of exactly 32 random bytes for the server ChaCha master key, not client keys.
 - Backend must set member cookies with Path=/api/member and strict security headers, including a self-only CSP permitting `wasm-unsafe-eval` where necessary, never general `unsafe-eval`.
 - Browser build uses `scripts/build.mjs` and emits `web/crypto.bundle.js`, retaining the vanilla app/API/UI files.
-- Docker copies both `scripts/` and `web/` for this build.
 
 ## First setup (review deployment prerequisites first)
 

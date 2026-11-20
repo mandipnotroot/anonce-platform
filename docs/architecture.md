@@ -2,7 +2,6 @@
 
 # Architecture and trust boundaries
 
-- This document describes system boundaries, not evidence of completed verification.
 - See [protocol.md](protocol.md) for cryptographic formats, [openapi.yaml](openapi.yaml) for HTTP contracts, and [verification requirements](../CONTRIBUTING.md#verification-and-release-gates) for release checks.
 
 ## Boundaries
@@ -61,16 +60,13 @@ accDescr: Creator publishes encrypted review content and member HPKE key envelop
     Note over M,S: Credential-free transport does not prevent network/timing correlation.
 ```
 
-This diagram shows system boundaries, not protection from malicious delivered
-code or network/timing correlation.
-
 - The browser encrypts review titles, descriptions, and complete questions before draft creation.
 - Signed descriptors contain encrypted content, not plaintext questions.
 - Publication snapshots all approved memberships and encrypts the content key separately to each account's independent X25519 encryption key.
 - Dashboard access unwraps only the caller's envelope; ordinary links contain no secret.
 - Later approvals receive no historical envelopes.
 - The separate X25519 answer recipient private key stays in the creator's encrypted vault; content keys cannot decrypt answers.
-- Anonymous transport remains separate from authenticated issuance, not proof against traffic correlation.
+- Anonymous transport remains separate from authenticated issuance.
 
 ## State and transactions
 
@@ -161,7 +157,7 @@ code or network/timing correlation.
 - Protect database integrity and retain trusted historical receipt public keys in the deployment configuration.
 
 - This does not hide network IP/timing correlation, tiny anonymity sets, malicious served JavaScript, operator access, issuer minting or server-CA substitution.
-- Independent source-first security review is required, not an audit claim.
+- Release requirements include an independent source-first security review.
 - Rotating a recovery phrase does not revoke compromised encrypted snapshots: full compromise repair requires a new vault key, object re-encryption and membership-key rotation.
 
 ## Product limits

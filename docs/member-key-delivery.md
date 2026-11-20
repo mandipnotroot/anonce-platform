@@ -2,16 +2,12 @@
 
 # Member content-key delivery contract
 
-- Status: implementation contract, not proof of passed tests.
-
 ## Access policy
 
 - Publication start snapshots every approved organization membership, including the creator and all roles.
 - Later approvals receive no historical content keys.
 - Published content stays immutable.
 - Revoked members cannot fetch envelopes, but cannot unlearn keys or content already obtained.
-- Changing the initial schema does not upgrade an initialized database.
-- Operators must explicitly approve any fresh-database deployment; never delete existing data automatically.
 
 ## Account keys
 
@@ -107,9 +103,8 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 - Browser retains only the current page's envelopes and progress, not the complete directory or publication payload.
 - HTTP 429 retains progress for a later retry. Publication remains subject to
   member/challenge rate limits; batching does not bypass them.
-- Losing the encrypted browser progress cache does not cancel the active snapshot.
-  A new start must wait for expiry or a changed draft revision; cross-device
-  resume and explicit cancellation are not implemented.
+- If the encrypted browser progress cache is lost, a new start must wait for
+  snapshot expiry or a changed draft revision.
 - Retain the 1536*1024-byte decoded payload limit and the tighter upload item limit; reject excess explicitly, never truncate.
 
 - Account schema requires `encryption_public` (32 bytes) and `encryption_key_signature` (64 bytes).
@@ -166,9 +161,8 @@ with these contract-specific cases:
 - The script uses the actual browser-compatible crypto module in Node, bounded
   batches, and valid synthetic recipient identities. It reports elapsed time,
   payload sizes, memory observations, and estimated request counts.
-- This is not a live browser or end-to-end publication benchmark. Fixture
-  generation is reported separately; request estimates exclude real network
-  latency and throttling. Do not treat component timings as deployment capacity.
+- Fixture generation is reported separately; component timings and request
+  estimates exclude network latency and throttling.
 - Use only disposable synthetic databases for PostgreSQL benchmarks. Database
   fixtures and role requirements follow the
   [verification gates](../CONTRIBUTING.md#verification-and-release-gates).
