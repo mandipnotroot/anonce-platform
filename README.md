@@ -51,16 +51,17 @@ and a matching domain does not establish membership. Invitations do not send ema
 ```mermaid
 flowchart LR
 accTitle: Anonce deployment trust boundaries
-accDescr: Browser-held plaintext and private keys connect through HTTPS to a service that stores encrypted data and metadata. Server signing keys stay separate.
+accDescr: Browser-held plaintext and private keys connect through one Caddy configuration using local or public HTTPS. The Go service initializes its schema and keys before serving and checks both database roles for readiness. Server signing keys stay separate.
     subgraph Client[Trusted browser boundary]
         Browser[Member or creator browser<br/>Unlocked secrets and plaintext]
     end
     subgraph Service[Deployment boundary]
-        Proxy[HTTPS proxy]
-        App[Go service<br/>Ciphertext and public state]
+        Proxy[Caddy<br/>Local CA or public ACME HTTPS]
+        App[Go service<br/>Schema and keys initialized before serving]
         DB[(PostgreSQL<br/>Encrypted vaults, reviews, answers<br/>Operational metadata)]
         Keys[Protected server keys<br/>CA, blind issuer, receipt signer]
-        Proxy --> App
+        Proxy <-->|Ciphertext and public state| App
+        App -.->|Healthy before proxy startup| Proxy
         App -->|Member database role| DB
         App -->|Restricted anonymous database role| DB
         App --> Keys

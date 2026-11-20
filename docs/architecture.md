@@ -17,40 +17,47 @@
 ```mermaid
 sequenceDiagram
 accTitle: Review publication and response flow
-accDescr: Creator publishes encrypted questions and member key envelopes. An approved member uses one browser for content access, authenticated blind issuance, and credential-free encrypted submission. Only creator decrypts answers.
+accDescr: Creator publishes encrypted review content and member HPKE key envelopes. A snapshot member verifies and decrypts content, encrypts answers, obtains a blind authorization through authenticated issuance, then submits without credentials. Browsers verify context-bound receipts before recording acceptance or decrypting results.
     participant C as Creator browser
-    participant M as Same approved member browser
+    participant M as Snapshot member browser
     participant S as Go service
     participant D as PostgreSQL
     Note over C,M: Memberships approved at snapshot start get content-key envelopes. Later approvals do not.
     Note over C,S: Phase 1 — publication
-        C->>C: Encrypt questions and retain answer private key in creator vault
+        C->>C: Encrypt title, description and questions<br/>Retain answer private key in creator vault
         C->>S: Authenticated publication start: signed encrypted descriptor
         S->>D: Freeze approved recipient snapshot
         loop Frozen recipient pages
+            C->>S: Authenticated recipient page request
             S-->>C: At most 100 authenticated recipient keys
+            C->>C: Verify recipient bindings and HPKE-seal content key per member
             C->>S: Authenticated bounded envelope upload
             S->>D: Bulk stage validated envelopes
         end
         C->>S: Authenticated finalize
         S->>D: Atomically publish complete snapshot and descriptor
-    Note over M,S: Phase 2 — approved member access and issuance
+    Note over M,S: Phase 2 — currently approved snapshot member access and issuance
         M->>S: Authenticated review access
-        S-->>M: Encrypted questions and own content-key envelope
-        M->>M: Decrypt questions and prepare blind authorization
-        M->>S: Authenticated blind-authorization request
-        S->>D: Atomically reserve per-member quota and cache signature
+        S-->>M: Encrypted content and caller's HPKE content-key envelope
+        M->>M: Verify descriptor, open envelope and decrypt content
+        Note over M: Browser-held X25519 key<br/>Envelope binds descriptor, member and key ID
+        M->>M: Encrypt answers to creator public key<br/>Prepare blind authorization
+        M->>S: Authenticated issuance request with encrypted pending state
+        S->>D: Atomically save pending state, reserve quota and cache signature
         S-->>M: Blind signature
     Note over M,S: Phase 3 — credential-free response and acceptance
-        M->>M: Unblind authorization and encrypt answers to creator public key
-        M->>S: Credential-free submission: authorization and ciphertext
+        M->>M: Unblind authorization
+        M->>S: Submission with credentials omitted: authorization and ciphertext
         S->>D: Atomically store ciphertext, spend, and signed receipt
         S-->>M: Signed acceptance receipt
+        M->>M: Verify receipt against trusted keys and submission context<br/>Save local acceptance
     Note over C,S: Phase 4 — creator-only result decryption
         C->>S: Authenticated creator result request
         S-->>C: Encrypted answers and signed receipts
-        C->>C: Verify receipts and decrypt with creator-only answer private key
-    Note over S: Server cannot decrypt questions or answers.
+        C->>C: Verify trusted receipt signature and item ID
+        C->>C: Match deployment, review, descriptor, issuer and response hashes
+        C->>C: Decrypt with creator-only answer private key
+    Note over S: Server sees access metadata and ciphertext lengths, not content or answers.
     Note over M,S: Credential-free transport does not prevent network/timing correlation.
 ```
 
@@ -135,7 +142,8 @@ code or network/timing correlation.
 - Encryption does not protect plaintext copies or snapshots retained outside the encrypted format.
 
 - Public/anonymous fetches use `credentials: "omit"`, `referrerPolicy: "no-referrer"`, and `redirect: "error"`.
-- The proxy strips Cookie, Authorization and identifying headers on these routes; the backend rejects Cookie/Authorization rather than using them.
+- On anonymous routes, the proxy strips Cookie, Authorization and listed identifying
+  headers; the backend rejects Cookie/Authorization rather than using them.
 - Logs, telemetry and errors must not recreate an identifying submission trail.
 
 - Dashboard completion derives only from locally encrypted records with verified acceptance receipts.

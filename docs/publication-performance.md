@@ -53,8 +53,8 @@
   bodies about 90.49 MB, excluding headers and transport overhead.
 - The 100000-member request count comprises 1000 recipient pages, 1000 uploads,
   1002 challenges, one start, one finalize, and 1003 other authenticated reads.
-  `reviewKeys` currently fetches vault data again for each recipient page;
-  the earlier 3004-request estimate omitted those additional reads.
+  At the reference baseline, `reviewKeys` fetched vault data again for each
+  recipient page.
 - Observed request-to-body-completion totals at that size were approximately
   199.3 seconds for recipient pages, 90.1 seconds for other reads, 17.6 seconds
   for uploads, 11.5 seconds for challenges, 10.3 seconds for snapshot start,
@@ -64,10 +64,11 @@
   Around 10000 members needs visible progress and reliable retry handling;
   100000 members takes over five minutes and is not a fast interactive
   experience. Product acceptance still needs an explicit latency target.
-- Prioritize profiling recipient transfer and repeated vault reads before
+- These observations suggest profiling recipient transfer and repeated vault reads before
   assuming cryptography dominates. Node component timings do not establish
   the actual browser bottleneck. Reusing authenticated creator keys within one
-  publication is a candidate optimization, not implemented by this benchmark.
+  publication is a candidate optimization, not a result established by this
+  reference run.
 
 ## Reproduce a live benchmark
 
@@ -103,7 +104,8 @@
    organization for each size and verifies exact envelope coverage afterward.
 
 - The standalone configuration exposes only loopback HTTPS port 18443 and
-  PostgreSQL port 15432. Do not combine it with deployment Compose overrides.
+  PostgreSQL port 15432. Run it standalone; do not merge it with `compose.yaml`
+  or deployment-specific overrides.
 - Unlike the deployment's internal-only database network, the benchmark uses a
   project-owned ordinary bridge so the host-side fixture can connect to the
   explicitly loopback-published PostgreSQL port. Do not copy this fixture

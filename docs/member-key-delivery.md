@@ -124,8 +124,8 @@ aad  = E('review-content-key-aad',  deployment_id, org_id, review_id, D, M, K)
 
 ## Application and UI interface
 
-- Ordinary navigation is `/#/respond/<review_id>`.
-- Reject old secret query forms. `prepareResponse({reviewId, answers})` obtains the key internally using authenticated review access.
+- Response links use `/#/respond/<review_id>`, with no query parameters or extra path segments.
+- `prepareResponse({reviewId, answers})` obtains the key internally using authenticated review access; links contain no content keys.
 
 - Review view models include `contentState` (`locked` or unlocked state)
   and boolean `completedOnThisBrowser`.

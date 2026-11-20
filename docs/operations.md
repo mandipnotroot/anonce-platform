@@ -254,11 +254,14 @@ docker compose exec -T db pg_restore -U anonce_admin -d anonce --exit-on-error <
 - To retain verification of receipts signed by an explicitly approved historical key, set `ANONCE_RECEIPT_TRUST_FILE` to a bounded operator-controlled public trust document using the schema in [protocol.md](protocol.md).
 - The document must include the deployment's current key and matching deployment ID.
 - The loader accepts at most 1 MiB, requires a regular file owned by root or the effective service UID, rejects final-component symlinks, and rejects group/world write permission.
-- Browser import is separately limited to 64 KiB; keep distributed trust documents within that limit.
-- Historical keys come from this file, not from database rows or imported receipts.
+- Historical keys come from this file, not from database rows or receipt-supplied fields.
 - This is verification-key configuration, not a signing-key rotation command.
 
-- For Compose, mount the public trust document read-only through a local override and set the variable to its container path.
+- For optional Compose trust configuration, add a read-only bind mount to the
+  `app` service in an operator-owned Compose override and set the variable to
+  that container path. Setting the variable alone does not mount the file.
+- Apply that override consistently to all Compose commands. It is separate from
+  the shared local/public TLS configuration.
 - Do not mount a private-key directory.
 - Keep the file and its parent directories protected from untrusted writes.
 - Distribute trust documents through an independently trusted channel; retain trusted copies with receipts.

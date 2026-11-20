@@ -30,24 +30,11 @@
 
 ### Changed
 
-- Share encoded-payload inspection between browser E2E and publication benchmarks,
-  including base64url-encoded plaintext in leakage checks.
-- Keep receipt-signature verification internal to context-bound receipt validation;
-  remove standalone-only tests and historical copy/layout absence assertions.
-- Group container build and Caddy configuration files under `docker/`, keeping
-  the deployment Compose file at the repository root.
 - Use one Compose file and Caddyfile for local and public deployments, with
-  automatic certificate selection by hostname instead of local-only overrides.
-- Remove unused certificate-formatting and nullable-comparison helpers.
-- Clarify that shared API rate-limit pools do not provide per-client fairness
-  or denial-of-service protection.
+  automatic certificate selection by hostname.
 - Combine review setup and question building on one page before creating a draft.
-- Remove redundant interface instructions while retaining actionable validation
-  errors and security warnings.
-- Use version-supported modern Go idioms for error matching, path splitting,
-  fixed-count loops, and test contexts without changing protocol formats.
 - Freeze publication recipients before paged key encryption and bounded envelope
-  uploads; finalize complete snapshots atomically instead of sending one full-roster payload.
+  uploads; finalize complete snapshots atomically.
 - Use one current schema with transactional, version-checked initialization.
   Initialization requires an empty database or the current schema; automatic
   upgrades and data transfer are not supported.
@@ -80,12 +67,6 @@
 - Preserve issuance retry bytes restored from PostgreSQL JSONB and count only
   committed responses.
 
-### Removed
-
-- Standalone receipt verification, receipt PNG/QR downloads and imports, and
-  public signing-key import/export controls. Signed receipts remain internal to
-  submission confirmation, retries, and reviewer validation.
-
 ### Security
 
 - Build and test with Go 1.27.4, including the standard-library fix for
@@ -103,7 +84,6 @@
 - Pad authenticated issuance pending objects to a fixed plaintext size to prevent
   direct response-length linkage for new objects. Previously retained objects,
   timing correlation, and other [trust limitations](SECURITY.md) remain out of scope.
-- Use inert HTML parsing in responsive checks.
 - Raise review limits to 500 questions, 512 KiB of plaintext, and 64 KiB
   descriptions; expose bounded operator-configurable limits to browser validation.
 - Increase descriptor and response ceilings to 768 KiB and 512 KiB, with
