@@ -359,6 +359,7 @@ test("late respond review success and failure do not render after navigation, ac
         querySelector: () => ({ addEventListener() {} }),
       },
       bind() {},
+      formError: () => '<p class="form-error"></p>',
       renderButtonIcons() {},
       isCurrent: current,
     };
@@ -438,6 +439,7 @@ test("respond submit and retry completions respect route invalidation", async ()
       bind(_selector, callback) {
         submit = async (fd) => callback(fd);
       },
+      formError: () => '<p class="form-error"></p>',
       renderButtonIcons() {},
       receiptHTML: () => "receipt",
     };
@@ -1100,6 +1102,64 @@ test("question removal uses the shared icon system and keeps an accessible name"
   assert.match(
     source,
     /data-remove aria-label="Remove question">\$\{icon\("trash-2"\)\}/,
+  );
+});
+
+test("review setup renderers share fields and preserve create/edit values safely", () => {
+  const rendererSource = source.slice(
+    source.indexOf("function formError("),
+    source.indexOf("async function renderReview("),
+  );
+  const renderers = vm.runInNewContext(
+    `${rendererSource}\n({ formError, reviewFields })`,
+    {
+      esc: (value) =>
+        String(value ?? "").replace(
+          /[&<>"']/g,
+          (character) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[character],
+        ),
+      questionHTML: (question, maxLabelBytes) => {
+        assert.equal(maxLabelBytes, 80);
+        return `<q>${question.text}</q>`;
+      },
+      dt: (value) => (value ? `date:${value}` : ""),
+    },
+  );
+  const create = renderers.reviewFields({
+    descriptionLimit: 1200,
+    maxQuestionLabelBytes: 80,
+  });
+  assert.match(create, /placeholder="What would you like to learn\?"/);
+  assert.match(create, /name="maxResponses"[^>]*value="1"/);
+  assert.match(create, /id="questions"><\/div>/);
+  const edit = renderers.reviewFields({
+    descriptionLimit: 1200,
+    maxQuestionLabelBytes: 80,
+    review: {
+      title: '<script "x">',
+      description: "</textarea>",
+      maxResponses: 3,
+      opensAt: "open",
+      closesAt: null,
+      questions: [{ text: "Existing" }],
+    },
+  });
+  assert.match(edit, /value="&lt;script &quot;x&quot;&gt;"/);
+  assert.match(edit, /maxlength="1200">&lt;\/textarea&gt;<\/textarea>/);
+  assert.match(edit, /value="3"/);
+  assert.match(edit, /value="date:open"/);
+  assert.match(edit, /id="questions"><q>Existing<\/q><\/div>/);
+  assert.match(renderers.formError(), /^<p class="form-error"><\/p>$/);
+  assert.match(
+    renderers.formError(true),
+    /^<p class="form-error" role="alert"><\/p>$/,
   );
 });
 

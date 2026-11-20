@@ -30,6 +30,7 @@
 
 ### Changed
 
+- Share review setup/edit field rendering and form-error markup across browser forms.
 - Use one Compose file and Caddyfile for local and public deployments, with
   automatic certificate selection by hostname.
 - Combine review setup and question building on one page before creating a draft.
