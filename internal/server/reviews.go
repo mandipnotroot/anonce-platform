@@ -711,9 +711,3 @@ func nullableDecimal(s *string) (*int64, error) {
 	n, e := decimal(*s)
 	return &n, e
 }
-func sameNullable(s *string, n *int64) bool {
-	if s == nil || n == nil {
-		return s == nil && n == nil
-	}
-	return *s == format(*n)
-}

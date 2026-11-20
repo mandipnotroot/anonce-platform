@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"errors"
 	"github.com/mandipnotroot/anonce-platform/internal/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -144,7 +143,4 @@ func (s *Server) initKeys(ctx context.Context) error {
 	}
 	s.receiptID = protocol.Hash(s.receipt.Public().(ed25519.PublicKey))
 	return tx.Commit(ctx)
-}
-func pemCert(b []byte) string {
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: b}))
 }

@@ -30,6 +30,9 @@
 
 ### Changed
 
+- Remove unused certificate-formatting and nullable-comparison helpers.
+- Clarify that shared API rate-limit pools do not provide per-client fairness
+  or denial-of-service protection.
 - Combine review setup and question building on one page before creating a draft.
 - Remove redundant interface instructions while retaining actionable validation
   errors and security warnings.

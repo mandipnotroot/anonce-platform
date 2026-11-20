@@ -34,6 +34,9 @@ or production-readiness claim is made. See
 - Dashboard completion stays browser-local; never send named completion flags or receipts to member APIs.
 - Browser-delivered code must be trusted. Anonce does not promise anonymity
   against malicious served code or network/timing correlation.
+- API rate limits use shared per-process public and verified-member pools, not
+  per-client tracking. One caller can exhaust a pool for other callers; these
+  limits do not provide per-client fairness or denial-of-service protection.
 - Cryptographic design and implementation require verification before real sensitive use.
 - Operators/issuers and server CA substitution are also trust boundaries.
 - Public password-derived keys allow offline guessing.
