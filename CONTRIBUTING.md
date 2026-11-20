@@ -45,7 +45,7 @@ when reviewing updates.
 | JSON, YAML (`.yaml`, `.yml`), Markdown        | Local Prettier, with explicit file paths.                                                                              |
 | PostgreSQL (`.sql`)                           | No automated formatter configured. Preserve surrounding SQL style and transactional schema initialization boundaries.  |
 | Shell (`.sh`)                                 | No automated formatter configured. Preserve surrounding shell style; validate syntax with `bash -n path/to/script.sh`. |
-| `docker/Caddyfile`, `docker/Caddyfile.local`  | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing these files.                          |
+| `docker/Caddyfile`                            | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing this file.                            |
 | `docker/Dockerfile`, `Makefile`, ignore files | Preserve surrounding style; keep required Make recipe tabs. No automated formatter configured.                         |
 
 Format only the files you change. For example:
@@ -132,7 +132,7 @@ Required standards:
   anonymous role available. These tests reset its application schemas and version
   tables; never reuse the server integration database or a database containing data
   you need. The required-test flag also fails if this URL is missing.
-- The separate container job validates both Compose configurations and builds
+- The separate container job validates the shared Compose configuration with local and public hostnames and builds
   application and proxy images without publishing or starting the deployment.
 - These jobs do not establish live HTTPS, backup recovery, or independent security-review evidence.
 

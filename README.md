@@ -108,16 +108,19 @@ Install Docker Compose v2 and use synthetic data only. The stack uses PostgreSQL
 3. Validate and start the local stack:
 
    ```sh
-   docker compose -p anonce-local -f compose.yaml -f compose.local.yaml config --quiet
-   docker compose -p anonce-local -f compose.yaml -f compose.local.yaml up -d --build
+   docker compose config --quiet
+   docker compose up -d --build
    ```
 
 4. Follow operations instructions to map `anonce.local` to the host and trust
    Caddy's local CA. Open `https://anonce.local` and register in the browser.
 
-**The local override listens on all interfaces.** Review network exposure before
-starting it. `npm run build` builds browser assets; build/test commands alone do
-not start the application.
+The same Compose file and Caddyfile serve local and public deployments; change
+`ANONCE_DOMAIN`, not configuration files. Caddy manages local-CA certificates for
+`.local` names and public certificates for eligible public domains.
+**Published ports listen on all interfaces by default.** Review network exposure
+before starting. `npm run build` builds browser assets; build/test commands alone
+do not start the application.
 
 Follow [operations guidance](docs/operations.md) for public deployment, backups,
 key continuity, and source availability.

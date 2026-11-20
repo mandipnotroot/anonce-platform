@@ -15,8 +15,8 @@
 ## Service ownership
 
 - Docker Compose v2 is the supported container deployment entry point.
-- Build and proxy configuration lives in `docker/`: `Dockerfile`, `Caddyfile`,
-  and `Caddyfile.local`. Compose files and `.dockerignore` stay at the repository
+- Build and proxy configuration lives in `docker/`: `Dockerfile` and `Caddyfile`.
+  The deployment `compose.yaml` and `.dockerignore` stay at the repository
   root; image builds use that root as their context.
 - PostgreSQL and Caddy service code is maintained upstream, not by this project.
   Do not fork or patch that code unless a documented requirement makes it necessary.
@@ -62,11 +62,11 @@
 ### Configuration
 
 Copy `.env.example` to `.env`; fill every blank with strong distinct credentials,
-correct role URLs (URL-encode passwords), public domain, and reviewed init path.
+correct role URLs (URL-encode passwords), deployment hostname, and reviewed init path.
 
 | Variable                                               | Required / default                                           | Purpose                                                                 |
 | ------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `ANONCE_DOMAIN`                                        | Required; example `feedback.example.org`                     | Public host; Compose derives `ANONCE_ORIGIN=https://<host>`             |
+| `ANONCE_DOMAIN`                                        | Required; e.g. `anonce.local` or `feedback.example.org`      | Hostname only; Compose derives `ANONCE_ORIGIN=https://<host>`           |
 | `ANONCE_SOURCE_URL`                                    | Required                                                     | Exact complete corresponding deployed source                            |
 | `POSTGRES_PASSWORD`                                    | Required; blank example                                      | Database administrator password                                         |
 | `ANONCE_MEMBER_DB_PASSWORD`, `ANONCE_ANON_DB_PASSWORD` | Required; blank example                                      | Distinct initialization role passwords                                  |
@@ -138,38 +138,43 @@ sudo chmod 0400 secrets/server_key
 - The browser displays this URL on desktop and mobile; verify that it supplies
   the required source.
 
-### Local deployment
+### Start the deployment
 
-After configuring `.env` and key permissions above, set
-`ANONCE_DOMAIN=anonce.local`. **The local override binds all interfaces
-(`0.0.0.0`), not just loopback.** Restrict host firewall access before starting.
+Use the same Compose file and Caddyfile for development and public deployment.
+After configuring `.env` and key permissions above, select `ANONCE_DOMAIN`:
+
+- Local: use `anonce.local` and map it to the Docker host on each client.
+- Public: use a publicly resolvable domain, configure its DNS to reach the host,
+  and permit inbound TCP 80/443.
+- Caddy automatically uses its local CA for `.local` names and localhost, and
+  public certificate automation for eligible public domains. No TLS mode flag
+  or separate configuration file is needed.
+- **Published ports bind all interfaces by default, not just loopback.**
+  Restrict host firewall access before starting, especially for local testing.
 
 ```sh
-docker compose -p anonce-local -f compose.yaml -f compose.local.yaml config --quiet
-docker compose -p anonce-local -f compose.yaml -f compose.local.yaml up -d --build
+docker compose config --quiet
+docker compose up -d --build
 ```
 
-- Map `anonce.local` to the server's LAN address on each client.
-- Export only Caddy's public local root certificate: inspect the running `caddy` container's `/data` volume for its `pki/authorities/local/root.crt`, then use `docker compose` with the same project/override flags and `cp caddy:<confirmed-path> ./anonce-local-ca.crt`.
+#### Trust local HTTPS
+
+- Local certificates are not publicly trusted. The container cannot install
+  trust into host or client browsers automatically.
+- Export only Caddy's public local root certificate: inspect the running `caddy` container's `/data` volume for its `pki/authorities/local/root.crt`, then use `docker compose cp caddy:<confirmed-path> ./anonce-local-ca.crt`.
 - Do not copy `root.key` or the entire volume.
 - Confirm the certificate fingerprint through a trusted operator channel before importing it into each client's trust store.
 - This trusts certificates issued by that local CA; remove trust when done.
 
-- Keep the same project name to preserve Caddy's TLS volumes.
+#### Persistent state and runtime boundaries
+
+- Keep the same Compose project name to preserve Caddy's TLS volumes.
+  Use the same project selection for every command; a changed hostname does not
+  require a new project.
 - A new unused `ANONCE_DB_VOLUME` initializes an empty database; rebuilding does not reset data.
 - Before switching volumes, build images, stop writes, and take a protected backup.
 - Preserve the previous image, volume, and matching server key for rollback.
 - Do not delete the old volume or run `down -v`.
-
-### Public deployment
-
-Use the public domain, configure DNS, and permit inbound TCP 80/443 before startup:
-
-```sh
-docker compose config --quiet
-docker compose build
-docker compose up -d
-```
 
 - The local image/runtime checks do not establish public DNS, certificate issuance,
   or production Compose deployment success.
@@ -185,7 +190,7 @@ docker compose up -d
 
 ## Troubleshooting
 
-- Use the same project and override flags as startup.
+- Use the same Compose project selection as startup.
 - Never print resolved secret configuration or attach keys, dumps, or credentials to reports.
 
 | Symptom                             | Safe check / action                                                                                                                 |
@@ -202,7 +207,7 @@ docker compose up -d
 
 PostgreSQL 18 mounts `pgdata` at `/var/lib/postgresql`.
 
-Use the same Compose project and override flags as startup in every command below.
+Use the same Compose project selection as startup in every command below.
 `anonce_admin` is the operator dump/restore role, not either runtime connection.
 
 - Validate disposable restores against the backup using table counts and sorted

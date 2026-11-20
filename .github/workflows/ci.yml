@@ -86,10 +86,12 @@ jobs:
           export ANONCE_SERVER_KEY_FILE="$RUNNER_TEMP/anonce-ci-server-key"
           printf 'ANONCE_SERVER_KEY_FILE=%s\n' "$ANONCE_SERVER_KEY_FILE" >> "$GITHUB_ENV"
           printf '%s' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' > "$ANONCE_SERVER_KEY_FILE"
-      - name: Validate base Compose configuration
+      - name: Validate Compose configuration with a public hostname
         run: docker compose -f compose.yaml config --quiet
-      - name: Validate local Compose override
-        run: docker compose -f compose.yaml -f compose.local.yaml config --quiet
+      - name: Validate Compose configuration with a local hostname
+        env:
+          ANONCE_DOMAIN: anonce.local
+        run: docker compose -f compose.yaml config --quiet
       - name: Build application and proxy images without publishing
         run: docker compose -f compose.yaml build app caddy
       - name: Remove disposable dummy key file
