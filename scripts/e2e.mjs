@@ -2,6 +2,7 @@
 // Opt-in real-browser integration test; targets an already-running HTTPS service.
 // Install Playwright in the test environment, not the production dependency set.
 import assert from "node:assert/strict";
+import { decodedTexts } from "./encoded-payloads.mjs";
 const origin = process.env.ANONCE_E2E_ORIGIN;
 if (!origin)
   throw new Error("Set ANONCE_E2E_ORIGIN to a disposable HTTPS deployment.");
@@ -41,27 +42,6 @@ const capture = (context) => {
       );
   });
 };
-// Signed payloads and descriptors are base64url JSON; inspect those as well as HTTP text.
-function decodedTexts(text, depth = 0) {
-  const result = [text];
-  if (depth === 5) return result;
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return result;
-  }
-  const visit = (item) => {
-    if (typeof item === "string" && /^[A-Za-z0-9_-]+$/.test(item)) {
-      const decoded = Buffer.from(item, "base64url").toString("utf8");
-      if (decoded.startsWith("{") || decoded.startsWith("["))
-        result.push(...decodedTexts(decoded, depth + 1));
-    } else if (item && typeof item === "object")
-      for (const child of Object.values(item)) visit(child);
-  };
-  visit(value);
-  return result;
-}
 const observe = (page) =>
   page.on("response", async (response) => {
     if (

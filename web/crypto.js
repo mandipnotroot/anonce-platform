@@ -1344,53 +1344,49 @@ export function getReceiptTrust() {
   return structuredClone(config.receiptTrust);
 }
 
-// Signature verification proves acceptance under supplied trust, not a match to
-// the original submission. Use verifyReceipt with independently held context.
-export async function verifyReceiptSignature({ receipt, trust }) {
-  return guard(() => {
-    trust = validateReceiptTrust(trust);
-    exactKeys(receipt, [
-      "v",
-      "deployment_id",
-      "receipt_id",
-      "review_id",
-      "descriptor_hash",
-      "issuer_key_id",
-      "response_hash",
-      "accepted_at",
-      "receipt_key_id",
-      "signature",
-    ]);
-    check(
-      receipt.v === 2 && typeof receipt.accepted_at === "string",
-      "INVALID_RECEIPT",
-    );
-    const message = encodeContext("receipt-v2", [
-      decode(receipt.deployment_id, 32),
-      decode(receipt.receipt_id, 16),
-      decode(receipt.review_id, 16),
-      decode(receipt.descriptor_hash, 32),
-      decode(receipt.issuer_key_id, 32),
-      decode(receipt.response_hash, 32),
-      u64be(receipt.accepted_at),
-      decode(receipt.receipt_key_id, 32),
-    ]);
-    check(receipt.deployment_id === trust.deployment_id, "DEPLOYMENT_MISMATCH");
-    const entry = trust.receipt_keys.find(
-      (key) => key.receipt_key_id === receipt.receipt_key_id,
-    );
-    check(entry, "RECEIPT_KEY_MISMATCH");
-    check(
-      ed25519.verify(
-        decode(receipt.signature, 64),
-        message,
-        decode(entry.receipt_public_key, 32),
-        { zip215: false },
-      ),
-      "INVALID_RECEIPT_SIGNATURE",
-    );
-    return structuredClone(receipt);
-  });
+function verifyReceiptSignature({ receipt, trust }) {
+  trust = validateReceiptTrust(trust);
+  exactKeys(receipt, [
+    "v",
+    "deployment_id",
+    "receipt_id",
+    "review_id",
+    "descriptor_hash",
+    "issuer_key_id",
+    "response_hash",
+    "accepted_at",
+    "receipt_key_id",
+    "signature",
+  ]);
+  check(
+    receipt.v === 2 && typeof receipt.accepted_at === "string",
+    "INVALID_RECEIPT",
+  );
+  const message = encodeContext("receipt-v2", [
+    decode(receipt.deployment_id, 32),
+    decode(receipt.receipt_id, 16),
+    decode(receipt.review_id, 16),
+    decode(receipt.descriptor_hash, 32),
+    decode(receipt.issuer_key_id, 32),
+    decode(receipt.response_hash, 32),
+    u64be(receipt.accepted_at),
+    decode(receipt.receipt_key_id, 32),
+  ]);
+  check(receipt.deployment_id === trust.deployment_id, "DEPLOYMENT_MISMATCH");
+  const entry = trust.receipt_keys.find(
+    (key) => key.receipt_key_id === receipt.receipt_key_id,
+  );
+  check(entry, "RECEIPT_KEY_MISMATCH");
+  check(
+    ed25519.verify(
+      decode(receipt.signature, 64),
+      message,
+      decode(entry.receipt_public_key, 32),
+      { zip215: false },
+    ),
+    "INVALID_RECEIPT_SIGNATURE",
+  );
+  return structuredClone(receipt);
 }
 
 export async function verifyReceipt({

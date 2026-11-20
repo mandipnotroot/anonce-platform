@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
+import { decodedTexts } from "./encoded-payloads.mjs";
 
 const allowedSizes = [1000, 10000, 100000];
 let stage = "setup";
@@ -127,25 +128,9 @@ function capture(context, markers) {
   let envelopesAttempted = 0;
   let pagesReceived = 0;
   let enabled = true;
-  const scan = (text, depth = 0) => {
-    assert.ok(!markers.some((marker) => text.includes(marker)));
-    if (depth >= 5) return;
-    let value;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      return;
-    }
-    const visit = (item) => {
-      if (typeof item === "string" && /^[A-Za-z0-9_-]+$/.test(item)) {
-        const decoded = Buffer.from(item, "base64url").toString("utf8");
-        assert.ok(!markers.some((marker) => decoded.includes(marker)));
-        if (decoded.startsWith("{") || decoded.startsWith("["))
-          scan(decoded, depth + 1);
-      } else if (item && typeof item === "object")
-        Object.values(item).forEach(visit);
-    };
-    visit(value);
+  const scan = (text) => {
+    for (const decoded of decodedTexts(text))
+      assert.ok(!markers.some((marker) => decoded.includes(marker)));
   };
   const validateRequest = (kind, text) => {
     if (!["start", "batch", "finalize"].includes(kind)) return;

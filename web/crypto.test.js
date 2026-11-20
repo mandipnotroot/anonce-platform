@@ -64,22 +64,6 @@ const init = {
   receiptKeys,
   receiptKeyId,
 };
-// A separate module instance has never been initialized and needs no location.
-const portable = await import("./crypto.js?standalone-receipts");
-const standaloneReceipt = signedReceipt();
-const savedLocation = globalThis.location;
-delete globalThis.location;
-try {
-  assert.deepEqual(
-    await portable.verifyReceiptSignature({
-      receipt: standaloneReceipt,
-      trust,
-    }),
-    standaloneReceipt,
-  );
-} finally {
-  globalThis.location = savedLocation;
-}
 await c.initCrypto(init);
 test("limits require the complete safe public contract and return frozen copies", async () => {
   const isolated = await import("./crypto.js?limits");
@@ -1282,6 +1266,14 @@ test("receipts require every independent context and detach verified data and tr
 
 test("receipt exact schema, canonical encodings, timestamps and all signed fields reject mutations", async () => {
   const receipt = signedReceipt();
+  const args = receiptArgs(receipt);
+  const contextKeys = {
+    deployment_id: "expectedDeploymentId",
+    review_id: "expectedReviewId",
+    descriptor_hash: "expectedDescriptorHash",
+    issuer_key_id: "expectedIssuerKeyId",
+    response_hash: "expectedResponseHash",
+  };
   for (const key of Object.keys(receipt)) {
     const changed = {
       ...receipt,
@@ -1292,14 +1284,26 @@ test("receipt exact schema, canonical encodings, timestamps and all signed field
             ? "2"
             : b64(bytes(fromBase64url(receipt[key]).length, 99)),
     };
-    await assert.rejects(
-      c.verifyReceiptSignature({ receipt: changed, trust }),
-      CryptoError,
-    );
+    // Match valid mutated context fields so rejection still reaches verification
+    // of the original signature, rather than only a context mismatch.
+    const changedArgs = { ...args, receipt: changed };
+    if (contextKeys[key])
+      changedArgs[contextKeys[key]] = fromBase64url(changed[key]);
+    if (key === "deployment_id")
+      changedArgs.trust = { ...trust, deployment_id: changed.deployment_id };
+    await assert.rejects(c.verifyReceipt(changedArgs), {
+      name: "CryptoError",
+      code:
+        key === "v"
+          ? "INVALID_RECEIPT"
+          : key === "receipt_key_id"
+            ? "RECEIPT_KEY_MISMATCH"
+            : "INVALID_RECEIPT_SIGNATURE",
+    });
     const missing = { ...receipt };
     delete missing[key];
     await assert.rejects(
-      c.verifyReceiptSignature({ receipt: missing, trust }),
+      c.verifyReceipt({ ...args, receipt: missing }),
       CryptoError,
     );
   }
@@ -1312,7 +1316,7 @@ test("receipt exact schema, canonical encodings, timestamps and all signed field
     "1.0",
   ]) {
     await assert.rejects(
-      c.verifyReceiptSignature({ receipt: { ...receipt, accepted_at }, trust }),
+      c.verifyReceipt({ ...args, receipt: { ...receipt, accepted_at } }),
       CryptoError,
     );
   }
@@ -1323,12 +1327,13 @@ test("receipt exact schema, canonical encodings, timestamps and all signed field
     { deployment_id: receipt.deployment_id + "=" },
   ]) {
     await assert.rejects(
-      c.verifyReceiptSignature({ receipt: { ...receipt, ...change }, trust }),
+      c.verifyReceipt({ ...args, receipt: { ...receipt, ...change } }),
       CryptoError,
     );
   }
   assert.deepEqual(
-    await c.verifyReceiptSignature({
+    await c.verifyReceipt({
+      ...args,
       receipt: signedReceipt({ accepted_at: "18446744073709551615" }),
       trust,
     }),
@@ -1347,7 +1352,7 @@ test("historical trusted receipt keys work; malformed or untrusted key sets fail
   const historicalTrust = { ...trust, receipt_keys: [...receiptKeys, entry] };
   await c.verifyReceipt(receiptArgs(receipt, historicalTrust));
   await assert.rejects(
-    c.verifyReceiptSignature({ receipt, trust }),
+    c.verifyReceipt(receiptArgs(receipt, trust)),
     CryptoError,
   );
   for (const bad of [
@@ -1364,7 +1369,7 @@ test("historical trusted receipt keys work; malformed or untrusted key sets fail
     { ...trust, deployment_id: b64(bytes(32, 77)) },
   ])
     await assert.rejects(
-      c.verifyReceiptSignature({ receipt: signedReceipt(), trust: bad }),
+      c.verifyReceipt({ ...receiptArgs(), trust: bad }),
       CryptoError,
     );
 });
@@ -1485,7 +1490,7 @@ test("shared deterministic receipt-v2 vector matches response and receipt transc
     vector.signature_hex,
   );
   assert.deepEqual(
-    await portable.verifyReceipt(receiptArgs(receipt, vector.trust)),
+    await c.verifyReceipt(receiptArgs(receipt, vector.trust)),
     receipt,
   );
 });

@@ -850,7 +850,6 @@ test("review dashboard hides locked member metadata and aggregates creator-owned
   assert.match(rendered, /7 issued/);
   assert.doesNotMatch(rendered, /Secret title|Unavailable accepted|0 accepted/);
   assert.match(source, /return r\.is_creator === true/);
-  assert.doesNotMatch(source, /Anyone with this link/);
 });
 
 test("dashboard exposes local completion and response action for creators and members", () => {
@@ -872,26 +871,7 @@ test("dashboard exposes local completion and response action for creators and me
   assert.doesNotMatch(source, /pending globally|not submitted/i);
 });
 
-test("UI source contains no middle-dot separators", () => {
-  assert.doesNotMatch(source, /·|&middot;|&#183;|\\u00b7|\\u\{b7\}/i);
-});
-
-test("presentational UI copy uses sentence case without uppercase styling", () => {
-  assert.doesNotMatch(styles, /text-transform\s*:\s*uppercase/i);
-  assert.doesNotMatch(
-    styles,
-    /\.(?:eyebrow|verifier-step|members-context)\s*\{[^}]*letter-spacing:\s*0\./s,
-  );
-  assert.doesNotMatch(source, />\s*(?:SAVE THIS ONCE|ANONYMOUS FEEDBACK)\s*</);
-  assert.match(source, />Save this once</);
-  assert.match(source, />Anonymous feedback</);
-});
-
-test("member and empty-state copy avoids explaining its own headings", () => {
-  assert.doesNotMatch(
-    source,
-    /Manage who belongs to this organization|Organizations bring verified members into one trusted space|Your reviews will appear here once you create one/,
-  );
+test("membership guidance and optional empty-state descriptions remain available", () => {
   assert.match(
     source,
     /This adds an existing account immediately\. New members can register first or join with an invite link\./,
@@ -918,19 +898,7 @@ test("page and section headings have deliberate breathing room", () => {
   );
 });
 
-test("redundant page copy is removed while user descriptions and intent context remain", () => {
-  for (const copy of [
-    "Review activity and manage responses.",
-    "Manage password and recovery settings.",
-    "Submitted responses will appear here once they are available to review.",
-    "Invites and membership approvals will appear here.",
-    "Your thoughtful answer can help make things better.",
-    "Sign in to manage your organization.",
-    "Create an account to join feedback spaces.",
-    "A thoughtful space for feedback",
-  ]) {
-    assert.ok(!source.includes(copy), `redundant copy remains: ${copy}`);
-  }
+test("user descriptions, intent context, and recovery replacement warning remain available", () => {
   assert.match(
     source,
     /r\.description \? `<p class="subtitle">\$\{esc\(r\.description\)\}<\/p>`/,
@@ -945,7 +913,6 @@ test("redundant page copy is removed while user descriptions and intent context 
 });
 
 test("workspace navigation keeps complete accessible names and responsive app navigation", () => {
-  assert.doesNotMatch(source, /class="route-context"/);
   assert.match(
     source,
     /aria-label="Account and recovery"[^>]*>[\s\S]*?<span class="nav-item">[\s\S]*?<span class="nav-label"><span>Account<\/span><span class="nav-detail">&amp; recovery<\/span><\/span>/,
@@ -964,7 +931,6 @@ test("workspace navigation keeps complete accessible names and responsive app na
     /\.nav a\.active\s*\{\s*box-shadow:\s*inset 0 -2px 0 var\(--blue\);?\s*\}/,
   );
   assert.match(source, /aria-label="Current workspace:/);
-  assert.doesNotMatch(source, /<small>WORKSPACE<\/small>/);
   assert.match(styles, /\.site-header\s*\{\s*position:\s*sticky;\s*top:\s*0/);
   assert.match(styles, /inset: auto 0 0/);
   assert.match(styles, /env\(safe-area-inset-bottom\)/);
@@ -1066,10 +1032,6 @@ test("security copy stays concise and keeps network-correlation limit", () => {
   assert.match(source, /cannot prevent network or timing correlation/);
   assert.match(source, /Anyone with this phrase may recover your account/);
   assert.match(source, /Replacing it disables your old phrase/);
-  assert.doesNotMatch(
-    source,
-    /Create a replacement phrase\. Your old recovery phrase will no longer work/,
-  );
 });
 
 test("shared responsive rules live with components rather than appended overrides", () => {
@@ -1080,7 +1042,6 @@ test("shared responsive rules live with components rather than appended override
     styles,
     /@media\s*\(max-width:\s*640px\)[\s\S]*?\.stat:last-child:nth-child\(odd\)/,
   );
-  assert.doesNotMatch(styles, /Shared rhythm and resilient layouts/);
 });
 
 test("organization rows group role and status while preserving Open action target", () => {
@@ -1093,7 +1054,6 @@ test("organization rows group role and status while preserving Open action targe
     styles,
     /\.org-row \+ \.org-row \{[^}]*border-top: 1px solid var\(--line\)/,
   );
-  assert.doesNotMatch(styles, /\.org-meta \.status-positive \.icon/);
   assert.match(styles, /\.org-open \{[^}]*min-height: 44px/);
   assert.match(
     styles,

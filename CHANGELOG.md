@@ -30,6 +30,10 @@
 
 ### Changed
 
+- Share encoded-payload inspection between browser E2E and publication benchmarks,
+  including base64url-encoded plaintext in leakage checks.
+- Keep receipt-signature verification internal to context-bound receipt validation;
+  remove standalone-only tests and historical copy/layout absence assertions.
 - Group container build and Caddy configuration files under `docker/`, keeping
   the deployment Compose file at the repository root.
 - Use one Compose file and Caddyfile for local and public deployments, with
