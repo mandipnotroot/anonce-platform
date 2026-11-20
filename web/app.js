@@ -698,13 +698,35 @@ async function reviewKeys(
 function validateContent(content) {
   return C.validateReviewContent(content);
 }
-async function memberContentKey(r, p, getVault) {
+async function refreshMemberships() {
+  const s = active(),
+    expectedGeneration = generation;
+  const session = await request("/api/member/me");
+  checkGeneration(expectedGeneration, s);
+  if (
+    session.account_id !== s.accountId ||
+    session.credential_epoch !== s.session.credential_epoch ||
+    !Array.isArray(session.memberships)
+  )
+    throw keyUnavailable();
+  s.session.memberships = session.memberships;
+  return session.memberships;
+}
+async function memberContentKey(
+  r,
+  p,
+  getVault,
+  getMemberships = refreshMemberships,
+) {
   if (r.is_creator === true)
     return (await reviewKeys(r.review_id || r.id, getVault)).contentKey;
   const s = active();
   if (!r.content_key_envelope || !s.encryptionPrivateKey)
     throw keyUnavailable();
-  const membership = s.session.memberships?.find((m) => m.org_id === r.org_id);
+  const expectedGeneration = generation;
+  const memberships = await getMemberships();
+  checkGeneration(expectedGeneration, s);
+  const membership = memberships.find((m) => m.org_id === r.org_id);
   const membershipId = membership?.membership_id || membership?.id;
   if (!membershipId || r.content_key_envelope.membership_id !== membershipId)
     throw keyUnavailable();
@@ -757,7 +779,7 @@ async function completedHere(reviewId) {
   }
   return false;
 }
-async function openedReview(r, contentKey, getVault) {
+async function openedReview(r, contentKey, getVault, getMemberships) {
   const s = active();
   const expectedGeneration = generation;
   const reviewId = r.review_id || r.id;
@@ -766,7 +788,7 @@ async function openedReview(r, contentKey, getVault) {
     if ((r.state || r.status) !== "draft") {
       const p = await publicDescriptor(reviewId);
       checkGeneration(expectedGeneration, s);
-      contentKey ||= await memberContentKey(r, p, getVault);
+      contentKey ||= await memberContentKey(r, p, getVault, getMemberships);
       view = reviewView(
         { ...r, descriptor: p.descriptor },
         await C.openDescriptorContent({ descriptor: p.descriptor, contentKey }),
@@ -833,8 +855,12 @@ export const listReviews = async ({ orgId, after }) => {
   checkGeneration(expectedGeneration, s);
   let vaultRequest;
   const getVault = () => (vaultRequest ||= request("/api/member/vault"));
+  let membershipsRequest;
+  const getMemberships = () => (membershipsRequest ||= refreshMemberships());
   const items = await Promise.all(
-    (r.items || []).map((r) => openedReview(r, undefined, getVault)),
+    (r.items || []).map((r) =>
+      openedReview(r, undefined, getVault, getMemberships),
+    ),
   );
   checkGeneration(expectedGeneration, s);
   return {

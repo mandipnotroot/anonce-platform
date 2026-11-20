@@ -65,8 +65,8 @@ try {
   await page.goto(origin + "/#/register");
   const email = `e2e-${Date.now()}-${Math.random().toString(16).slice(2)}@example.net`;
   const password = crypto.randomUUID() + crypto.randomUUID();
-  await page.getByLabel("Email address", { exact: true }).fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password").fill(password);
   await page
     .getByRole("button", { name: "Create account", exact: true })
     .click();
@@ -373,7 +373,15 @@ try {
         r.contentState !== "open" ||
         r.completedOnThisBrowser !== false
       )
-        throw Error("Approved member did not unlock published content");
+        throw Error(
+          "Approved member did not unlock published content: " +
+            JSON.stringify({
+              found: Boolean(r),
+              isCreator: r?.is_creator,
+              contentState: r?.contentState,
+              completedOnThisBrowser: r?.completedOnThisBrowser,
+            }),
+        );
       let rejected = false;
       try {
         await a.listResponses({ reviewId });
@@ -389,10 +397,8 @@ try {
     await (await import("/app.js")).logout();
   });
   await respondent.goto(invitation);
-  await respondent
-    .getByLabel("Email address", { exact: true })
-    .fill(respondentEmail);
-  await respondent.getByLabel("Password", { exact: true }).fill(password);
+  await respondent.getByLabel("Email address").fill(respondentEmail);
+  await respondent.getByLabel("Password").fill(password);
   await respondent
     .getByRole("button", { name: "Sign in", exact: true })
     .click();

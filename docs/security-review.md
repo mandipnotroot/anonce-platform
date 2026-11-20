@@ -34,6 +34,11 @@
 - Requests and transactions dispatched before invalidation cannot be undone.
   Guards reject stale continuations; they do not erase another tab's memory,
   copied data, or exported files.
+- Follow-up live testing exposed stale browser membership data after joining an
+  organization. Published-content opening now refreshes authoritative memberships
+  and validates the account, credential epoch, and originating session before
+  using the caller's envelope. This does not deliver historical keys to members
+  approved after publication.
 - No concrete backend authorization bypass, token replay/quota bypass, SQL
   injection, remote malformed-input crash, or cryptographic forgery was established
   in the reviewed paths. This is not a claim that none exists.
@@ -73,9 +78,12 @@
 - No live HTTPS multi-account browser penetration test, independent cryptographic
   audit, backup/restore or key-rotation exercise, or comprehensive Git-history
   secret scan is established by this review.
-- Live browser authentication/publication/submission/export journeys remain
-  unverified. HTTPS readiness, mocked UI checks, and module tests do not satisfy
-  that release gate.
+- Follow-up live HTTPS browser checks cover authentication, publication,
+  member-content opening, submission/retry, creator decryption/export, reload,
+  and cross-device recovery in a disposable local deployment. This bounded
+  integration coverage is not a penetration test or production validation.
+- The live harness accepts required-field decorations in authentication labels;
+  exact label matching previously prevented registration from being exercised.
 - Shared per-process API limits do not provide per-client fairness or
   denial-of-service protection.
 - Large trusted-operator receipt-key configurations remain a startup-cost

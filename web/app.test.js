@@ -2287,7 +2287,7 @@ test("vault keys verify derived identity binding and reject registered encryptio
   );
   assert.equal(verified, 1);
 });
-test("member envelope opens with own membership and local completion verifies without network or uploads", async () => {
+test("member envelope refreshes own membership and local completion verifies without uploads", async () => {
   let opens = 0,
     receipts = 0;
   const descriptor = {
@@ -2309,6 +2309,13 @@ test("member envelope opens with own membership and local completion verifies wi
     },
   };
   const context = await service({
+    request: async (path) => {
+      assert.equal(path, "/api/member/me");
+      return {
+        account_id: "YQ",
+        memberships: [{ org_id: "org", id: "bQ" }],
+      };
+    },
     allEncrypted: async () => [record],
     C: {
       openReviewContentKey: async (args) => {
@@ -2335,7 +2342,7 @@ test("member envelope opens with own membership and local completion verifies wi
     accountId: "YQ",
     masterKey: new Uint8Array(32),
     encryptionPrivateKey: new Uint8Array(32),
-    session: { memberships: [{ org_id: "org", id: "bQ" }] },
+    session: { memberships: [] },
   });
   const review = {
     org_id: "org",
@@ -2361,6 +2368,128 @@ test("member envelope opens with own membership and local completion verifies wi
   assert.equal(await context.service.completedHere("Yg"), true);
   assert.equal(receipts, 1);
 });
+
+for (const operation of ["listReviews", "getReview"]) {
+  test(`${operation} refreshes stale membership once and fails closed on invalid refresh`, async () => {
+    let mode = "valid",
+      reads = 0,
+      opens = 0;
+    const review = {
+      id: b64(16),
+      org_id: "org",
+      state: "published",
+      content_key_envelope: { membership_id: "bQ" },
+    };
+    const context = await service({
+      request: async (path) => {
+        if (path === "/api/member/me") {
+          reads++;
+          if (mode === "error") throw Error("unavailable");
+          return {
+            account_id: mode === "account" ? "Yg" : "YQ",
+            credential_epoch: mode === "epoch" ? 2 : 1,
+            memberships:
+              mode === "missing"
+                ? undefined
+                : mode === "removed"
+                  ? []
+                  : [
+                      {
+                        org_id: "org",
+                        membership_id: mode === "mismatch" ? "bg" : "bQ",
+                      },
+                    ],
+          };
+        }
+        if (path.startsWith("/api/public/"))
+          return { descriptor: "e30", descriptor_signature: "YQ" };
+        return operation === "listReviews"
+          ? { items: [review, review], next: null }
+          : review;
+      },
+      C: {
+        verifyDescriptor: async () => ({}),
+        openReviewContentKey: async () => {
+          opens++;
+          return new Uint8Array(32);
+        },
+        openDescriptorContent: async () => ({ title: "Opened", questions: [] }),
+      },
+    });
+    context.configureLifecycle();
+    context.setState({
+      accountId: "YQ",
+      encryptionPrivateKey: new Uint8Array(32),
+      session: { credential_epoch: 1, memberships: [] },
+    });
+    for (mode of [
+      "valid",
+      "removed",
+      "mismatch",
+      "missing",
+      "account",
+      "epoch",
+      "error",
+      "valid",
+    ]) {
+      const before = opens,
+        beforeReads = reads;
+      const result = await context.service[operation]({
+        orgId: "org",
+        reviewId: review.id,
+      });
+      const items = operation === "listReviews" ? result.items : [result];
+      assert.equal(reads - beforeReads, 1);
+      assert.equal(opens - before, mode === "valid" ? items.length : 0);
+      for (const item of items)
+        assert.equal(item.contentState, mode === "valid" ? "open" : "locked");
+    }
+  });
+}
+
+for (const replaceOnly of [false, true]) {
+  test(`membership refresh cannot update replaced session (${replaceOnly ? "replacement" : "logout"})`, async () => {
+    const entered = deferred(),
+      resume = deferred();
+    let opens = 0;
+    const context = await service({
+      request: async (path) => {
+        if (path === "/api/member/session") return {};
+        assert.equal(path, "/api/member/me");
+        entered.resolve();
+        return resume.promise;
+      },
+      C: {
+        openReviewContentKey: async () => {
+          opens++;
+        },
+      },
+    });
+    const original = {
+      accountId: "YQ",
+      encryptionPrivateKey: new Uint8Array(32),
+      session: { memberships: [] },
+    };
+    context.setState(original);
+    const work = context.service.memberContentKey(
+      {
+        org_id: "org",
+        content_key_envelope: { membership_id: "bQ" },
+      },
+      {},
+    );
+    await entered.promise;
+    if (replaceOnly) context.setState({ accountId: "Yg" });
+    else await context.service.logout();
+    resume.resolve({
+      account_id: "YQ",
+      memberships: [{ org_id: "org", id: "bQ" }],
+    });
+    await assert.rejects(work, { code: "SESSION_CHANGED" });
+    assert.equal(original.session.memberships.length, 0);
+    assert.equal(opens, 0);
+  });
+}
 
 test("registration sends independent encryption key binding and versioned membership vault", async () => {
   const membership = {

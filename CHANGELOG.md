@@ -57,6 +57,9 @@
 
 ### Fixed
 
+- Refresh member identity data before opening published review content, so members
+  who join during an unlocked session can use their own publication envelopes.
+- Allow live-browser sign-in and registration checks to match required-field labels.
 - Ignore stale session and workspace requests after logout or organization changes.
 - Enforce review creation roles under the organization lock, including retries
   after demotion.
