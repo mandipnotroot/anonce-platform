@@ -15,6 +15,9 @@
 ## Service ownership
 
 - Docker Compose v2 is the supported container deployment entry point.
+- Build and proxy configuration lives in `docker/`: `Dockerfile`, `Caddyfile`,
+  and `Caddyfile.local`. Compose files and `.dockerignore` stay at the repository
+  root; image builds use that root as their context.
 - PostgreSQL and Caddy service code is maintained upstream, not by this project.
   Do not fork or patch that code unless a documented requirement makes it necessary.
 - This project maintains the application, Compose configuration, database role

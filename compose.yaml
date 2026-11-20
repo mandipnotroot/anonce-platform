@@ -39,7 +39,9 @@ services:
     logging:
       driver: none
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     environment:
       DATABASE_URL: ${DATABASE_URL:?set member/migration role URL, never administrator}
       ANON_DATABASE_URL: ${ANON_DATABASE_URL:?set distinct restricted anonymous role URL}
@@ -79,13 +81,14 @@ services:
   caddy:
     build:
       context: .
+      dockerfile: docker/Dockerfile
       target: proxy
     user: "1000:1000"
     environment:
       ANONCE_DOMAIN: ${ANONCE_DOMAIN:?set public domain}
     ports: ["80:8080", "443:8443", "443:8443/udp"]
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks: [edge]

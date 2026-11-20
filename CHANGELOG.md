@@ -30,6 +30,8 @@
 
 ### Changed
 
+- Group container build and Caddy configuration files under `docker/`, keeping
+  Compose files at the repository root.
 - Remove unused certificate-formatting and nullable-comparison helpers.
 - Clarify that shared API rate-limit pools do not provide per-client fairness
   or denial-of-service protection.

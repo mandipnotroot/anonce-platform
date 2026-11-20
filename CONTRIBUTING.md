@@ -38,15 +38,15 @@ when reviewing updates.
 - The repository Prettier configuration is authoritative for supported files.
 - Prettier is development-only; it adds no runtime browser or server dependencies.
 
-| Files                                  | Formatter and policy                                                                                                   |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Go (`.go`)                             | `gofmt`, through `make fmt` and `make fmt-check`.                                                                      |
-| JavaScript (`.js`, `.mjs`), HTML, CSS  | Local Prettier, with explicit file paths.                                                                              |
-| JSON, YAML (`.yaml`, `.yml`), Markdown | Local Prettier, with explicit file paths.                                                                              |
-| PostgreSQL (`.sql`)                    | No automated formatter configured. Preserve surrounding SQL style and transactional schema initialization boundaries.  |
-| Shell (`.sh`)                          | No automated formatter configured. Preserve surrounding shell style; validate syntax with `bash -n path/to/script.sh`. |
-| `Caddyfile`, `Caddyfile.local`         | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing these files.                          |
-| `Dockerfile`, `Makefile`, ignore files | Preserve surrounding style; keep required Make recipe tabs. No automated formatter configured.                         |
+| Files                                         | Formatter and policy                                                                                                   |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Go (`.go`)                                    | `gofmt`, through `make fmt` and `make fmt-check`.                                                                      |
+| JavaScript (`.js`, `.mjs`), HTML, CSS         | Local Prettier, with explicit file paths.                                                                              |
+| JSON, YAML (`.yaml`, `.yml`), Markdown        | Local Prettier, with explicit file paths.                                                                              |
+| PostgreSQL (`.sql`)                           | No automated formatter configured. Preserve surrounding SQL style and transactional schema initialization boundaries.  |
+| Shell (`.sh`)                                 | No automated formatter configured. Preserve surrounding shell style; validate syntax with `bash -n path/to/script.sh`. |
+| `docker/Caddyfile`, `docker/Caddyfile.local`  | Use `caddy fmt` from the project's pinned Caddy image/tool version when changing these files.                          |
+| `docker/Dockerfile`, `Makefile`, ignore files | Preserve surrounding style; keep required Make recipe tabs. No automated formatter configured.                         |
 
 Format only the files you change. For example:
 

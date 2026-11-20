@@ -23,7 +23,7 @@ updates:
       prefix: chore
       include: scope
   - package-ecosystem: docker
-    directory: /
+    directory: /docker
     schedule:
       interval: weekly
     commit-message:

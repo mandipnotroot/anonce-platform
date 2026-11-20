@@ -7,4 +7,4 @@ services:
       - "0.0.0.0:443:8443"
       - "0.0.0.0:443:8443/udp"
     volumes:
-      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ./docker/Caddyfile.local:/etc/caddy/Caddyfile:ro
