@@ -414,7 +414,7 @@ async function load() {
     return;
   }
   if (route[0] === "respond") {
-    renderRespond(route[1]);
+    renderRespond(route[1], isCurrentLoad);
     return;
   }
   let organizationError = "";
@@ -993,7 +993,7 @@ function bindQuestionControls(limits) {
     }
   });
 }
-async function renderReview(id, tab, isCurrent = () => true) {
+async function renderReview(id, tab, isCurrent) {
   if (id === "new") {
     if (session?.scope !== "full" || !canCreateReviews(currentOrg)) {
       go("/");
@@ -1088,7 +1088,6 @@ async function renderReview(id, tab, isCurrent = () => true) {
   if (!canManage && !canReviewResponses) {
     if (review.status === "published" || review.status === "open") {
       go(`/respond/${encodeURIComponent(id)}`);
-      renderRespond(id);
     } else go("/");
     return;
   }
@@ -1111,7 +1110,7 @@ async function renderReview(id, tab, isCurrent = () => true) {
   if (responseError) toast(responseError);
   document
     .querySelector("#retry-responses")
-    ?.addEventListener("click", () => renderReview(id, "results"));
+    ?.addEventListener("click", () => renderReview(id, "results", isCurrent));
   const loadMoreResponses = async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
@@ -1121,17 +1120,19 @@ async function renderReview(id, tab, isCurrent = () => true) {
         reviewId: id,
         after: responseResult.next,
       });
+      if (!isCurrent()) return;
       responseResult = {
         items: [...responseResult.items, ...page.items],
         next: page.next,
       };
       const panel = document.querySelector("#response-results");
       panel.innerHTML = renderResponseResults(responseResult, "", review);
-      bindResponseExports(id);
+      bindResponseExports(id, isCurrent);
       panel
         .querySelector("#load-more-responses")
         ?.addEventListener("click", loadMoreResponses);
     } catch (e) {
+      if (!isCurrent()) return;
       toast(say(e));
       button.disabled = false;
       setButtonText(button, "Load more responses");
@@ -1200,17 +1201,18 @@ async function renderReview(id, tab, isCurrent = () => true) {
     document.querySelector("#preview-area").innerHTML =
       `<div class="section-row"><h2 class="section-title">Preview</h2></div><div class="card response-card"><h2>${esc(data.get("title"))}</h2><p>${esc(data.get("description"))}</p>${qs.map((q) => `<div class="question-preview"><strong>${esc(q.text || "Question")}</strong><div>${q.type === "text" ? '<textarea aria-label="Answer preview" disabled></textarea>' : q.options.map((o) => `<label class="answer-option"><input type="${q.type === "multiple" ? "checkbox" : "radio"}" disabled> ${esc(o)}</label>`).join("")}</div></div>`).join("")}</div>`;
   });
-  bindResponseExports(id);
+  bindResponseExports(id, isCurrent);
 }
-function bindResponseExports(id) {
+function bindResponseExports(id, isCurrent) {
   for (const [fmt, idbtn] of [
     ["json", "export-json"],
     ["csv", "export-csv"],
   ])
     document.querySelector("#" + idbtn)?.addEventListener("click", async () => {
       try {
-        const f = await api.exportResponses({ reviewId: id, format: fmt }),
-          url = URL.createObjectURL(f.blob),
+        const f = await api.exportResponses({ reviewId: id, format: fmt });
+        if (!isCurrent()) return;
+        const url = URL.createObjectURL(f.blob),
           a = document.createElement("a");
         a.href = url;
         a.download = f.filename;
@@ -1218,7 +1220,7 @@ function bindResponseExports(id) {
         URL.revokeObjectURL(url);
         toast(`${fmt.toUpperCase()} export download started.`, "success");
       } catch (e) {
-        toast(say(e));
+        if (isCurrent()) toast(say(e));
       }
     });
 }
@@ -1270,11 +1272,12 @@ function dt(v) {
         .toISOString()
         .slice(0, 16);
 }
-async function renderRespond(id) {
+async function renderRespond(id, isCurrent) {
   let r;
   try {
     r = await api.getReview({ reviewId: id });
   } catch (e) {
+    if (!isCurrent()) return;
     frame(
       `${head("This review is unavailable", "We couldn’t load this review. Try again shortly.")}`,
       "Respond",
@@ -1282,6 +1285,7 @@ async function renderRespond(id) {
     toast(say(e));
     return;
   }
+  if (!isCurrent()) return;
   if (r.contentState === "locked" || !Array.isArray(r.questions)) {
     frame(
       emptyCard(
@@ -1331,11 +1335,19 @@ async function renderRespond(id) {
       index: i,
       value: q.type === "multiple" ? fd.getAll(`q-${i}`) : fd.get(`q-${i}`),
     }));
-    let p = await api.prepareResponse({
-      reviewId: id,
-      answers,
-    });
-    let result = await api.submitResponse({ pendingId: p.pendingId });
+    let p, result;
+    try {
+      p = await api.prepareResponse({
+        reviewId: id,
+        answers,
+      });
+      if (!isCurrent()) return;
+      result = await api.submitResponse({ pendingId: p.pendingId });
+      if (!isCurrent()) return;
+    } catch (e) {
+      if (isCurrent()) toast(say(e));
+      return;
+    }
     const box = document.querySelector("#receipt");
     if (result.status === "pending") {
       const pendingId = result.pendingId || p.pendingId;
@@ -1348,8 +1360,10 @@ async function renderRespond(id) {
         btn.disabled = true;
         try {
           let x = await api.lookupReceipt({ pendingId });
+          if (!isCurrent()) return;
           if (x.status !== "accepted")
             x = await api.submitResponse({ pendingId });
+          if (!isCurrent()) return;
           if (x.status === "accepted") {
             box.innerHTML = receiptHTML(x.receipt);
             renderButtonIcons(box);
@@ -1357,9 +1371,9 @@ async function renderRespond(id) {
             state.textContent =
               "Still processing. You can check again shortly.";
         } catch (e) {
-          toast(say(e));
+          if (isCurrent()) toast(say(e));
         } finally {
-          if (document.querySelector("#retry"))
+          if (isCurrent() && document.querySelector("#retry"))
             document.querySelector("#retry").disabled = false;
         }
       };

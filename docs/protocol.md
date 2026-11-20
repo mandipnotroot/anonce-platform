@@ -77,7 +77,12 @@
 - Registration binds the independent account X25519 public key with the membership Ed25519 key.
 - See [member key delivery](member-key-delivery.md) for the binding transcript, unlock checks, and encrypted device-cache state.
 - This trusted-origin capability is not password-gated defense against malicious served code, XSS, or profile backups.
-- Logout deletes capability/cache and guards pending writes, but cannot revoke copies.
+- Logout deletes capability/cache and invalidates in-flight work in the current tab.
+- Registration, review mutations, response persistence, and decrypted review/result
+  returns are bound to their originating session; sensitive page callbacks also
+  check the current route.
+- These guards cannot undo requests already dispatched, revoke copied content, or
+  erase another tab's memory. Close other tabs on shared devices.
 - Password/phrase changes preserve V/data through wrapping; they do not repair old snapshot compromise.
 
 ## Reviews and blind authorizations

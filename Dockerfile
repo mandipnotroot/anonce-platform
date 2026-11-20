@@ -7,7 +7,7 @@ COPY web ./web
 COPY scripts ./scripts
 RUN npm run build
 
-FROM golang:1.27.3-alpine3.23 AS server
+FROM golang:1.27.4-alpine3.23 AS server
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/anonce ./cmd/anonce
@@ -17,7 +17,8 @@ RUN chown -R 1000:1000 /data /config && setcap -r /usr/bin/caddy
 USER 1000:1000
 
 FROM alpine:3.24
-RUN apk add --no-cache ca-certificates tzdata
+# Refresh only the app image's affected OpenSSL libraries from stable Alpine.
+RUN apk add --no-cache --upgrade ca-certificates tzdata libcrypto3=3.5.9-r1 libssl3=3.5.9-r1
 WORKDIR /app
 COPY --from=server /out/anonce /app/anonce
 COPY --from=browser /src/web /app/web

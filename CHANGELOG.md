@@ -80,6 +80,15 @@
 
 ### Security
 
+- Build and test with Go 1.27.4, including the standard-library fix for
+  CVE-2026-97054.
+- Use the upstream PostgreSQL 18.7 Alpine image with refreshed bundled libraries;
+  unresolved upstream component advisories remain documented in the security review.
+- Refresh the application image's OpenSSL libraries to Alpine's fixed
+  `3.5.9-r1` packages without modifying third-party service images.
+- Bind in-flight registration, review mutations, encrypted response persistence,
+  and decrypted review/result operations to their originating browser session;
+  discard stale renders, exports, and submission feedback after logout or navigation.
 - Separate authenticated-member request capacity from public and anonymous traffic
   without adding identifying tracking to anonymous endpoints.
 - Reject unsafe server master-key files and bound key-material reads.

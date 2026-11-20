@@ -5,6 +5,7 @@ import * as app from "./app.js";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { createHash } from "node:crypto";
+import { saveSealed as persistSealed } from "./storage.js";
 const b64 = (n) => Buffer.alloc(n).toString("base64url");
 const pendingFixture = () => ({
   pendingId: b64(16),
@@ -80,7 +81,7 @@ async function service(overrides = {}) {
   vm.runInContext(
     source +
       `;state={accountId:'YQ',masterKey:new Uint8Array(32)};
-    globalThis.service={initialize,getLimits,sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication};
+    globalThis.service={initialize,getLimits,sealIssuancePending,finishPending,local,listResponses,exportResponses,submitResponse,lookupReceipt,reviewKeys,listReviews,contentRecipients,memberContentKey,completedHere,validateMemberKeys,register,sendPublication,logout,prepareResponse,getReview,seal};
     globalThis.setState=value=>{state=value;};
     globalThis.setLogin=value=>{login=value;};
     globalThis.setCredentials=value=>{credentials=value;};
@@ -101,6 +102,354 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+async function switchAccount(context) {
+  await context.service.logout();
+  context.setState({
+    accountId: "Yg",
+    masterKey: new Uint8Array(32).fill(2),
+    membershipSeed: new Uint8Array(32).fill(2),
+  });
+}
+
+for (const [operation, replaceOnly] of [
+  "createReview",
+  "updateReview",
+  "publishReview",
+].flatMap((operation) => [
+  [operation, false],
+  [operation, true],
+])) {
+  test(`${operation} rejects stale content encryption/signing before mutation or cache write (${replaceOnly ? "owner replacement" : "logout"})`, async () => {
+    const entered = deferred(),
+      resume = deferred();
+    let mutations = 0,
+      caches = 0;
+    const pause = async () => {
+      entered.resolve();
+      return resume.promise;
+    };
+    const context = await service({
+      request: async () => ({ org_id: "YQ", encrypted_content: {} }),
+      C: {
+        generateRecipientKey: async () => ({ privateKey: new Uint8Array(32) }),
+        sealVaultObject: async () => ({}),
+        validateReviewContent: (content) => content,
+        openDraftContent: async () => ({
+          title: "A private title",
+          questions: [],
+        }),
+        sealReviewContent: pause,
+        recipientPublicKey: async () => new Uint8Array(32),
+        signDescriptor: pause,
+      },
+    });
+    context.configureLifecycle();
+    context.setReviewKeys(async () => ({
+      contentKey: new Uint8Array(32),
+      privateKey: new Uint8Array(32),
+    }));
+    context.setSigned(async () => {
+      mutations++;
+      return {};
+    });
+    context.countCache = () => caches++;
+    vm.runInContext(`cacheState=async()=>countCache();`, context);
+    const work = context.lifecycle[operation]({
+      orgId: "YQ",
+      reviewId: b64(16),
+      title: "A private title",
+      expectedRevision: 1,
+      questions: [],
+    });
+    await entered.promise;
+    if (replaceOnly)
+      context.setState({ accountId: "Yg", masterKey: new Uint8Array(32) });
+    else await switchAccount(context);
+    resume.resolve(new Uint8Array(64));
+    await assert.rejects(work, { code: "SESSION_CHANGED" });
+    assert.equal(mutations, 0);
+    assert.equal(caches, 0);
+  });
+}
+
+for (const fails of [false, true]) {
+  test(`publication ${fails ? "error" : "success"} after account switch cannot cache or finalize under B`, async () => {
+    const entered = deferred(),
+      resume = deferred();
+    let mutations = 0,
+      caches = 0;
+    const context = await service({ request: async () => ({}) });
+    context.configureLifecycle();
+    context.setSigned(async () => {
+      mutations++;
+      entered.resolve();
+      return resume.promise;
+    });
+    context.countCache = () => caches++;
+    vm.runInContext(`cacheState=async()=>countCache();`, context);
+    const work = context.service.sendPublication(b64(16), { start: {} });
+    await entered.promise;
+    await switchAccount(context);
+    if (fails)
+      resume.reject(Object.assign(Error("forbidden"), { status: 403 }));
+    else
+      resume.resolve({
+        publication_id: b64(16),
+        recipient_count: 1,
+        expires_at: "9999999999",
+      });
+    await assert.rejects(work, { code: "SESSION_CHANGED" });
+    assert.equal(mutations, 1);
+    assert.equal(caches, 0);
+  });
+}
+
+test("registration canceled during credentials cannot register or start a fresh login", async () => {
+  const entered = deferred(),
+    resume = deferred();
+  let logins = 0,
+    registrations = 0;
+  const context = await service({
+    request: async () => ({}),
+    C: {
+      generateMembershipKey: async () => ({}),
+      generateMemberEncryptionKeyPair: async () => ({}),
+    },
+  });
+  context.configureLifecycle();
+  context.setCredentials(async () => {
+    entered.resolve();
+    return resume.promise;
+  });
+  context.setSigned(async () => registrations++);
+  context.setLogin(async () => logins++);
+  const work = context.service.register({
+    email: "a@example.test",
+    password: "test",
+  });
+  await entered.promise;
+  await switchAccount(context);
+  resume.resolve({});
+  await assert.rejects(work, { code: "SESSION_CHANGED" });
+  assert.equal(logins, 0);
+  assert.equal(registrations, 0);
+});
+
+test("prepareResponse cannot persist A authorization under B after delayed encryption", async () => {
+  const entered = deferred(),
+    resume = deferred();
+  let writes = 0;
+  const context = await service({
+    request: async () => ({}),
+    saveSealed: async () => writes++,
+    C: {
+      openDescriptorContent: async () => ({
+        title: "A private title",
+        questions: [],
+      }),
+      encryptResponse: async () => {
+        entered.resolve();
+        return resume.promise;
+      },
+      prepareAuthorization: async () => ({}),
+    },
+  });
+  vm.runInContext(
+    `publicDescriptor=async()=>({descriptor:{},descriptorBytes:new Uint8Array()});
+    memberContentKey=async()=>new Uint8Array(32);`,
+    context,
+  );
+  const work = context.service.prepareResponse({
+    reviewId: b64(16),
+    answers: [],
+  });
+  await entered.promise;
+  await switchAccount(context);
+  resume.resolve({});
+  await assert.rejects(work, { code: "SESSION_CHANGED" });
+  assert.equal(writes, 0);
+});
+
+for (const phase of ["descriptor", "issuance"]) {
+  test(`finishPending canceled during ${phase} cannot spend B quota or persist A authorization`, async () => {
+    const entered = deferred(),
+      resume = deferred();
+    let writes = 0,
+      issues = 0,
+      finalizations = 0;
+    const context = await service({
+      request: async () => ({}),
+      saveSealed: async () => writes++,
+      C: {
+        verifyDescriptor: async () => {
+          if (phase === "descriptor") {
+            entered.resolve();
+            await resume.promise;
+          }
+          return {};
+        },
+        finalizeAuthorization: async () => {
+          finalizations++;
+          return {};
+        },
+      },
+    });
+    context.setSigned(async () => {
+      issues++;
+      entered.resolve();
+      return resume.promise;
+    });
+    const pending = pendingFixture();
+    pending.issuancePayload = {};
+    const work = context.service.finishPending(pending);
+    await entered.promise;
+    await switchAccount(context);
+    resume.resolve({});
+    await assert.rejects(work, { code: "SESSION_CHANGED" });
+    assert.equal(issues, phase === "issuance" ? 1 : 0);
+    assert.equal(finalizations, 0);
+    assert.equal(writes, 0);
+  });
+}
+
+test("getReview rejects decrypted A content after delayed completion lookup and account switch", async () => {
+  const entered = deferred(),
+    resume = deferred();
+  const context = await service({
+    request: async () => ({ review_id: b64(16), state: "published" }),
+    allEncrypted: async () => {
+      entered.resolve();
+      return resume.promise;
+    },
+    C: {
+      openDescriptorContent: async () => ({
+        title: "Private A",
+        questions: [],
+      }),
+    },
+  });
+  context.configureLifecycle();
+  vm.runInContext(
+    `publicDescriptor=async()=>({descriptor:{}});
+    memberContentKey=async()=>new Uint8Array(32);`,
+    context,
+  );
+  const work = context.service.getReview({ reviewId: b64(16) });
+  await entered.promise;
+  await switchAccount(context);
+  resume.resolve([]);
+  await assert.rejects(work, { code: "SESSION_CHANGED" });
+});
+
+for (const method of ["submitResponse", "lookupReceipt"]) {
+  for (const fails of [false, true]) {
+    test(`${method} rejects stale anonymous ${fails ? "error" : "receipt"} without saving to B`, async () => {
+      const entered = deferred(),
+        resume = deferred();
+      let writes = 0;
+      const context = await service({
+        loadSealed: async () => ({ ...pendingFixture(), submission: {} }),
+        saveSealed: async () => writes++,
+        request: async (path, options) => {
+          if (!path.startsWith("/api/anon/")) return {};
+          assert.equal(options.anonymous, true);
+          entered.resolve();
+          return resume.promise;
+        },
+        C: { verifyDescriptor: async () => ({}) },
+      });
+      const work = context.service[method]({ pendingId: b64(16) });
+      await entered.promise;
+      await switchAccount(context);
+      if (fails)
+        resume.reject(
+          Object.assign(Error("offline"), { code: "NETWORK_ERROR" }),
+        );
+      else resume.resolve({});
+      await assert.rejects(work, { code: "SESSION_CHANGED" });
+      assert.equal(writes, 0);
+    });
+  }
+}
+
+test("logout during local sealing prevents the pending record write", async () => {
+  const entered = deferred(),
+    resume = deferred();
+  let writes = 0;
+  const context = await service({
+    request: async () => ({}),
+    C: {
+      sealVaultObject: async () => {
+        entered.resolve();
+        return resume.promise;
+      },
+    },
+    saveSealed: async ({ sealVaultObject, beforePersist, ...options }) => {
+      await sealVaultObject(options);
+      beforePersist();
+      writes++;
+    },
+  });
+  const work = context.service.seal(b64(16), {});
+  await entered.promise;
+  await switchAccount(context);
+  resume.resolve({});
+  await assert.rejects(work, { code: "SESSION_CHANGED" });
+  assert.equal(writes, 0);
+});
+
+test("storage saveSealed validity guard rejects delayed encryption before opening IndexedDB", async () => {
+  const resume = deferred();
+  let valid = true;
+  const work = persistSealed({
+    accountId: new Uint8Array(16),
+    masterKey: new Uint8Array(32),
+    objectId: new Uint8Array(16),
+    revision: "1",
+    value: {},
+    sealVaultObject: () => resume.promise,
+    beforePersist: () => {
+      if (!valid)
+        throw Object.assign(Error("stale"), { code: "SESSION_CHANGED" });
+    },
+  });
+  valid = false;
+  resume.resolve({ ciphertext: "opaque", nonce: "nonce" });
+  await assert.rejects(work, { code: "SESSION_CHANGED" });
+});
+
+test("results and exports reject A plaintext after delayed response decryption", async () => {
+  for (const exportResult of [false, true]) {
+    const entered = deferred(),
+      resume = deferred();
+    const context = await service({
+      request: async () => ({
+        items: [{ id: "receipt", receipt: {}, enc: "YQ", ciphertext: "YQ" }],
+      }),
+      C: {
+        openDescriptorContent: async () => ({ questions: [] }),
+        decryptResponse: async () => {
+          entered.resolve();
+          return resume.promise;
+        },
+      },
+    });
+    vm.runInContext(
+      `publicDescriptor=async()=>({});
+      reviewKeys=async()=>({contentKey:new Uint8Array(32),privateKey:new Uint8Array(32)});
+      verifyEnvelopeReceipt=async()=>({receipt_id:'receipt'});`,
+      context,
+    );
+    const work = exportResult
+      ? context.service.exportResponses({ reviewId: b64(16), format: "json" })
+      : context.service.listResponses({ reviewId: b64(16) });
+    await entered.promise;
+    await switchAccount(context);
+    resume.resolve({ answers: { secret: "A plaintext" } });
+    await assert.rejects(work, { code: "SESSION_CHANGED" });
+  }
+});
 
 test("initialization forwards deployed limits and app exposes effective crypto limits", async () => {
   const limits = { max_response_bytes: 1024 };
@@ -617,7 +966,7 @@ test("credential reauthentication failure cannot clear newer state", async () =>
   const pending = context.auth.loginAfterCredentialChange({}, 0);
   vm.runInContext(`generation++;state={accountId:'new'};`, context);
   result.reject(Error("old login failed"));
-  assert.equal(await pending, null);
+  await assert.rejects(pending, { code: "SESSION_CHANGED" });
   assert.equal(context.inspect().state.accountId, "new");
 });
 
@@ -1886,10 +2235,9 @@ test("publication clears definitive failures and preserves uncertain start paylo
     sent.push(body);
     throw Object.assign(Error("expired"), { status: 410 });
   });
-  await assert.rejects(
-    context.service.sendPublication("review", payload, true),
-    { status: 410 },
-  );
+  await assert.rejects(context.service.sendPublication("review", payload), {
+    status: 410,
+  });
   assert.deepEqual(sent, [payload.start]);
   assert.equal(state.pendingReviewPublishes.review, undefined);
   state.pendingReviewPublishes.review = payload;
@@ -1897,10 +2245,9 @@ test("publication clears definitive failures and preserves uncertain start paylo
     assert.equal(body, payload.start);
     throw Object.assign(Error("network"), { code: "NETWORK_ERROR" });
   });
-  await assert.rejects(
-    context.service.sendPublication("review", payload, true),
-    { code: "NETWORK_ERROR" },
-  );
+  await assert.rejects(context.service.sendPublication("review", payload), {
+    code: "NETWORK_ERROR",
+  });
   assert.equal(state.pendingReviewPublishes.review, payload);
 });
 test("vault keys verify derived identity binding and reject registered encryption mismatch", async () => {

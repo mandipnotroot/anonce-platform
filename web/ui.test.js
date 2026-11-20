@@ -321,12 +321,394 @@ test("rotation checks unsaved phrase before issuing credential mutation", () => 
 });
 
 test("responses render review content and prepare answers by review ID", () => {
-  assert.match(source, /async function renderRespond\(id\)/);
+  assert.match(source, /async function renderRespond\(id, isCurrent\)/);
   assert.match(source, /contentState === "locked"/);
   assert.match(
     source,
     /api\.prepareResponse\(\{\s*reviewId: id,\s*answers,?\s*\}\)/,
   );
+});
+
+test("late respond review success and failure do not render after navigation, active load renders", async () => {
+  assert.match(source, /renderRespond\(route\[1\], isCurrentLoad\)/);
+  const renderSource = source.slice(
+    source.indexOf("async function renderRespond("),
+    source.indexOf("\nload();"),
+  );
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  async function attempt(outcome, current) {
+    const frames = [],
+      notices = [];
+    const context = {
+      api: { getReview: () => outcome.promise },
+      frame: (...args) => frames.push(args),
+      toast: (message) => notices.push(message),
+      say: String,
+      esc: (value) => String(value ?? ""),
+      head: (...args) => args.join(" "),
+      emptyCard: (...args) => args.join(" "),
+      document: {
+        querySelectorAll: () => [],
+        querySelector: () => ({ addEventListener() {} }),
+      },
+      bind() {},
+      renderButtonIcons() {},
+      isCurrent: current,
+    };
+    vm.runInNewContext(`${renderSource}\nrenderRespond`, context);
+    const rendering = context.renderRespond("review", current);
+    return { rendering, frames, notices };
+  }
+  let active = true;
+  const lateSuccess = deferred(),
+    staleSuccess = await attempt(lateSuccess, () => active);
+  // Change the route after the sensitive fetch begins, before it completes.
+  active = false;
+  lateSuccess.resolve({ title: "Private review", questions: [] });
+  await staleSuccess.rendering;
+  assert.deepEqual(staleSuccess.frames, []);
+
+  active = true;
+  const lateError = deferred(),
+    staleError = await attempt(lateError, () => active);
+  active = false;
+  lateError.reject(new Error("late failure"));
+  await staleError.rendering;
+  assert.deepEqual(staleError.frames, []);
+  assert.deepEqual(staleError.notices, []);
+
+  const fresh = await attempt(
+    { promise: Promise.resolve({ title: "Current", questions: [] }) },
+    () => true,
+  );
+  await fresh.rendering;
+  assert.equal(fresh.frames.length, 1);
+  assert.match(fresh.frames[0][0], /Current/);
+});
+
+test("respond submit and retry completions respect route invalidation", async () => {
+  const renderSource = source.slice(
+    source.indexOf("async function renderRespond("),
+    source.indexOf("\nload();"),
+  );
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  async function setup(api) {
+    let active = true,
+      submit;
+    const notices = [],
+      nodes = new Map();
+    nodes.set("#respond", {
+      addEventListener(_event, callback) {
+        submit = callback;
+      },
+      classList: { add() {} },
+    });
+    nodes.set("#receipt", { innerHTML: "" });
+    nodes.set("#retry", { disabled: false });
+    nodes.set("#pending-state", { textContent: "" });
+    const context = {
+      api: {
+        getReview: async () => ({ title: "Review", questions: [] }),
+        ...api,
+      },
+      frame() {},
+      toast: (message) => notices.push(message),
+      say: String,
+      esc: (value) => String(value ?? ""),
+      head: (...args) => args.join(" "),
+      emptyCard: (...args) => args.join(" "),
+      document: {
+        querySelectorAll: () => [],
+        querySelector: (selector) => nodes.get(selector),
+      },
+      bind(_selector, callback) {
+        submit = async (fd) => callback(fd);
+      },
+      renderButtonIcons() {},
+      receiptHTML: () => "receipt",
+    };
+    vm.runInNewContext(`${renderSource}\nrenderRespond`, context);
+    await context.renderRespond("review", () => active);
+    return {
+      nodes,
+      notices,
+      submit: (fd = { getAll: () => [], get: () => null }) => submit(fd),
+      invalidate() {
+        active = false;
+      },
+    };
+  }
+
+  const preparing = deferred();
+  let submitCalls = 0;
+  const duringPrepare = await setup({
+    prepareResponse: () => preparing.promise,
+    submitResponse: async () => {
+      submitCalls++;
+      return { status: "accepted" };
+    },
+  });
+  const preparingRequest = duringPrepare.submit();
+  duringPrepare.invalidate();
+  preparing.resolve({ pendingId: "pending" });
+  await preparingRequest;
+  assert.equal(submitCalls, 0);
+  assert.equal(duringPrepare.nodes.get("#receipt").innerHTML, "");
+
+  for (const rejected of [false, true]) {
+    const submission = deferred();
+    let started;
+    const submitStarted = new Promise((resolve) => {
+      started = resolve;
+    });
+    const duringSubmit = await setup({
+      prepareResponse: async () => ({ pendingId: "pending" }),
+      submitResponse: () => {
+        started();
+        return submission.promise;
+      },
+    });
+    const request = duringSubmit.submit();
+    await submitStarted;
+    duringSubmit.invalidate();
+    rejected
+      ? submission.reject(new Error("stale submit"))
+      : submission.resolve({ status: "accepted", receipt: "secret" });
+    await request;
+    assert.equal(duringSubmit.nodes.get("#receipt").innerHTML, "");
+    assert.deepEqual(duringSubmit.notices, []);
+  }
+
+  for (const rejected of [false, true]) {
+    const lookup = deferred();
+    const retry = await setup({
+      prepareResponse: async () => ({ pendingId: "pending" }),
+      submitResponse: async () => ({ status: "pending", pendingId: "pending" }),
+      lookupReceipt: () => lookup.promise,
+    });
+    await retry.submit();
+    const retryClick = retry.nodes.get("#retry").onclick;
+    assert.equal(typeof retryClick, "function");
+    const retryRequest = retryClick();
+    retry.invalidate();
+    rejected
+      ? lookup.reject(new Error("stale lookup"))
+      : lookup.resolve({ status: "accepted", receipt: "secret" });
+    await retryRequest;
+    assert.equal(
+      retry.nodes.get("#receipt").innerHTML.includes("receipt"),
+      false,
+    );
+    assert.equal(retry.nodes.get("#retry").disabled, true);
+    assert.deepEqual(retry.notices, []);
+  }
+
+  const current = await setup({
+    prepareResponse: async () => ({ pendingId: "pending" }),
+    submitResponse: async () => ({ status: "accepted", receipt: "valid" }),
+  });
+  await current.submit();
+  assert.equal(current.nodes.get("#receipt").innerHTML, "receipt");
+});
+
+test("response pagination and exports ignore stale success and failure", async () => {
+  assert.doesNotMatch(source, /renderRespond\(id\)/);
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  const paginationSource = source.slice(
+    source.indexOf("const loadMoreResponses = async"),
+    source.indexOf(
+      '\n  document\n    .querySelector("#load-more-responses")',
+      source.indexOf("const loadMoreResponses = async"),
+    ),
+  );
+  async function runPagination(outcome, active) {
+    let content = "",
+      notice = "";
+    const button = { disabled: false },
+      panel = {
+        set innerHTML(value) {
+          content = value;
+        },
+        querySelector() {
+          return null;
+        },
+      };
+    const context = {
+      api: { listResponses: () => outcome.promise },
+      responseResult: { items: [], next: "cursor" },
+      review: {},
+      id: "review",
+      isCurrent: () => active.value,
+      document: { querySelector: () => panel },
+      renderResponseResults: () => "private response results",
+      bindResponseExports() {},
+      setButtonText() {},
+      toast: (message) => {
+        notice = message;
+      },
+      say: String,
+    };
+    const loadMore = vm.runInNewContext(
+      `${paginationSource}\nloadMoreResponses`,
+      context,
+    );
+    const request = loadMore({ currentTarget: button });
+    return {
+      request,
+      button,
+      get content() {
+        return content;
+      },
+      get notice() {
+        return notice;
+      },
+    };
+  }
+  for (const rejected of [false, true]) {
+    const wait = deferred(),
+      active = { value: true };
+    const result = await runPagination(wait, active);
+    active.value = false;
+    rejected
+      ? wait.reject(new Error("stale page"))
+      : wait.resolve({ items: [{ secret: true }], next: null });
+    await result.request;
+    assert.equal(result.content, "");
+    assert.equal(result.notice, "");
+    assert.equal(result.button.disabled, true);
+  }
+  const freshPage = await runPagination(
+    { promise: Promise.resolve({ items: [], next: null }) },
+    { value: true },
+  );
+  await freshPage.request;
+  assert.equal(freshPage.content, "private response results");
+
+  const exportSource = source.slice(
+    source.indexOf("function bindResponseExports("),
+    source.indexOf(
+      "\nfunction renderResponseResults",
+      source.indexOf("function bindResponseExports("),
+    ),
+  );
+  async function runExport(outcome, active) {
+    let click,
+      downloads = 0,
+      notices = 0;
+    const context = {
+      api: { exportResponses: () => outcome.promise },
+      document: {
+        querySelector: () => ({
+          addEventListener(_name, callback) {
+            click = callback;
+          },
+        }),
+        createElement: () => ({
+          click() {
+            downloads++;
+          },
+        }),
+      },
+      URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+      isCurrent: () => active.value,
+      toast: () => {
+        notices++;
+      },
+      say: String,
+    };
+    vm.runInNewContext(`${exportSource}\nbindResponseExports`, context)(
+      "review",
+      context.isCurrent,
+    );
+    const request = click();
+    return {
+      request,
+      get downloads() {
+        return downloads;
+      },
+      get notices() {
+        return notices;
+      },
+    };
+  }
+  for (const rejected of [false, true]) {
+    const wait = deferred(),
+      active = { value: true };
+    const result = await runExport(wait, active);
+    active.value = false;
+    rejected
+      ? wait.reject(new Error("stale export"))
+      : wait.resolve({ blob: {}, filename: "responses.csv" });
+    await result.request;
+    assert.equal(result.downloads, 0);
+    assert.equal(result.notices, 0);
+  }
+  const freshExport = await runExport(
+    { promise: Promise.resolve({ blob: {}, filename: "responses.csv" }) },
+    { value: true },
+  );
+  await freshExport.request;
+  assert.equal(freshExport.downloads, 1);
+  assert.equal(freshExport.notices, 1);
+});
+
+test("response-results retry preserves the originating load guard", async () => {
+  const binding = source.slice(
+    source.indexOf('  document\n    .querySelector("#retry-responses")'),
+    source.indexOf(
+      ";\n",
+      source.indexOf('  document\n    .querySelector("#retry-responses")'),
+    ) + 1,
+  );
+  let click,
+    active = true,
+    resolveFetch,
+    rendered = 0;
+  const pending = new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const context = {
+    document: {
+      querySelector: () => ({
+        addEventListener(_event, callback) {
+          click = callback;
+        },
+      }),
+    },
+    id: "review",
+    isCurrent: () => active,
+    async renderReview(_id, _tab, isCurrent) {
+      await pending;
+      if (isCurrent()) rendered++;
+    },
+  };
+  vm.runInNewContext(binding, context);
+  const retry = click();
+  active = false;
+  resolveFetch();
+  await retry;
+  assert.equal(rendered, 0);
 });
 
 test("response routes reject query parameters and extra path segments before auth or review fetch", () => {
@@ -941,13 +1323,14 @@ test("JSON and CSV exports confirm that browser download started", async () => {
     },
     toast: (message, type = "error") => notices.push({ message, type }),
     say: String,
+    isCurrent: () => true,
   };
   const exportsSource = source.slice(
     source.indexOf("function bindResponseExports("),
     source.indexOf("function renderResponseResults("),
   );
   vm.runInNewContext(
-    `${exportsSource}\nbindResponseExports("review-1");`,
+    `${exportsSource}\nbindResponseExports("review-1", isCurrent);`,
     context,
   );
   await handlers.get("#export-json")();

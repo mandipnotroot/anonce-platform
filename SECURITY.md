@@ -7,6 +7,9 @@ and is not approved for sensitive production data. No independent security audit
 or production-readiness claim is made. See
 [architecture/threat boundaries](docs/architecture.md) and [protocol](docs/protocol.md).
 
+- The [2026-11-20 source review](docs/security-review.md) records remediated browser
+  lifecycle findings, unresolved upstream image risks, and verification limits.
+
 ## Report privately
 
 - Use GitHub's enabled private [Report a vulnerability](https://github.com/mandipnotroot/anonce-platform/security/advisories/new)

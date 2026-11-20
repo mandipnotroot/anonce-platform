@@ -22,8 +22,9 @@ function database() {
   return opening;
 }
 
-async function transact(mode, operation) {
+async function transact(mode, operation, beforePersist) {
   const db = await database();
+  beforePersist?.();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
     const req = operation(tx.objectStore(STORE));
@@ -41,11 +42,15 @@ export const deleteEncrypted = (key) =>
   transact("readwrite", (store) => store.delete(key));
 export const getDeviceRecord = (key) =>
   transact("readonly", (store) => store.get("device:" + key));
-export const putDeviceRecord = (key, value) =>
-  transact("readwrite", (store) => store.put(value, "device:" + key));
+export const putDeviceRecord = (key, value, beforePersist) =>
+  transact(
+    "readwrite",
+    (store) => store.put(value, "device:" + key),
+    beforePersist,
+  );
 export const deleteDeviceRecord = (key) =>
   transact("readwrite", (store) => store.delete("device:" + key));
-export function putEncrypted(key, object) {
+export function putEncrypted(key, object, beforePersist) {
   if (
     !object ||
     typeof object !== "object" ||
@@ -54,7 +59,11 @@ export function putEncrypted(key, object) {
   ) {
     throw new TypeError("Only encrypted vault objects may be persisted.");
   }
-  return transact("readwrite", (store) => store.put(object, key));
+  return transact(
+    "readwrite",
+    (store) => store.put(object, key),
+    beforePersist,
+  );
 }
 
 export async function saveSealed({
@@ -64,6 +73,7 @@ export async function saveSealed({
   revision,
   value,
   sealVaultObject,
+  beforePersist,
 }) {
   const object = await sealVaultObject({
     accountId,
@@ -72,7 +82,9 @@ export async function saveSealed({
     revision,
     plaintext: new TextEncoder().encode(JSON.stringify(value)),
   });
-  await putEncrypted(`${accountId}:${objectId}`, object);
+  beforePersist?.();
+  await putEncrypted(`${accountId}:${objectId}`, object, beforePersist);
+  beforePersist?.();
   return object;
 }
 

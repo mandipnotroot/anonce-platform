@@ -128,7 +128,9 @@ async function deviceKey(
       raw.fill(0);
     }
     if (generation !== expectedGeneration) return;
-    await putDeviceRecord("key:" + accountId, key);
+    await putDeviceRecord("key:" + accountId, key, () =>
+      checkGeneration(expectedGeneration),
+    );
   }
   if (!key) return;
   return new Uint8Array(
@@ -144,9 +146,8 @@ async function deviceKey(
     ),
   );
 }
-async function cacheState() {
-  const captured = state,
-    expectedGeneration = generation;
+async function cacheState(captured = state, expectedGeneration = generation) {
+  checkGeneration(expectedGeneration, captured);
   const key = await deviceKey(captured.accountId, true, expectedGeneration);
   if (!key) return;
   try {
@@ -156,10 +157,13 @@ async function cacheState() {
       plaintext: jsonBytes(toWire(captured)),
     });
     if (generation === expectedGeneration && state === captured)
-      await putDeviceRecord("cache:" + captured.accountId, object);
+      await putDeviceRecord("cache:" + captured.accountId, object, () =>
+        checkGeneration(expectedGeneration, captured),
+      );
   } finally {
     key.fill(0);
   }
+  checkGeneration(expectedGeneration, captured);
 }
 const random = (n) => crypto.getRandomValues(new Uint8Array(n));
 const id = () => C.toBase64url(random(16));
@@ -193,8 +197,11 @@ async function initialize() {
   }
   return config;
 }
-function checkGeneration(expectedGeneration) {
-  if (generation !== expectedGeneration)
+function checkGeneration(expectedGeneration, owner) {
+  if (
+    generation !== expectedGeneration ||
+    (arguments.length > 1 && state !== owner)
+  )
     throw new APIError(
       "SESSION_CHANGED",
       "The session changed. Please sign in again.",
@@ -217,21 +224,25 @@ async function signed(
   method = "POST",
   expectedGeneration = generation,
 ) {
+  const captured = state;
+  const signingSeeds = seeds || { membership_sig: active().membershipSeed };
+  const accountId = payload.account_id || captured?.accountId;
   await initialize();
-  const accountId = payload.account_id || state?.accountId;
+  checkGeneration(expectedGeneration, captured);
   const payloadBytes = jsonBytes(toWire(payload));
+  const payloadHash = await C.hashBytes(payloadBytes);
+  checkGeneration(expectedGeneration, captured);
   const challenge = await request("/api/member/challenges", {
     method: "POST",
     body: {
       account_id: accountId,
       action,
-      payload_hash: await C.hashBytes(payloadBytes),
+      payload_hash: payloadHash,
     },
   });
+  checkGeneration(expectedGeneration, captured);
   const proof = { challenge_id: challenge.challenge_id };
-  for (const [kind, seed] of Object.entries(
-    seeds || { membership_sig: active().membershipSeed },
-  )) {
+  for (const [kind, seed] of Object.entries(signingSeeds)) {
     proof[kind] = await C.signChallenge({
       challenge,
       expectedAction: action,
@@ -240,11 +251,14 @@ async function signed(
       seed,
     });
   }
-  checkGeneration(expectedGeneration);
-  return request(path, {
+  checkGeneration(expectedGeneration, captured);
+  const result = await request(path, {
     method,
     body: { payload: C.toBase64url(payloadBytes), proof },
   });
+  if (path !== "/api/member/session")
+    checkGeneration(expectedGeneration, captured);
+  return result;
 }
 const mutation = (path, action, payload = {}, method) =>
   signed(
@@ -408,9 +422,13 @@ export async function getSessionStatus() {
     throw error;
   }
 }
-export async function login({ email, password }) {
-  const expectedGeneration = ++generation;
+export async function login(
+  { email, password },
+  expectedGeneration = ++generation,
+) {
+  checkGeneration(expectedGeneration);
   await initialize();
+  checkGeneration(expectedGeneration);
   const params = await request("/api/member/auth/params", {
     method: "POST",
     body: { email },
@@ -427,6 +445,7 @@ export async function login({ email, password }) {
     expectedGeneration,
   );
   session = { ...session, ...(await request("/api/member/me")) };
+  checkGeneration(expectedGeneration);
   const unlocked = await vaultOpen(params.account_id, derived, "password");
   if (generation !== expectedGeneration) {
     wipeState({ ...unlocked, authSeed: derived.authSeed });
@@ -481,12 +500,14 @@ async function wrapper(accountId, kind, material, metadataHash, masterKey) {
   });
 }
 export async function register({ email, password }) {
+  const expectedGeneration = ++generation;
   await initialize();
   const accountId = id(),
     masterKey = random(32),
     membership = await C.generateMembershipKey(),
     encryption = await C.generateMemberEncryptionKeyPair();
   const cr = await credentials(accountId, password);
+  checkGeneration(expectedGeneration);
   const object = await C.sealVaultObject({
     accountId: bytes(accountId),
     masterKey,
@@ -544,8 +565,12 @@ export async function register({ email, password }) {
       recovery_sig: cr.r.authSeed,
       membership_sig: membership.seed,
     },
+    "POST",
+    expectedGeneration,
   );
-  const session = await login({ email, password });
+  checkGeneration(expectedGeneration);
+  const session = await login({ email, password }, expectedGeneration);
+  checkGeneration(expectedGeneration);
   return { session, recoveryWords: cr.recovery.words.split(" ") };
 }
 export async function logout() {
@@ -624,7 +649,9 @@ async function reviewKeys(
   getVault = () => request("/api/member/vault"),
 ) {
   const s = active(),
+    expectedGeneration = generation,
     vault = await getVault();
+  checkGeneration(expectedGeneration, s);
   const object = (vault.vault_objects || vault.objects || []).find(
     (o) => o.id === reviewId,
   );
@@ -658,11 +685,13 @@ async function reviewKeys(
       !canonical(value.recipient_private_key, 32)
     )
       throw keyUnavailable();
+    checkGeneration(expectedGeneration, s);
     return {
       contentKey: bytes(value.content_key),
       privateKey: bytes(value.recipient_private_key),
     };
   } catch {
+    checkGeneration(expectedGeneration, s);
     throw keyUnavailable();
   }
 }
@@ -729,11 +758,14 @@ async function completedHere(reviewId) {
   return false;
 }
 async function openedReview(r, contentKey, getVault) {
+  const s = active();
+  const expectedGeneration = generation;
   const reviewId = r.review_id || r.id;
   let view;
   try {
     if ((r.state || r.status) !== "draft") {
       const p = await publicDescriptor(reviewId);
+      checkGeneration(expectedGeneration, s);
       contentKey ||= await memberContentKey(r, p, getVault);
       view = reviewView(
         { ...r, descriptor: p.descriptor },
@@ -753,9 +785,12 @@ async function openedReview(r, contentKey, getVault) {
       );
     }
   } catch {
+    checkGeneration(expectedGeneration, s);
     view = reviewView(r);
   }
+  checkGeneration(expectedGeneration, s);
   view.completedOnThisBrowser = await completedHere(reviewId);
+  checkGeneration(expectedGeneration, s);
   return view;
 }
 const list = (r, fn = (x) => x) => ({
@@ -790,26 +825,40 @@ export const revokeMember = ({ orgId, memberId }) =>
 export const changeMemberRole = ({ orgId, memberId, role }) =>
   mutation(`/orgs/${orgId}/members/${memberId}/role`, "member-role", { role });
 export const listReviews = async ({ orgId, after }) => {
+  const s = state;
+  const expectedGeneration = generation;
   const r = await request(
     `/api/member/orgs/${orgId}/reviews${after ? "?after=" + encodeURIComponent(after) : ""}`,
   );
+  checkGeneration(expectedGeneration, s);
   let vaultRequest;
   const getVault = () => (vaultRequest ||= request("/api/member/vault"));
+  const items = await Promise.all(
+    (r.items || []).map((r) => openedReview(r, undefined, getVault)),
+  );
+  checkGeneration(expectedGeneration, s);
   return {
-    items: await Promise.all(
-      (r.items || []).map((r) => openedReview(r, undefined, getVault)),
-    ),
+    items,
     next: r.next ?? null,
   };
 };
 export async function getReview({ reviewId }) {
+  const s = active();
+  const expectedGeneration = generation;
   await initialize();
-  return openedReview(await request(`/api/member/reviews/${reviewId}`));
+  checkGeneration(expectedGeneration, s);
+  const review = await request(`/api/member/reviews/${reviewId}`);
+  checkGeneration(expectedGeneration, s);
+  const result = await openedReview(review);
+  checkGeneration(expectedGeneration, s);
+  return result;
 }
 const pendingCreates = new Map();
 export async function createReview({ orgId, title, maxResponses = 1 }) {
-  const s = active();
+  const s = active(),
+    expectedGeneration = generation;
   await initialize();
+  checkGeneration(expectedGeneration, s);
   const slot = s.accountId + ":" + orgId;
   let pending = pendingCreates.get(slot) || s.pendingReviewCreates?.[orgId];
   if (pending) pending.contentKey = bytes(pending.contentKey);
@@ -852,20 +901,26 @@ export async function createReview({ orgId, title, maxResponses = 1 }) {
         vault_write: { expected_revision: "0", object },
       }),
     };
+    checkGeneration(expectedGeneration, s);
     pendingCreates.set(slot, pending);
     (s.pendingReviewCreates ||= {})[orgId] = pending;
-    await cacheState();
+    await cacheState(s, expectedGeneration);
+    checkGeneration(expectedGeneration, s);
   } else {
     try {
       const r = await request(
         `/api/member/reviews/${pending.payload.review_id}`,
       );
+      checkGeneration(expectedGeneration, s);
       const view = await openedReview(r, pending.contentKey);
+      checkGeneration(expectedGeneration, s);
       pendingCreates.delete(slot);
       delete s.pendingReviewCreates?.[orgId];
-      await cacheState();
+      await cacheState(s, expectedGeneration);
+      checkGeneration(expectedGeneration, s);
       return view;
     } catch (e) {
+      checkGeneration(expectedGeneration, s);
       if (!["NOT_FOUND", "not_found"].includes(e.code)) throw e;
     }
   }
@@ -873,10 +928,15 @@ export async function createReview({ orgId, title, maxResponses = 1 }) {
     `/api/member/orgs/${orgId}/reviews`,
     "review-create",
     pending.payload,
+    { membership_sig: s.membershipSeed },
+    "POST",
+    expectedGeneration,
   );
+  checkGeneration(expectedGeneration, s);
   pendingCreates.delete(slot);
   delete s.pendingReviewCreates?.[orgId];
-  await cacheState();
+  await cacheState(s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   return reviewView(r, pending.content);
 }
 export async function updateReview({
@@ -889,8 +949,12 @@ export async function updateReview({
   opensAt,
   closesAt,
 }) {
-  const old = await request(`/api/member/reviews/${reviewId}`),
-    keys = await reviewKeys(reviewId);
+  const s = active(),
+    expectedGeneration = generation;
+  const old = await request(`/api/member/reviews/${reviewId}`);
+  checkGeneration(expectedGeneration, s);
+  const keys = await reviewKeys(reviewId);
+  checkGeneration(expectedGeneration, s);
   const previous = await C.openDraftContent({
     reviewId: bytes(reviewId),
     orgId: bytes(old.org_id),
@@ -922,40 +986,47 @@ export async function updateReview({
     contentKey: keys.contentKey,
     content,
   });
-  return reviewView(
-    await mutation(
-      `/reviews/${reviewId}`,
-      "review-update",
-      {
-        expected_revision: String(expectedRevision),
-        encrypted_content,
-        max_responses: maxResponses,
-        opens_at: time(opensAt),
-        closes_at: time(closesAt),
-      },
-      "PUT",
-    ),
-    content,
+  checkGeneration(expectedGeneration, s);
+  const result = await signed(
+    `/api/member/reviews/${reviewId}`,
+    "review-update",
+    {
+      request_id: id(),
+      expected_revision: String(expectedRevision),
+      encrypted_content,
+      max_responses: maxResponses,
+      opens_at: time(opensAt),
+      closes_at: time(closesAt),
+    },
+    { membership_sig: s.membershipSeed },
+    "PUT",
+    expectedGeneration,
   );
+  checkGeneration(expectedGeneration, s);
+  return reviewView(result, content);
 }
 export const closeReview = ({ reviewId, expectedRevision }) =>
   mutation(`/reviews/${reviewId}/close`, "review-close", {
     expected_revision: String(expectedRevision),
   });
 export async function deleteReview({ reviewId, expectedRevision }) {
+  const s = active(),
+    expectedGeneration = generation;
   const result = await mutation(
     `/reviews/${reviewId}`,
     "review-delete",
     { expected_revision: String(expectedRevision) },
     "DELETE",
   );
+  checkGeneration(expectedGeneration, s);
   for (const [slot, pending] of pendingCreates)
     if (pending.payload.review_id === reviewId) pendingCreates.delete(slot);
-  if (state?.pendingReviewCreates)
-    for (const [orgId, pending] of Object.entries(state.pendingReviewCreates))
+  if (s.pendingReviewCreates)
+    for (const [orgId, pending] of Object.entries(s.pendingReviewCreates))
       if (pending.payload.review_id === reviewId)
-        delete state.pendingReviewCreates[orgId];
-  if (state) await cacheState();
+        delete s.pendingReviewCreates[orgId];
+  await cacheState(s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   return result;
 }
 async function publicDescriptor(reviewId) {
@@ -1033,6 +1104,7 @@ async function credentialChange({
     });
     proofs.new_password_sig = p.authSeed;
   }
+  checkGeneration(expectedGeneration, s);
   await signed(
     "/api/member/credentials/" + (recoveryOnly ? "recovery" : "password"),
     recoveryOnly ? "recovery-rotate" : "password-change",
@@ -1041,6 +1113,7 @@ async function credentialChange({
     "POST",
     expectedGeneration,
   );
+  checkGeneration(expectedGeneration, s);
   const session = await loginAfterCredentialChange(
     { email: s.email, password: newPassword || currentPassword },
     expectedGeneration,
@@ -1061,14 +1134,17 @@ export const changePassword = (options) => credentialChange(options);
 export const rotateRecovery = (options) =>
   credentialChange({ ...options, recoveryOnly: true });
 async function loginAfterCredentialChange(options, expectedGeneration) {
-  if (generation !== expectedGeneration) return null;
+  checkGeneration(expectedGeneration);
   wipeState(state);
   state = undefined;
   setSessionCSRF(undefined);
   const loginGeneration = generation + 1;
   try {
-    return await login(options);
+    const session = await login(options);
+    checkGeneration(loginGeneration);
+    return session;
   } catch {
+    checkGeneration(loginGeneration);
     // Login may set state before device-cache persistence fails.
     if (generation === loginGeneration) {
       wipeState(state);
@@ -1081,6 +1157,7 @@ async function loginAfterCredentialChange(options, expectedGeneration) {
 export async function recover({ email, words, newPassword }) {
   const expectedGeneration = ++generation;
   await initialize();
+  checkGeneration(expectedGeneration);
   const params = await request("/api/member/auth/params", {
       method: "POST",
       body: { email },
@@ -1160,28 +1237,43 @@ export async function recover({ email, words, newPassword }) {
     ...(!nextSession ? { reauthenticationRequired: true } : {}),
   };
 }
-async function seal(objectId, value, revision = "1") {
-  const s = active();
-  return saveSealed({
+async function seal(
+  objectId,
+  value,
+  revision = "1",
+  s = active(),
+  expectedGeneration = generation,
+) {
+  checkGeneration(expectedGeneration, s);
+  const result = await saveSealed({
     accountId: bytes(s.accountId),
     masterKey: s.masterKey,
     objectId: bytes(objectId),
     revision,
     value,
-    sealVaultObject: C.sealVaultObject,
+    beforePersist: () => checkGeneration(expectedGeneration, s),
+    sealVaultObject: async (options) => {
+      const object = await C.sealVaultObject(options);
+      checkGeneration(expectedGeneration, s);
+      return object;
+    },
   });
+  checkGeneration(expectedGeneration, s);
+  return result;
 }
-async function local(objectId) {
-  const s = active();
+async function local(objectId, s = active(), expectedGeneration = generation) {
+  checkGeneration(expectedGeneration, s);
   const cached = await loadSealed({
     accountId: bytes(s.accountId),
     masterKey: s.masterKey,
     objectId: bytes(objectId),
     openVaultObject: C.openVaultObject,
   });
+  checkGeneration(expectedGeneration, s);
   if (cached) return cached;
   const vault = await request("/api/member/vault"),
     object = vault.objects.find((o) => o.id === objectId);
+  checkGeneration(expectedGeneration, s);
   if (!object) return;
   const p = JSON.parse(
     new TextDecoder().decode(
@@ -1192,9 +1284,11 @@ async function local(objectId) {
       }),
     ),
   );
+  checkGeneration(expectedGeneration, s);
   if (p.kind === "issuance-pending") {
     validateCompactPending(p, objectId);
     const published = await publicDescriptor(p.reviewId);
+    checkGeneration(expectedGeneration, s);
     if (
       C.toBase64url(await C.hashBytes(published.descriptorBytes)) !==
       p.descriptorHash
@@ -1223,22 +1317,33 @@ async function local(objectId) {
   } else if (p.pendingId) {
     throw new APIError("INVALID_RESPONSE", "Invalid remote pending response.");
   }
-  await pendingSave(p);
+  await pendingSave(p, s, expectedGeneration);
   return p;
 }
-async function ensureCertificate(orgId) {
+async function ensureCertificate(orgId, expectedGeneration = generation) {
+  const s = active();
+  checkGeneration(expectedGeneration, s);
   const certificate = await request(`/api/member/orgs/${orgId}/certificate`);
+  checkGeneration(expectedGeneration, s);
   if (
     certificate.expires_at !== undefined &&
     BigInt(certificate.expires_at) <=
       BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 3600)
   ) {
-    return mutation(`/orgs/${orgId}/certificate/renew`, "certificate-renew");
+    return signed(
+      `/api/member/orgs/${orgId}/certificate/renew`,
+      "certificate-renew",
+      { request_id: id() },
+      undefined,
+      "POST",
+      expectedGeneration,
+    );
   }
   return certificate;
 }
 export async function listPendingResponses() {
   const s = active(),
+    expectedGeneration = generation,
     vault = await request("/api/member/vault"),
     found = new Map();
   for (const object of [...vault.objects, ...(await allEncrypted())]) {
@@ -1262,6 +1367,7 @@ export async function listPendingResponses() {
     if (!old || Number(p.revision) > Number(old.revision))
       found.set(p.pendingId, p);
   }
+  checkGeneration(expectedGeneration, s);
   return {
     items: [...found.values()]
       .filter((p) => !p.receipt)
@@ -1320,18 +1426,24 @@ export async function publishReview({ reviewId, expectedRevision }) {
   return prepareStagedPublication(reviewId, expectedRevision);
 }
 async function prepareStagedPublication(reviewId, expectedRevision) {
-  const s = active();
+  const s = active(),
+    expectedGeneration = generation;
   const existing = s.pendingReviewPublishes?.[reviewId];
-  if (existing) return sendPublication(reviewId, existing);
-  const r = await request(`/api/member/reviews/${reviewId}`),
-    cert = await ensureCertificate(r.org_id);
+  if (existing)
+    return sendPublication(reviewId, existing, s, expectedGeneration);
+  const r = await request(`/api/member/reviews/${reviewId}`);
+  checkGeneration(expectedGeneration, s);
+  const cert = await ensureCertificate(r.org_id, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   const keys = await reviewKeys(reviewId);
+  checkGeneration(expectedGeneration, s);
   const content = await C.openDraftContent({
     reviewId: bytes(reviewId),
     orgId: bytes(r.org_id),
     contentKey: keys.contentKey,
     encryptedContent: r.encrypted_content,
   });
+  checkGeneration(expectedGeneration, s);
   C.validateReviewContent(content, { publish: true });
   const descriptor = {
     v: 3,
@@ -1350,6 +1462,7 @@ async function prepareStagedPublication(reviewId, expectedRevision) {
     issuer_public_key: r.issuer_public_key,
   };
   const descriptorBytes = jsonBytes(descriptor);
+  checkGeneration(expectedGeneration, s);
   if (descriptorBytes.length > C.getLimits().max_descriptor_bytes)
     throw new APIError("INVALID_CONTENT", "Review descriptor is too large.");
   const payload = toWire({
@@ -1361,15 +1474,22 @@ async function prepareStagedPublication(reviewId, expectedRevision) {
       membershipSeed: s.membershipSeed,
     }),
   });
+  checkGeneration(expectedGeneration, s);
   if (jsonBytes(payload).length > 1536 * 1024)
     throw new APIError("INVALID_CONTENT", "Publication payload is too large.");
   const pending = { start: payload, orgId: r.org_id, uploaded: 0 };
   (s.pendingReviewPublishes ||= {})[reviewId] = pending;
-  await cacheState();
-  return sendPublication(reviewId, pending);
+  await cacheState(s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
+  return sendPublication(reviewId, pending, s, expectedGeneration);
 }
-async function sendPublication(reviewId, pending) {
-  const s = active();
+async function sendPublication(
+  reviewId,
+  pending,
+  s = active(),
+  expectedGeneration = generation,
+) {
+  checkGeneration(expectedGeneration, s);
   try {
     const base = `/api/member/reviews/${reviewId}`;
     if (!pending.publicationId) {
@@ -1377,7 +1497,11 @@ async function sendPublication(reviewId, pending) {
         `${base}/publication`,
         "review-publication-start",
         pending.start,
+        { membership_sig: s.membershipSeed },
+        "POST",
+        expectedGeneration,
       );
+      checkGeneration(expectedGeneration, s);
       if (
         !canonical(result?.publication_id, 16) ||
         !Number.isSafeInteger(result.recipient_count) ||
@@ -1390,7 +1514,8 @@ async function sendPublication(reviewId, pending) {
       pending.publicationId = result.publication_id;
       pending.count = result.recipient_count;
       pending.expiresAt = result.expires_at;
-      await cacheState();
+      await cacheState(s, expectedGeneration);
+      checkGeneration(expectedGeneration, s);
     }
     while (pending.uploaded < pending.count || pending.batch) {
       if (!pending.batch) {
@@ -1401,7 +1526,9 @@ async function sendPublication(reviewId, pending) {
           pending.after,
           pending.count - pending.uploaded,
         );
+        checkGeneration(expectedGeneration, s);
         const keys = await reviewKeys(reviewId);
+        checkGeneration(expectedGeneration, s);
         const envelopes = [];
         for (let i = 0; i < recipients.length; i += 8) {
           envelopes.push(
@@ -1418,6 +1545,7 @@ async function sendPublication(reviewId, pending) {
               ),
             )),
           );
+          checkGeneration(expectedGeneration, s);
         }
         pending.batch = toWire({
           request_id: id(),
@@ -1425,19 +1553,25 @@ async function sendPublication(reviewId, pending) {
           content_key_envelopes: envelopes,
         });
         pending.next = next;
-        await cacheState();
+        await cacheState(s, expectedGeneration);
+        checkGeneration(expectedGeneration, s);
       }
       const ack = await signed(
         `${base}/publication/envelopes`,
         "review-publication-envelopes",
         pending.batch,
+        { membership_sig: s.membershipSeed },
+        "POST",
+        expectedGeneration,
       );
+      checkGeneration(expectedGeneration, s);
       if (!ack || ack.ok !== true) throw keyUnavailable();
       pending.uploaded += pending.batch.content_key_envelopes.length;
       pending.after = pending.next;
       delete pending.batch;
       delete pending.next;
-      await cacheState();
+      await cacheState(s, expectedGeneration);
+      checkGeneration(expectedGeneration, s);
     }
     if (!pending.finalize) {
       pending.finalize = {
@@ -1445,31 +1579,40 @@ async function sendPublication(reviewId, pending) {
         expected_revision: pending.start.expected_revision,
         publication_id: pending.publicationId,
       };
-      await cacheState();
+      await cacheState(s, expectedGeneration);
+      checkGeneration(expectedGeneration, s);
     }
     const result = await signed(
       `/api/member/reviews/${reviewId}/publish`,
       "review-publish",
       pending.finalize,
+      { membership_sig: s.membershipSeed },
+      "POST",
+      expectedGeneration,
     );
+    checkGeneration(expectedGeneration, s);
     if (!result || result.state !== "published") throw keyUnavailable();
     delete s.pendingReviewPublishes[reviewId];
-    await cacheState();
+    await cacheState(s, expectedGeneration);
+    checkGeneration(expectedGeneration, s);
     return result;
   } catch (e) {
+    checkGeneration(expectedGeneration, s);
     const status = e.status ?? e.statusCode;
     // Unknown outcomes keep the exact request, including malformed success replies.
     if (status >= 500) throw e;
     if (status >= 400 && status < 500 && status !== 429) {
       delete s.pendingReviewPublishes[reviewId];
-      await cacheState();
+      await cacheState(s, expectedGeneration);
+      checkGeneration(expectedGeneration, s);
     }
     throw e;
   }
 }
 
-async function pendingSave(p) {
-  await seal(p.pendingId, p, String(p.revision || 1));
+async function pendingSave(p, s = active(), expectedGeneration = generation) {
+  checkGeneration(expectedGeneration, s);
+  await seal(p.pendingId, p, String(p.revision || 1), s, expectedGeneration);
 }
 // Only the authenticated issuance copy is padded; local pending objects stay unchanged.
 export const getLimits = () => C.getLimits();
@@ -1532,7 +1675,12 @@ function validateCompactPending(p, objectId) {
   )
     fail();
 }
-async function sealIssuancePending(p) {
+async function sealIssuancePending(
+  p,
+  s = active(),
+  expectedGeneration = generation,
+) {
+  checkGeneration(expectedGeneration, s);
   const compact = {
     v: 1,
     kind: "issuance-pending",
@@ -1555,20 +1703,26 @@ async function sealIssuancePending(p) {
     );
   const padded = new Uint8Array(size).fill(0x20);
   padded.set(plaintext);
-  const s = active();
-  return C.sealVaultObject({
+  checkGeneration(expectedGeneration, s);
+  const object = await C.sealVaultObject({
     accountId: bytes(s.accountId),
     masterKey: s.masterKey,
     objectId: bytes(p.pendingId),
     revision: "1",
     plaintext: padded,
   });
+  checkGeneration(expectedGeneration, s);
+  return object;
 }
 export async function prepareResponse({ reviewId, answers }) {
-  active();
+  const s = active(),
+    expectedGeneration = generation;
   const p = await publicDescriptor(reviewId);
+  checkGeneration(expectedGeneration, s);
   const review = await request(`/api/member/reviews/${reviewId}`);
+  checkGeneration(expectedGeneration, s);
   const contentKey = await memberContentKey(review, p);
+  checkGeneration(expectedGeneration, s);
   const content = await C.openDescriptorContent({
     descriptor: p.descriptor,
     contentKey,
@@ -1602,20 +1756,23 @@ export async function prepareResponse({ reviewId, answers }) {
     encrypted: toWire(encrypted),
     revision: 1,
   };
-  await pendingSave(pending);
+  await pendingSave(pending, s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   return { pendingId };
 }
-async function finishPending(p) {
+async function finishPending(p, s = active(), expectedGeneration = generation) {
+  checkGeneration(expectedGeneration, s);
   const descriptorBytes = bytes(p.descriptor),
     descriptor = await C.verifyDescriptor({
       descriptorBytes,
       signature: bytes(p.descriptorSignature),
       expectedReviewId: bytes(p.reviewId),
     });
+  checkGeneration(expectedGeneration, s);
   if (!p.submission) {
     if (!p.issuancePayload) {
-      await ensureCertificate(descriptor.org_id);
-      const object = await sealIssuancePending(p);
+      await ensureCertificate(descriptor.org_id, expectedGeneration);
+      const object = await sealIssuancePending(p, s, expectedGeneration);
       p.issuancePayload = toWire({
         request_id: p.requestId,
         issuer_key_id: descriptor.issuer_key_id,
@@ -1623,13 +1780,17 @@ async function finishPending(p) {
         pending_state: { expected_revision: "0", object },
       });
       p.revision++;
-      await pendingSave(p);
+      await pendingSave(p, s, expectedGeneration);
     }
     const issued = await signed(
       `/api/member/reviews/${p.reviewId}/issuances`,
       "issue",
       p.issuancePayload,
+      { membership_sig: s.membershipSeed },
+      "POST",
+      expectedGeneration,
     );
+    checkGeneration(expectedGeneration, s);
     const token = await C.finalizeAuthorization({
       descriptor,
       preparedMessage: bytes(p.authorization.preparedMessage),
@@ -1649,11 +1810,18 @@ async function finishPending(p) {
       ciphertext: encrypted.ciphertext,
     });
     p.revision++;
-    await pendingSave(p);
+    await pendingSave(p, s, expectedGeneration);
   }
+  checkGeneration(expectedGeneration, s);
   return p;
 }
-async function checkedReceipt(p, receipt) {
+async function checkedReceipt(
+  p,
+  receipt,
+  s = active(),
+  expectedGeneration = generation,
+) {
+  checkGeneration(expectedGeneration, s);
   const descriptorBytes = bytes(p.descriptor),
     descriptor = await C.verifyDescriptor({
       descriptorBytes,
@@ -1676,9 +1844,11 @@ async function checkedReceipt(p, receipt) {
     p.submission,
     receipt,
   );
+  checkGeneration(expectedGeneration, s);
   p.receipt = receipt;
   p.revision++;
-  await pendingSave(p);
+  await pendingSave(p, s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   return { status: "accepted", receipt };
 }
 async function verifyEnvelopeReceipt(p, envelope, receipt) {
@@ -1705,15 +1875,19 @@ async function verifyEnvelopeReceipt(p, envelope, receipt) {
   });
 }
 export async function submitResponse({ pendingId }) {
-  let p = await local(pendingId);
+  const s = active(),
+    expectedGeneration = generation;
+  let p = await local(pendingId, s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   if (!p)
     throw new APIError(
       "PENDING_NOT_FOUND",
       "Sign in on the original browser to restore this pending response.",
     );
-  if (p.receipt) return checkedReceipt(p, p.receipt);
+  if (p.receipt) return checkedReceipt(p, p.receipt, s, expectedGeneration);
   try {
-    p = await finishPending(p);
+    p = await finishPending(p, s, expectedGeneration);
+    checkGeneration(expectedGeneration, s);
     return await checkedReceipt(
       p,
       await request("/api/anon/submissions", {
@@ -1721,16 +1895,22 @@ export async function submitResponse({ pendingId }) {
         body: p.submission,
         anonymous: true,
       }),
+      s,
+      expectedGeneration,
     );
   } catch (e) {
+    checkGeneration(expectedGeneration, s);
     if (e.code === "NETWORK_ERROR") return { status: "pending", pendingId };
     throw e;
   }
 }
 export async function lookupReceipt({ pendingId }) {
-  const p = await local(pendingId);
+  const s = active(),
+    expectedGeneration = generation;
+  const p = await local(pendingId, s, expectedGeneration);
+  checkGeneration(expectedGeneration, s);
   if (!p?.submission) return { status: "pending", pendingId };
-  if (p.receipt) return checkedReceipt(p, p.receipt);
+  if (p.receipt) return checkedReceipt(p, p.receipt, s, expectedGeneration);
   try {
     return await checkedReceipt(
       p,
@@ -1743,22 +1923,28 @@ export async function lookupReceipt({ pendingId }) {
           serial: p.authorization.serial,
         },
       }),
+      s,
+      expectedGeneration,
     );
   } catch (e) {
+    checkGeneration(expectedGeneration, s);
     if (["NOT_FOUND", "not_found", "NETWORK_ERROR"].includes(e.code))
       return { status: "pending", pendingId };
     throw e;
   }
 }
 export async function listResponses({ reviewId, after }) {
-  active();
-  const p = await publicDescriptor(reviewId),
-    keys = await reviewKeys(reviewId),
+  const s = active();
+  const expectedGeneration = generation;
+  const p = await publicDescriptor(reviewId);
+  checkGeneration(expectedGeneration, s);
+  const keys = await reviewKeys(reviewId),
     privateKey = keys.privateKey;
   const content = await C.openDescriptorContent({
     descriptor: p.descriptor,
     contentKey: keys.contentKey,
   });
+  checkGeneration(expectedGeneration, s);
   const result = await request(
       `/api/member/reviews/${reviewId}/submissions${after ? "?after=" + encodeURIComponent(after) : ""}`,
     ),
@@ -1800,16 +1986,20 @@ export async function listResponses({ reviewId, after }) {
       });
     }
   }
+  checkGeneration(expectedGeneration, s);
   return { items, next: result.next ?? null };
 }
 export async function exportResponses({ reviewId, format }) {
   if (!["json", "csv"].includes(format))
     throw new APIError("INVALID_FORMAT", "Choose JSON or CSV.");
+  const s = active();
+  const expectedGeneration = generation;
   const result = { items: [] };
   let after;
   const seen = new Set();
   do {
     const page = await listResponses({ reviewId, after });
+    checkGeneration(expectedGeneration, s);
     result.items.push(...page.items);
     after = page.next;
     if (after && seen.has(after))
@@ -1847,6 +2037,7 @@ export async function exportResponses({ reviewId, format }) {
         ].join("\r\n");
   const mimeType =
     format === "json" ? "application/json" : "text/csv;charset=utf-8";
+  checkGeneration(expectedGeneration, s);
   return {
     filename: `review-${reviewId}.${format}`,
     mimeType,

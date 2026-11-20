@@ -26,7 +26,7 @@
   No publication implementation or default rate-limit changes are used.
 - Environment: Linux x86-64, AMD Ryzen 9 7940HS exposed as 6 logical CPUs,
   approximately 5.8 GiB host RAM, Chromium 159.0.8154.6, Node 26.13.1,
-  and the container limits below. PostgreSQL uses `18.6-alpine3.24`.
+  and the container limits below. PostgreSQL uses `18.7-alpine3.24`.
 - Workload: one creator, unique valid synthetic recipient identities, and one
   short required text question. Sizes run sequentially in separate organizations
   on the same disposable deployment; the database is not reset between sizes.
