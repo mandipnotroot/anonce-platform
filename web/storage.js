@@ -1,37 +1,76 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Only authenticated ciphertext records belong here. Secrets stay in memory.
+import { openDB } from "idb";
+
 const DATABASE = "anonce-encrypted-v1";
 const STORE = "records";
 let opening;
 
 function database() {
-  if (!opening)
-    opening = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DATABASE, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => {
-        opening = undefined;
-        reject(new Error("Encrypted local storage unavailable."));
-      };
-      req.onblocked = () => {
-        opening = undefined;
-        reject(new Error("Close other Anonce tabs and retry."));
-      };
+  if (!opening) {
+    let abandoned = false;
+    let connection;
+    const invalidate = () => {
+      if (opening === attempt) opening = undefined;
+    };
+    const attempt = new Promise((resolve, reject) => {
+      // Defer open so the attempt identity exists even for synchronous failures.
+      Promise.resolve()
+        .then(() => {
+          return openDB(DATABASE, 1, {
+            upgrade(db) {
+              db.createObjectStore(STORE);
+            },
+            blocked() {
+              abandoned = true;
+              invalidate();
+              reject(new Error("Close other Anonce tabs and retry."));
+            },
+            blocking() {
+              connection?.close();
+              invalidate();
+            },
+            terminated: invalidate,
+          }).then((db) => {
+            connection = db;
+            if (abandoned) db.close();
+            else resolve(db);
+          });
+        })
+        .catch(() => {
+          invalidate();
+          reject(new Error("Encrypted local storage unavailable."));
+        });
     });
+    opening = attempt;
+  }
   return opening;
 }
 
 async function transact(mode, operation, beforePersist) {
   const db = await database();
   beforePersist?.();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const req = operation(tx.objectStore(STORE));
-    tx.oncomplete = () => resolve(req.result);
-    tx.onerror = tx.onabort = () =>
-      reject(new Error("Encrypted local storage operation failed."));
-  });
+  let tx;
+  let done;
+  try {
+    tx = db.transaction(STORE, mode);
+    done = tx.done;
+    // Observe both rejections immediately, and wait for commit, not just request success.
+    const [result] = await Promise.all([
+      operation(tx.objectStore(STORE)),
+      done,
+    ]);
+    return result;
+  } catch {
+    // A synchronous request error can leave a transaction active.
+    try {
+      tx?.abort();
+    } catch {
+      // Already completed or aborted.
+    }
+    await done?.catch(() => {});
+    throw new Error("Encrypted local storage operation failed.");
+  }
 }
 
 export const getEncrypted = (key) =>

@@ -8,7 +8,7 @@ import {
   getDeviceRecord,
   putDeviceRecord,
   deleteDeviceRecord,
-} from "./storage.js";
+} from "./storage.bundle.js";
 
 let state,
   config,

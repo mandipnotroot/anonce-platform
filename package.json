@@ -14,7 +14,8 @@
     "test:e2e": "node scripts/e2e.mjs",
     "test:interop": "node scripts/crypto-interop.mjs",
     "build": "node scripts/build.mjs",
-    "test:crypto": "node --test web/crypto.test.js"
+    "test:crypto": "node --test web/crypto.test.js",
+    "test:storage": "npm run build && node scripts/storage-check.mjs"
   },
   "dependencies": {
     "@cloudflare/blindrsa-ts": "0.4.6",
@@ -27,6 +28,7 @@
     "@peculiar/x509": "3.1.0",
     "@scure/bip39": "2.4.0",
     "hash-wasm": "4.13.0",
+    "idb": "8.0.4",
     "reflect-metadata": "0.2.2"
   },
   "devDependencies": {

@@ -48,7 +48,9 @@
 - The binary is `./cmd/anonce`, listens on `ANONCE_ADDR=:8080`, serves `ANONCE_WEB_DIR=/app/web`, and reads `ANONCE_KEY_FILE=/run/secrets/server_key`.
 - That file contains the unpadded base64url encoding of exactly 32 random bytes for the server ChaCha master key, not client keys.
 - Backend must set member cookies with Path=/api/member and strict security headers, including a self-only CSP permitting `wasm-unsafe-eval` where necessary, never general `unsafe-eval`.
-- Browser build uses `scripts/build.mjs` and emits `web/crypto.bundle.js`, retaining the vanilla app/API/UI files.
+- Browser build uses `scripts/build.mjs` to bundle cryptography and IndexedDB
+  integration locally, retaining the vanilla app/API/UI files. No browser
+  dependency is loaded from a CDN.
 
 ## First setup (review deployment prerequisites first)
 

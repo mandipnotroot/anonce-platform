@@ -29,3 +29,6 @@ secrets/
 /web/crypto.bundle.js
 /web/crypto.bundle.js.map
 /web/crypto.bundle.js.LEGAL.txt
+/web/storage.bundle.js
+/web/storage.bundle.js.map
+/web/storage.bundle.js.LEGAL.txt
