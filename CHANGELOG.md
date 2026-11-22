@@ -30,16 +30,13 @@
 
 ### Changed
 
-- Use canonical browser API response fields without obsolete session, vault, or
-  invite aliases; reject invalid publication certificate membership IDs instead
-  of substituting session data.
+- Require canonical certificate membership IDs before preparing publication.
 - Align browser notifications with shared component styles, stack up to three
   messages, and pause dismissal while hovered or keyboard-focused.
-- Use explicit button icons instead of guessing from labels, omit fallback
-  decorations, and distinguish quiet ghost actions from secondary buttons.
+- Use explicit button icons and distinguish quiet ghost actions from secondary
+  buttons.
 - Share recovery-phrase and response-export download handling, allowing browsers
   time to consume files before releasing their temporary URLs.
-- Remove the unused browser session-status API and its mock scaffolding.
 - Use locally bundled `idb` for encrypted browser storage transactions, preserving
   the existing database format and session-change guards.
 - Share review setup/edit field rendering and form-error markup across browser forms.

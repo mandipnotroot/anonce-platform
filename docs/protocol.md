@@ -137,7 +137,7 @@ Descriptor is base64url exact JSON bytes, at most 786432 decoded bytes, containi
 - Browser answer encryption/decryption requires successfully authenticated, validated content; plaintext is not appended to the signed descriptor.
 - Publication compares the stored encrypted envelope, membership, and issuer metadata under revision CAS.
 - Before preparing publication, the browser requires a canonical 16-byte membership
-  ID from the certificate response; session membership data is not a fallback.
+  ID from the certificate response.
 - Keys already exist in the vault; publication does not write another vault object.
 
 - The server retains `max_responses` and opening/closing times in plaintext to enforce per-member authorization quotas and acceptance windows atomically.

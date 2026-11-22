@@ -61,6 +61,8 @@
   document instead of repeating detailed guidance.
 - Describe current behavior, not completed implementation tasks. Remove stale
   rollout instructions; retain active compatibility limits and data-loss warnings.
+- Remove references to deleted features and fallbacks from current documentation;
+  do not catalog their absence. Preserve release history and active security warnings.
 - Preserve prerequisites, security warnings, trust boundaries, limitations, and
   the distinction between implemented behavior and planned or unverified work.
 - Keep commands, code examples, protocol values, links, and heading anchors
@@ -130,6 +132,9 @@
 - Run focused checks appropriate to changed behavior, including negative cases
   and security/concurrency boundaries. Record exact commands, exit statuses,
   results, and skipped checks with reasons.
+- Remove obsolete tests and fixtures when features or fallbacks are removed;
+  do not add tests solely to assert their absence. Retain tests for current
+  contracts, security boundaries, and explicitly supported historical behavior.
 - Distinguish implemented behavior, tested evidence, and unverified assumptions.
   Never claim production readiness, audit, or security guarantees without evidence.
 - Do not fabricate passing tests, deployments, review, or cryptographic assurance.

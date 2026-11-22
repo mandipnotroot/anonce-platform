@@ -114,30 +114,8 @@ test("session start and invite use canonical bare response fields", async () => 
     context,
   );
   assert.equal(await context.start(), session);
-  context.response = { token: "canonical", invite_token: "obsolete" };
+  context.response = { token: "canonical" };
   assert.equal((await context.invite()).token, "canonical");
-  context.response = { invite_token: "obsolete" };
-  assert.equal((await context.invite()).token, undefined);
-});
-
-test("review keys ignore obsolete vault_objects even when canonical objects are empty", async () => {
-  let opens = 0;
-  const context = await service({
-    request: async () => ({
-      objects: [],
-      vault_objects: [{ id: b64(16), revision: "1" }],
-    }),
-    C: {
-      openVaultObject: async () => {
-        opens++;
-        throw Error("obsolete object must not be opened");
-      },
-    },
-  });
-  await assert.rejects(context.service.reviewKeys(b64(16)), {
-    code: "KEY_UNAVAILABLE",
-  });
-  assert.equal(opens, 0);
 });
 
 for (const membershipId of [undefined, "", "member", b64(32)]) {
