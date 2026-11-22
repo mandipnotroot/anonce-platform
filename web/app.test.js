@@ -87,7 +87,7 @@ async function service(overrides = {}) {
     globalThis.setCredentials=value=>{credentials=value;};
     globalThis.setReviewKeys=value=>{reviewKeys=value;};
     globalThis.lifecycle={createReview,updateReview,publishReview,deleteReview};
-    globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'member',certificate:'certificate'});};
+    globalThis.configureLifecycle=()=>{config={deployment_id:'YQ'};cacheState=async()=>{};ensureCertificate=async()=>({membership_id:'AAAAAAAAAAAAAAAAAAAAAA',certificate:'certificate'});};
     globalThis.setSigned=value=>{signed=value;};`,
     context,
   );
@@ -101,6 +101,80 @@ function deferred() {
     reject = no;
   });
   return { promise, resolve, reject };
+}
+
+test("session start and invite use canonical bare response fields", async () => {
+  const context = await service();
+  const session = { account_id: b64(16), csrf_token: b64(32) };
+  context.response = session;
+  vm.runInContext(
+    `initialize=async()=>{}; signed=async()=>response;
+     globalThis.start=()=>sessionStart(response.account_id,new Uint8Array(32),"login-password",generation);
+     globalThis.invite=()=>createInvite({orgId:"org",role:"reviewer",expiresAt:2000000000});`,
+    context,
+  );
+  assert.equal(await context.start(), session);
+  context.response = { token: "canonical", invite_token: "obsolete" };
+  assert.equal((await context.invite()).token, "canonical");
+  context.response = { invite_token: "obsolete" };
+  assert.equal((await context.invite()).token, undefined);
+});
+
+test("review keys ignore obsolete vault_objects even when canonical objects are empty", async () => {
+  let opens = 0;
+  const context = await service({
+    request: async () => ({
+      objects: [],
+      vault_objects: [{ id: b64(16), revision: "1" }],
+    }),
+    C: {
+      openVaultObject: async () => {
+        opens++;
+        throw Error("obsolete object must not be opened");
+      },
+    },
+  });
+  await assert.rejects(context.service.reviewKeys(b64(16)), {
+    code: "KEY_UNAVAILABLE",
+  });
+  assert.equal(opens, 0);
+});
+
+for (const membershipId of [undefined, "", "member", b64(32)]) {
+  test(`publication rejects invalid certificate membership ID ${String(membershipId)} before keys, cache or mutation`, async () => {
+    let keys = 0,
+      caches = 0,
+      mutations = 0;
+    const context = await service({
+      request: async () => ({ org_id: "org" }),
+    });
+    context.configureLifecycle();
+    context.setState({
+      accountId: "YQ",
+      session: { memberships: [{ org_id: "org", id: b64(16) }] },
+    });
+    context.certificate = { membership_id: membershipId, certificate: "cert" };
+    context.countCache = () => caches++;
+    vm.runInContext(
+      `ensureCertificate=async()=>certificate;cacheState=async()=>countCache();`,
+      context,
+    );
+    context.setReviewKeys(async () => {
+      keys++;
+      throw Error("must reject before keys");
+    });
+    context.setSigned(async () => mutations++);
+    await assert.rejects(
+      context.lifecycle.publishReview({
+        reviewId: b64(16),
+        expectedRevision: 1,
+      }),
+      { code: "KEY_UNAVAILABLE" },
+    );
+    assert.equal(keys, 0);
+    assert.equal(caches, 0);
+    assert.equal(mutations, 0);
+  });
 }
 
 async function switchAccount(context) {
@@ -1981,7 +2055,7 @@ test("encrypted review lifecycle binds separate keys and keeps all content out o
             "issuer_public_key",
           ].sort(),
         );
-        assert.equal(descriptor.reviewer_membership_id, "member");
+        assert.equal(descriptor.reviewer_membership_id, b64(16));
         assert.deepEqual(descriptor.encrypted_content, envelopes.at(-1));
         assert.equal(
           descriptor.recipient_public_key,

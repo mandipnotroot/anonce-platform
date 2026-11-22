@@ -30,6 +30,9 @@
 
 ### Changed
 
+- Use canonical browser API response fields without obsolete session, vault, or
+  invite aliases; reject invalid publication certificate membership IDs instead
+  of substituting session data.
 - Align browser notifications with shared component styles, stack up to three
   messages, and pause dismissal while hovered or keyboard-focused.
 - Use explicit button icons instead of guessing from labels, omit fallback

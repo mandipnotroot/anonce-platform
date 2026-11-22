@@ -274,7 +274,7 @@ function sessionView(s) {
 async function sessionStart(accountId, authSeed, method, expectedGeneration) {
   const session = await queueCookieMutation(async () => {
     checkGeneration(expectedGeneration);
-    const result = await signed(
+    const session = await signed(
       "/api/member/session",
       method,
       { request_id: id(), account_id: accountId, method },
@@ -285,7 +285,6 @@ async function sessionStart(accountId, authSeed, method, expectedGeneration) {
       "POST",
       expectedGeneration,
     );
-    const session = result.session || result;
     // Even a canceled login may have installed an HttpOnly cookie.
     cookieCSRF = session.csrf_token;
     return session;
@@ -308,7 +307,7 @@ async function vaultOpen(accountId, derived, kind) {
     wrapper: vault[kind + "_wrap"],
   });
   let membershipSeed, encryptionPrivateKey;
-  for (const object of vault.vault_objects || vault.objects || []) {
+  for (const object of vault.objects || []) {
     const raw = await C.openVaultObject({
       accountId: bytes(accountId),
       masterKey,
@@ -364,8 +363,7 @@ export async function getSession() {
     await initialize();
     await cookieMutations;
     checkGeneration(expectedGeneration);
-    const result = await request("/api/member/me"),
-      s = result.session || result;
+    const s = await request("/api/member/me");
     checkGeneration(expectedGeneration);
     cookieCSRF = s.csrf_token;
     setSessionCSRF(s.csrf_token);
@@ -639,9 +637,7 @@ async function reviewKeys(
     expectedGeneration = generation,
     vault = await getVault();
   checkGeneration(expectedGeneration, s);
-  const object = (vault.vault_objects || vault.objects || []).find(
-    (o) => o.id === reviewId,
-  );
+  const object = (vault.objects || []).find((o) => o.id === reviewId);
   if (!object || String(object.revision) !== "1") throw keyUnavailable();
   try {
     const value = strictJSON(
@@ -823,7 +819,7 @@ export const createInvite = async ({ orgId, role, expiresAt }) => {
     role,
     expires_at: time(expiresAt),
   });
-  return { token: result.token || result.invite_token };
+  return { token: result.token };
 };
 export const acceptInvite = ({ token }) =>
   mutation("/invites/accept", "invite-accept", { invite_token: token });
@@ -1448,6 +1444,7 @@ async function prepareStagedPublication(reviewId, expectedRevision) {
   checkGeneration(expectedGeneration, s);
   const cert = await ensureCertificate(r.org_id, expectedGeneration);
   checkGeneration(expectedGeneration, s);
+  if (!canonical(cert.membership_id, 16)) throw keyUnavailable();
   const keys = await reviewKeys(reviewId);
   checkGeneration(expectedGeneration, s);
   const content = await C.openDraftContent({
@@ -1463,9 +1460,7 @@ async function prepareStagedPublication(reviewId, expectedRevision) {
     deployment_id: config.deployment_id,
     review_id: reviewId,
     org_id: r.org_id,
-    reviewer_membership_id:
-      cert.membership_id ||
-      s.session.memberships?.find((m) => m.org_id === r.org_id)?.id,
+    reviewer_membership_id: cert.membership_id,
     reviewer_certificate: cert.certificate,
     encrypted_content: r.encrypted_content,
     recipient_public_key: C.toBase64url(
