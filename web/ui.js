@@ -128,27 +128,74 @@ function toast(message, type = "error") {
     region = document.createElement("div");
     region.id = "toast-region";
     region.className = "toast-region";
-    region.setAttribute("aria-atomic", "true");
+    region.setAttribute("role", "region");
+    region.setAttribute("aria-label", "Notifications");
     document.body.appendChild(region);
   }
-  region.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
-  region.setAttribute("role", type === "error" ? "alert" : "status");
-  region.replaceChildren();
   const item = document.createElement("div");
   item.className = `toast toast-${type}`;
+  item.setAttribute("role", type === "error" ? "alert" : "status");
+  item.setAttribute("aria-atomic", "true");
+  const marker = document.createElement("span");
+  marker.className = "toast-marker";
+  marker.setAttribute("aria-hidden", "true");
+  const markerIcon = document.createElement("img");
+  markerIcon.className = "icon";
+  markerIcon.alt = "";
+  markerIcon.setAttribute("aria-hidden", "true");
+  markerIcon.src = `./assets/icons/${type === "error" ? "ban" : "check-circle-2"}.svg`;
+  marker.appendChild(markerIcon);
   const text = document.createElement("span");
+  text.className = "toast-message";
   text.textContent = message;
-  item.appendChild(text);
+  item.append(marker, text);
   const close = document.createElement("button");
   close.className = "toast-close";
   close.type = "button";
   close.setAttribute("aria-label", "Dismiss notification");
-  close.textContent = "×";
-  close.onclick = () => item.remove();
+  close.textContent = "Close";
+  close.onclick = () => {
+    dismiss();
+  };
   item.appendChild(close);
+  let remaining = 8000;
+  let startedAt = Date.now();
+  const pause = () => {
+    if (item.dismissTimer === undefined) return;
+    clearTimeout(item.dismissTimer);
+    item.dismissTimer = undefined;
+    remaining = Math.max(0, remaining - (Date.now() - startedAt));
+  };
+  const resume = () => {
+    if (
+      item.dismissTimer !== undefined ||
+      item.matches(":hover") ||
+      item.contains(document.activeElement)
+    )
+      return;
+    startedAt = Date.now();
+    item.dismissTimer = setTimeout(dismiss, remaining);
+  };
+  function dismiss() {
+    clearTimeout(item.dismissTimer);
+    item.dismissTimer = undefined;
+    item.remove();
+  }
+  item.addEventListener("pointerenter", pause);
+  item.addEventListener("pointerleave", resume);
+  item.addEventListener("focusin", pause);
+  item.addEventListener("focusout", () => queueMicrotask(resume));
   region.appendChild(item);
-  clearTimeout(region.dismissTimer);
-  region.dismissTimer = setTimeout(() => item.remove(), 10000);
+  while (region.children.length > 3) {
+    const oldest = [...region.children].find(
+      (notice) =>
+        !notice.matches(":hover") && !notice.contains(document.activeElement),
+    );
+    if (!oldest) break;
+    clearTimeout(oldest.dismissTimer);
+    oldest.remove();
+  }
+  resume();
 }
 async function copyText(value, label = "Text") {
   try {
@@ -174,40 +221,18 @@ function receiptHTML(receipt) {
 function icon(name) {
   return `<img class="icon" src="./assets/icons/${name}.svg" alt="" aria-hidden="true">`;
 }
-const buttonIcons = [
-  [/copy/i, "copy"],
-  [/download|export/i, "download"],
-  [/create|new|add/i, "plus"],
-  [/remove|revoke/i, "trash-2"],
-  [/sign in|accept|continue|send|save|approve|update/i, "check"],
-  [/manage|open|respond|status|retry|back/i, "arrow-right"],
-  [/rotate/i, "rotate-cw"],
-  [/share/i, "share-2"],
-  [/publish/i, "check"],
-  [/close/i, "x"],
-];
 function renderButtonIcons(scope = root) {
-  scope.querySelectorAll(".button").forEach((control) => {
-    const existing = control.querySelector(".icon");
-    if (existing) {
-      control.dataset.icon ||= existing
-        .getAttribute("src")
-        ?.split("/")
-        .at(-1)
-        .replace(/\.svg$/, "");
-      return;
-    }
-    const name =
-      buttonIcons.find(([pattern]) => pattern.test(control.textContent))?.[1] ||
-      "arrow-right";
-    control.dataset.icon = name;
-    control.insertAdjacentHTML("afterbegin", icon(name));
+  scope.querySelectorAll(".button[data-icon]").forEach((control) => {
+    if (control.querySelector(".icon")) return;
+    control.insertAdjacentHTML("afterbegin", icon(control.dataset.icon));
   });
 }
 function setButtonText(control, text) {
+  const existing = control.querySelector(".icon");
   const name = control.dataset.icon;
   control.textContent = text;
   if (name) control.insertAdjacentHTML("afterbegin", icon(name));
+  else if (existing) control.prepend(existing);
 }
 function frame(body, title = "Workspace") {
   root.setAttribute("aria-busy", "false");
@@ -280,11 +305,26 @@ function statusBadge(value) {
   ];
   return `<span class="status-badge status-${tone}">${icon(tone === "positive" ? "check-circle-2" : tone === "warning" ? "clock-3" : tone === "danger" ? "ban" : "circle-dot")}<span>${esc(label)}</span></span>`;
 }
-function button(label, href, cls = "") {
-  return `<a class="button ${cls}" href="#/${href}">${esc(label)}</a>`;
+function button(label, href, cls = "", iconName = "") {
+  const actionIcon = iconName ? ` data-icon="${esc(iconName)}"` : "";
+  return `<a class="button ${cls}"${actionIcon} href="#/${href}">${esc(label)}</a>`;
 }
 function recoveryPhrasePanel(words, prefix = "recovery") {
-  return `<div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><div class="recovery-actions"><button id="${prefix}-copy" class="button secondary" type="button">Copy phrase</button><button id="${prefix}-download" class="button secondary" type="button">Download .txt</button></div>`;
+  return `<div class="word-grid">${words.map((w, i) => `<div class="word"><b>${String(i + 1).padStart(2, "0")}</b>${esc(w)}</div>`).join("")}</div><div class="recovery-actions"><button id="${prefix}-copy" class="button secondary" data-icon="copy" type="button">${icon("copy")}Copy phrase</button><button id="${prefix}-download" class="button secondary" data-icon="download" type="button">${icon("download")}Download .txt</button></div>`;
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    // Browsers may start consuming the blob after the click handler returns.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
 }
 function bindRecoveryPhraseTools(words, prefix = "recovery") {
   const phraseText = words.join(" ");
@@ -308,17 +348,7 @@ function bindRecoveryPhraseTools(words, prefix = "recovery") {
     const blob = new Blob([`${phraseText}\n`], {
       type: "text/plain;charset=utf-8",
     });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "anonce-recovery-phrase.txt";
-    document.body.appendChild(link);
-    try {
-      link.click();
-    } finally {
-      link.remove();
-      URL.revokeObjectURL(url);
-    }
+    downloadBlob(blob, "anonce-recovery-phrase.txt");
     toast("Recovery phrase download started.", "success");
   };
 }
@@ -526,7 +556,7 @@ function renderHome() {
   const creatorReviews = reviews.filter(isReviewOwner);
   const canCreate = canCreateReviews(currentOrg);
   frame(
-    `${head("Overview", "", canCreate ? button("New review", "review/new") : "")}${renderPendingResponses()}${canCreate ? `<div class="stat-grid"><div class="card stat"><div class="stat-label">Your reviews shown</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div>` : ""}<div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">${canCreate ? "Your reviews" : "Reviews to respond to"}</h2><a class="top-link" href="#/orgs">Organizations</a></div>${
+    `${head("Overview", "", canCreate ? button("New review", "review/new", "", "plus") : "")}${renderPendingResponses()}${canCreate ? `<div class="stat-grid"><div class="card stat"><div class="stat-label">Your reviews shown</div><div class="stat-value">${creatorReviews.length}</div></div><div class="card stat"><div class="stat-label">Accepted responses</div><div class="stat-value">${aggregateCount("accepted_count", creatorReviews)}</div></div><div class="card stat"><div class="stat-label">Issued authorizations</div><div class="stat-value">${aggregateCount("issued_count", creatorReviews)}</div></div></div>` : ""}<div class="section-row"><h2 class="section-title" id="reviews-heading" tabindex="-1">${canCreate ? "Your reviews" : "Reviews to respond to"}</h2><a class="top-link" href="#/orgs">Organizations</a></div>${
       reviews.length
         ? `<div class="review-list">${reviews
             .map((r) => {
@@ -803,7 +833,7 @@ function renderOrgs() {
         });
       toast("Invitation created.", "success");
       document.querySelector("#invite-result").innerHTML =
-        `<div class="notice">Invite created. Share this link with the member:<div class="share-box"><input readonly value="${esc(location.origin + location.pathname + "#/invite/" + r.token)}" aria-label="Invitation link"><button class="button small" type="button" id="copy">Copy</button></div></div>`;
+        `<div class="notice">Invite created. Share this link with the member:<div class="share-box"><input readonly value="${esc(location.origin + location.pathname + "#/invite/" + r.token)}" aria-label="Invitation link"><button class="button small" data-icon="copy" type="button" id="copy">Copy</button></div></div>`;
       renderButtonIcons(document.querySelector("#invite-result"));
       document.querySelector("#copy").onclick = () =>
         copyText(
@@ -1226,12 +1256,7 @@ function bindResponseExports(id, isCurrent) {
       try {
         const f = await api.exportResponses({ reviewId: id, format: fmt });
         if (!isCurrent()) return;
-        const url = URL.createObjectURL(f.blob),
-          a = document.createElement("a");
-        a.href = url;
-        a.download = f.filename;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(f.blob, f.filename);
         toast(`${fmt.toUpperCase()} export download started.`, "success");
       } catch (e) {
         if (isCurrent()) toast(say(e));

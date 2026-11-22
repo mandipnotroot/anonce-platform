@@ -43,7 +43,6 @@ const server = createServer(async (request, response) => {
 const mockModule = `
 let active = sessionStorage.getItem("mock-session") ? JSON.parse(sessionStorage.getItem("mock-session")) : null;
 const setActive=value=>{active=value;if(value)sessionStorage.setItem("mock-session",JSON.stringify(value));else sessionStorage.removeItem("mock-session")};
-let statusCalls=0,statusHold=null,statusResolve=null,statusListeners=[];
 let mockRole = "owner";
 let reviewHold=null,reviewResolve=null,pendingHold=null,pendingResolve=null,reviewStarted=0,pendingStarted=0;
 let failPending=false;
@@ -67,11 +66,6 @@ export const getLimits=()=>mockLimits;
 export const setMockLimits=limits=>mockLimits={...mockLimits,...limits};
 export const getSession=async()=>active;
 export const invalidateSession=()=>setActive(null);
-export const getSessionStatus=async()=>{statusCalls++;statusListeners.splice(0).forEach(resolve=>resolve());return statusHold?await statusHold:active};
-export const resetSessionStatus=()=>{statusCalls=0};
-export const waitForSessionStatus=()=>statusCalls?Promise.resolve():new Promise(resolve=>statusListeners.push(resolve));
-export const holdSessionStatus=()=>{statusHold=new Promise(resolve=>statusResolve=resolve)};
-export const releaseSessionStatus=()=>{statusResolve?.(active);statusHold=null;statusResolve=null};
 export const setMockScope=scope=>setActive({...active,scope});
 export const register=async({email})=>{setActive({account_id:"acct",email,scope:"full"});return {recoveryWords:phrase,session:active};};
 export const login=async({email,password})=>{if(password==="fail-password")throw new Error("Email or password is incorrect.");setActive({account_id:"acct",email,scope:"full"});return active;};
@@ -99,7 +93,30 @@ export const listResponses=async()=>({items:[{id:"r1",acceptedAt:"2026-01-01T00:
 async function verifyRecoveryTools(page, expected) {
   await page.getByRole("button", { name: "Copy phrase" }).click();
   await page.locator("#toast-region").getByText("Phrase copied.").waitFor();
-  await page.getByRole("button", { name: "Dismiss notification" }).click();
+  const originalViewport = page.viewportSize();
+  for (const width of [1365, 390]) {
+    await page.setViewportSize({ width, height: width > 640 ? 900 : 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page
+      .locator("#toast-region .toast")
+      .evaluateAll((toasts) =>
+        Promise.all(
+          toasts.flatMap((toast) =>
+            toast.getAnimations().map((animation) => animation.finished),
+          ),
+        ),
+      );
+    await page.screenshot({
+      path: join(artifactDir, `anonce-toast-success-${width}.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize(originalViewport);
+  await page
+    .locator("#toast-region .toast")
+    .filter({ hasText: "Phrase copied." })
+    .getByRole("button", { name: "Dismiss notification" })
+    .click();
   await page
     .locator("#toast-region")
     .getByText("Phrase copied.")
@@ -281,12 +298,16 @@ try {
         );
         assert.equal(
           await capturePage.evaluate(() =>
-            [...document.querySelectorAll(".button")].every((button) =>
-              button.querySelector(".icon"),
+            [...document.querySelectorAll(".button[data-icon]")].every(
+              (button) =>
+                button
+                  .querySelector(".icon")
+                  ?.getAttribute("src")
+                  ?.includes(`/icons/${button.dataset.icon}.svg`),
             ),
           ),
           true,
-          `${name} action button icon missing`,
+          `${name} explicit action icon is missing or mismatched`,
         );
         const buttonContrast = await capturePage.evaluate(() => {
           const luminance = (color) =>
@@ -308,7 +329,20 @@ try {
             .filter((button) => button.checkVisibility())
             .map((button) => {
               const style = getComputedStyle(button);
-              const colors = [style.color, style.backgroundColor]
+              const surfaceProbe = document.createElement("span");
+              surfaceProbe.style.backgroundColor = getComputedStyle(
+                document.documentElement,
+              )
+                .getPropertyValue("--surface")
+                .trim();
+              document.body.appendChild(surfaceProbe);
+              const surface = getComputedStyle(surfaceProbe).backgroundColor;
+              surfaceProbe.remove();
+              const background =
+                style.backgroundColor === "rgba(0, 0, 0, 0)"
+                  ? surface
+                  : style.backgroundColor;
+              const colors = [style.color, background]
                 .map(luminance)
                 .sort((a, b) => b - a);
               return {
@@ -317,7 +351,7 @@ try {
                   button.textContent.trim(),
                 contrast: (colors[0] + 0.05) / (colors[1] + 0.05),
                 foreground: style.color,
-                background: style.backgroundColor,
+                background,
               };
             });
         });
@@ -342,8 +376,8 @@ try {
               probe.remove();
               return color;
             };
-            return [
-              ...document.querySelectorAll(".button.secondary, .button.ghost"),
+            const secondary = [
+              ...document.querySelectorAll(".button.secondary"),
             ]
               .filter((button) => button.checkVisibility())
               .every(
@@ -351,9 +385,20 @@ try {
                   getComputedStyle(button).backgroundColor ===
                   expected(button.disabled ? "--soft" : "--button-secondary"),
               );
+            const ghost = [...document.querySelectorAll(".button.ghost")]
+              .filter((button) => button.checkVisibility())
+              .every(
+                (button) =>
+                  getComputedStyle(button).backgroundColor ===
+                    (button.disabled
+                      ? expected("--soft")
+                      : "rgba(0, 0, 0, 0)") &&
+                  getComputedStyle(button).boxShadow === "none",
+              );
+            return secondary && ghost;
           }),
           true,
-          `${name} secondary button fill does not match its enabled/disabled state at ${viewport.width}px (${colorScheme})`,
+          `${name} secondary/ghost button treatment does not match its state at ${viewport.width}px (${colorScheme})`,
         );
         if (name === "recovery")
           assert.equal(
@@ -666,6 +711,26 @@ try {
     .locator("#toast-region")
     .getByText("Email or password is incorrect.")
     .waitFor();
+  for (const width of [1365, 390]) {
+    await errorPage.setViewportSize({
+      width,
+      height: width > 640 ? 900 : 844,
+    });
+    await errorPage.evaluate(() => window.scrollTo(0, 0));
+    await errorPage
+      .locator("#toast-region .toast")
+      .evaluateAll((toasts) =>
+        Promise.all(
+          toasts.flatMap((toast) =>
+            toast.getAnimations().map((animation) => animation.finished),
+          ),
+        ),
+      );
+    await errorPage.screenshot({
+      path: join(artifactDir, `anonce-toast-error-${width}.png`),
+      fullPage: true,
+    });
+  }
   assert.equal(
     await errorPage
       .locator("#toast-region")
@@ -678,6 +743,23 @@ try {
     await errorPage.locator("#auth .form-error").textContent(),
     "",
     "inline error duplicated toast",
+  );
+  await errorPage.getByRole("button", { name: "Sign in" }).click();
+  await errorPage.locator("#toast-region").getByRole("alert").nth(1).waitFor();
+  assert.equal(
+    await errorPage.locator("#toast-region .toast").count(),
+    2,
+    "consecutive notifications remain available",
+  );
+  await errorPage
+    .locator("#toast-region .toast")
+    .first()
+    .getByRole("button", { name: "Dismiss notification" })
+    .click();
+  assert.equal(
+    await errorPage.locator("#toast-region .toast").count(),
+    1,
+    "dismissing one notification preserves the next",
   );
 
   for (const viewport of [
@@ -1295,9 +1377,10 @@ try {
   });
   await rotateButton.click();
   await recoveryPage.locator("#new-phrase .word").first().waitFor();
-  assert.ok(
+  assert.equal(
     await rotateButton.locator(".icon").count(),
-    "icon disappeared after submit busy-state restore",
+    0,
+    "unconfigured action remains icon-free after busy-state restore",
   );
   console.log(
     "UI check passed: auth, registration/recovery, org membership and confirm dialog, review create/edit/preview/publish/results, submission/receipt, account rotation, notifications, focus, theme and responsive checks.",

@@ -15,6 +15,65 @@ const toastSource = source.slice(
   source.indexOf("function toast("),
   source.indexOf("async function copyText("),
 );
+const downloadSource = source.slice(
+  source.indexOf("function downloadBlob("),
+  source.indexOf("function bindRecoveryPhraseTools("),
+);
+const buttonSource = source.slice(
+  source.indexOf("function icon("),
+  source.indexOf("function frame("),
+);
+
+test("button icons are explicit and label changes never infer a fallback", () => {
+  assert.doesNotMatch(
+    source,
+    /buttonIcons|pattern\.test\(control\.textContent\)/,
+  );
+  const insertions = [];
+  const unspecified = {
+    dataset: {},
+    textContent: "Copy",
+    querySelector: () => null,
+    insertAdjacentHTML: (...args) => insertions.push(args),
+  };
+  const explicit = {
+    dataset: { icon: "copy" },
+    textContent: "Something else",
+    querySelector: () => null,
+    insertAdjacentHTML: (...args) => insertions.push(args),
+  };
+  const existingIcon = { className: "icon" };
+  const preserved = {
+    dataset: {},
+    textContent: "Old label",
+    querySelector: () => existingIcon,
+    prepend(node) {
+      this.prepended = node;
+    },
+  };
+  const controls = [unspecified, explicit];
+  const context = {
+    root: {},
+    icon: (name) => `<img class="icon" src="./assets/icons/${name}.svg">`,
+  };
+  const { renderButtonIcons, setButtonText } = vm.runInNewContext(
+    `${buttonSource}\n({ renderButtonIcons, setButtonText })`,
+    context,
+  );
+  renderButtonIcons({
+    querySelectorAll: () => controls.filter((control) => control.dataset.icon),
+  });
+  assert.deepEqual(insertions, [
+    [
+      "afterbegin",
+      '<img class="icon" src="./assets/icons/copy.svg" alt="" aria-hidden="true">',
+    ],
+  ]);
+  setButtonText(unspecified, "Please wait…");
+  assert.equal(insertions.length, 1, "text does not choose an icon");
+  setButtonText(preserved, "Loading…");
+  assert.equal(preserved.prepended, existingIcon);
+});
 
 function harness({ clipboard } = {}) {
   const phraseWords = ["alpha", "bravo", "charlie"];
@@ -23,6 +82,8 @@ function harness({ clipboard } = {}) {
   const removed = [];
   const revoked = [];
   const notices = [];
+  const timers = new Map();
+  let nextTimer = 0;
   let blob;
   let nextURL = "blob:recovery-test";
   class FakeBlob {
@@ -76,6 +137,15 @@ function harness({ clipboard } = {}) {
         revoked.push(url);
       },
     },
+    setTimeout(callback, delay) {
+      const id = ++nextTimer;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+    Date,
   };
   vm.runInNewContext(
     `${helperSource}\nbindRecoveryPhraseTools(phrase, "test");`,
@@ -90,6 +160,7 @@ function harness({ clipboard } = {}) {
     get blob() {
       return blob;
     },
+    timers,
   };
 }
 
@@ -122,27 +193,49 @@ test("clipboard rejection and missing clipboard show safe failure feedback", asy
   assert.match(missing.notices[0].message, /Could not copy recovery phrase/);
 });
 
-test("toast DOM updates live priority, text safely, and supports dismissal", () => {
+test("toast notifications stack safely, cap at three, and dismiss independently", () => {
   const nodes = new Map();
+  const timers = new Map();
+  let timerID = 0;
   class Element {
     constructor(tag) {
       this.tag = tag;
       this.children = [];
       this.attributes = {};
       this.removed = false;
+      this.listeners = {};
     }
     setAttribute(key, value) {
       this.attributes[key] = value;
     }
     appendChild(child) {
       this.children.push(child);
+      child.parentElement = this;
       return child;
     }
-    replaceChildren() {
-      this.children = [];
+    append(...children) {
+      children.forEach((child) => this.appendChild(child));
+    }
+    get firstElementChild() {
+      return this.children[0] || null;
     }
     remove() {
       this.removed = true;
+      if (this.parentElement)
+        this.parentElement.children = this.parentElement.children.filter(
+          (child) => child !== this,
+        );
+    }
+    addEventListener(name, callback) {
+      this.listeners[name] = callback;
+    }
+    matches(selector) {
+      return selector === ":hover" && this.hovered === true;
+    }
+    contains(node) {
+      return (
+        this === node || this.children.some((child) => child.contains?.(node))
+      );
     }
     set textContent(value) {
       this.text = value;
@@ -155,6 +248,7 @@ test("toast DOM updates live priority, text safely, and supports dismissal", () 
     }
   }
   const document = {
+    activeElement: null,
     body: {
       appendChild(node) {
         nodes.set(`#${node.id}`, node);
@@ -167,22 +261,55 @@ test("toast DOM updates live priority, text safely, and supports dismissal", () 
       return nodes.get(selector);
     },
   };
-  const context = { document, setTimeout: () => 1, clearTimeout() {} };
+  const context = {
+    document,
+    Date,
+    queueMicrotask: (callback) => callback(),
+    setTimeout(callback, delay) {
+      timers.set(++timerID, { callback, delay });
+      return timerID;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+  };
   vm.runInNewContext(
-    `${toastSource}\ntoast("Copied.", "success"); toast("Request failed.");`,
+    `${toastSource}\ntoast("Copied.", "success"); toast("Request failed."); toast("Third."); document.activeElement = document.querySelector("#toast-region").children[0].children[2]; toast("Fourth.");`,
     context,
   );
   const region = nodes.get("#toast-region");
-  assert.equal(region.attributes["aria-live"], "assertive");
-  assert.equal(region.attributes.role, "alert");
-  assert.equal(region.children.length, 1);
-  assert.match(region.textContent, /Request failed\./);
-  assert.doesNotMatch(region.textContent, /Copied\./);
-  region.children[0].children[1].onclick();
-  assert.equal(region.children[0].removed, true);
+  assert.equal(region.attributes.role, "region");
+  assert.equal(region.children.length, 3);
+  assert.equal(region.children[1].attributes.role, "alert");
+  assert.equal(region.children[0].textContent.includes("Copied."), true);
+  assert.equal(region.children[1].textContent.includes("Third."), true);
+  assert.equal(region.children[2].textContent.includes("Fourth."), true);
+  const focusedToast = region.children[0];
+  const latestToast = region.children[2];
+  const timerCount = timers.size;
+  focusedToast.listeners.pointerenter();
+  assert.equal(timers.size, timerCount - 1, "hover pauses timeout");
+  document.activeElement = null;
+  focusedToast.listeners.pointerleave();
+  assert.equal(timers.size, timerCount, "leaving resumes timeout");
+  document.activeElement = focusedToast.children.at(-1);
+  focusedToast.listeners.focusin();
+  assert.equal(timers.size, timerCount - 1, "keyboard focus pauses timeout");
+  document.activeElement = null;
+  focusedToast.listeners.focusout();
+  assert.equal(
+    timers.size,
+    timerCount,
+    "leaving keyboard focus resumes timeout",
+  );
+  latestToast.children.at(-1).onclick();
+  assert.equal(latestToast.removed, true);
+  assert.equal(focusedToast.removed, false);
+  assert.equal(region.children.length, 2);
+  assert.ok([...timers.values()].every(({ delay }) => delay === 8000));
 });
 
-test("download contains exact text, uses expected filename, removes anchor, and revokes URL", () => {
+test("recovery download cleans its anchor and delays URL revocation", () => {
   const h = harness();
   h.nodes.get("#test-download").onclick();
   assert.equal(h.blob.parts[0], "alpha bravo charlie\n");
@@ -191,6 +318,9 @@ test("download contains exact text, uses expected filename, removes anchor, and 
     { href: "blob:recovery-test", download: "anonce-recovery-phrase.txt" },
   ]);
   assert.equal(h.removed.length, 1);
+  assert.deepEqual(h.revoked, []);
+  assert.equal([...h.timers.values()][0].delay, 60_000);
+  [...h.timers.values()][0].callback();
   assert.deepEqual(h.revoked, ["blob:recovery-test"]);
 });
 
@@ -618,34 +748,66 @@ test("response pagination and exports ignore stale success and failure", async (
     let click,
       downloads = 0,
       notices = 0;
+    const revoked = [];
+    const scheduled = [];
+    let appendedAnchors = 0;
+    let removedAnchors = 0;
     const context = {
       api: { exportResponses: () => outcome.promise },
       document: {
+        body: {
+          appendChild(node) {
+            node.isConnected = true;
+            appendedAnchors++;
+          },
+        },
         querySelector: () => ({
           addEventListener(_name, callback) {
             click = callback;
           },
         }),
         createElement: () => ({
+          remove() {
+            this.isConnected = false;
+            removedAnchors++;
+          },
           click() {
             downloads++;
           },
         }),
       },
-      URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+      URL: {
+        createObjectURL: () => "blob:test",
+        revokeObjectURL(url) {
+          revoked.push(url);
+        },
+      },
+      setTimeout(callback, delay) {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      },
+      clearTimeout() {},
       isCurrent: () => active.value,
       toast: () => {
         notices++;
       },
       say: String,
     };
-    vm.runInNewContext(`${exportSource}\nbindResponseExports`, context)(
-      "review",
-      context.isCurrent,
-    );
+    vm.runInNewContext(
+      `${downloadSource}\n${exportSource}\nbindResponseExports`,
+      context,
+    )("review", context.isCurrent);
     const request = click();
     return {
       request,
+      revoked,
+      scheduled,
+      get appendedAnchors() {
+        return appendedAnchors;
+      },
+      get removedAnchors() {
+        return removedAnchors;
+      },
       get downloads() {
         return downloads;
       },
@@ -673,6 +835,12 @@ test("response pagination and exports ignore stale success and failure", async (
   await freshExport.request;
   assert.equal(freshExport.downloads, 1);
   assert.equal(freshExport.notices, 1);
+  assert.equal(freshExport.appendedAnchors, 1);
+  assert.equal(freshExport.removedAnchors, 1);
+  assert.deepEqual(freshExport.revoked, []);
+  assert.equal(freshExport.scheduled[0].delay, 60_000);
+  freshExport.scheduled[0].callback();
+  assert.deepEqual(freshExport.revoked, ["blob:test"]);
 });
 
 test("response-results retry preserves the originating load guard", async () => {
@@ -1320,6 +1488,11 @@ test("JSON and CSV exports confirm that browser download started", async () => {
       },
     },
     document: {
+      body: {
+        appendChild(node) {
+          node.isConnected = true;
+        },
+      },
       querySelector(selector) {
         return {
           addEventListener(_type, handler) {
@@ -1329,6 +1502,9 @@ test("JSON and CSV exports confirm that browser download started", async () => {
       },
       createElement() {
         return {
+          remove() {
+            this.isConnected = false;
+          },
           click() {
             clicks.push(this.download);
           },
@@ -1339,23 +1515,39 @@ test("JSON and CSV exports confirm that browser download started", async () => {
       createObjectURL() {
         return `blob:${++urlNumber}`;
       },
-      revokeObjectURL() {},
+      revokeObjectURL(url) {
+        revoked.push(url);
+      },
     },
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    },
+    clearTimeout() {},
     toast: (message, type = "error") => notices.push({ message, type }),
     say: String,
     isCurrent: () => true,
   };
+  const revoked = [];
+  const timers = [];
   const exportsSource = source.slice(
     source.indexOf("function bindResponseExports("),
     source.indexOf("function renderResponseResults("),
   );
   vm.runInNewContext(
-    `${exportsSource}\nbindResponseExports("review-1", isCurrent);`,
+    `${downloadSource}\n${exportsSource}\nbindResponseExports("review-1", isCurrent);`,
     context,
   );
   await handlers.get("#export-json")();
   await handlers.get("#export-csv")();
   assert.deepEqual(clicks, ["responses.json", "responses.csv"]);
+  assert.deepEqual(revoked, []);
+  assert.deepEqual(
+    timers.map(({ delay }) => delay),
+    [60_000, 60_000],
+  );
+  timers.forEach(({ callback }) => callback());
+  assert.deepEqual(revoked, ["blob:1", "blob:2"]);
   assert.deepEqual(notices, [
     { message: "JSON export download started.", type: "success" },
     { message: "CSV export download started.", type: "success" },

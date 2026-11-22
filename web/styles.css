@@ -288,15 +288,23 @@ a {
   background: var(--blue-hover);
   border-color: var(--blue-hover);
 }
-.button.secondary,
-.button.ghost {
+.button.secondary {
   border-color: var(--blue);
   background: var(--button-secondary);
   color: var(--ink);
   box-shadow: none;
 }
-.button.secondary:hover,
+.button.secondary:hover {
+  background: var(--soft);
+}
+.button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
 .button.ghost:hover {
+  border-color: var(--line);
   background: var(--soft);
 }
 .button.danger {
@@ -1187,14 +1195,14 @@ textarea {
   pointer-events: none;
 }
 .toast {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 16px 14px 16px 18px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
   border: 1px solid var(--line);
-  border-left: 4px solid var(--danger);
-  border-radius: 10px;
+  border-left: 4px solid var(--status-danger-line);
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow);
@@ -1204,17 +1212,42 @@ textarea {
   animation: toast-in 0.18s ease-out;
 }
 .toast-success {
-  border-left-color: var(--blue);
+  border-left-color: var(--status-positive-line);
+}
+.toast-marker {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--status-danger-bg);
+  color: var(--status-danger-ink);
+  font-size: 14px;
+  font-weight: 750;
+}
+.toast-success .toast-marker {
+  background: var(--status-positive-bg);
+  color: var(--status-positive-ink);
+}
+.toast-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .toast-close {
-  flex: none;
-  border: 0;
-  padding: 0 3px;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: var(--muted);
-  font-size: 22px;
-  line-height: 1;
+  color: var(--blue);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
   cursor: pointer;
+}
+.toast-close:hover {
+  border-color: var(--line);
+  background: var(--soft);
 }
 @keyframes toast-in {
   from {
@@ -1234,7 +1267,7 @@ textarea {
 }
 @media (max-width: 640px) {
   .toast-region {
-    top: 10px;
+    top: calc(10px + env(safe-area-inset-top));
     right: 10px;
     width: calc(100vw - 20px);
   }
